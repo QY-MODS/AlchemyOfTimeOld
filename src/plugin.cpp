@@ -69,8 +69,9 @@ public:
 
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->crosshairRef) return RE::BSEventNotifyControl::kContinue;
-        if (!M->getListenContainerChange()) return RE::BSEventNotifyControl::kContinue;
+        if (!M->getListenCrosshair()) return RE::BSEventNotifyControl::kContinue;
         if (!M->IsItem(event->crosshairRef.get())) return RE::BSEventNotifyControl::kContinue;
+
 
         if (!M->RefIsRegistered(event->crosshairRef->GetFormID())) {
             logger::trace("Item not registered.");
@@ -187,6 +188,7 @@ public:
             // drop event
             if (!event->newContainer) {
                 logger::trace("Dropped.");
+                M->setListenCrosshair(false);
                 RE::TESObjectREFR* ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(event->reference.native_handle());
                 if (ref) logger::trace("Dropped ref name: {}", ref->GetBaseObject()->GetName());
                 if (!ref || ref->GetBaseObject()->GetFormID() != event->baseObj) {
@@ -220,6 +222,8 @@ public:
                 Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported behaviour. Please put back the item(s) you removed from your inventory.");
                 logger::error("Unsupported. Please put back the item(s) you removed from your inventory.");
             }
+
+            M->setListenCrosshair(true);
         }
 
 

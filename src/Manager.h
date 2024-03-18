@@ -268,6 +268,17 @@ class Manager {
         listen_activate = value;
     }
 
+    void setListenContainerChange(const bool value) {
+        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        listen_container_change = value;
+    }
+
+
+    void setListenMenuOpenClose(const bool value) {
+        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        listen_menuopenclose = value;
+    }
+
     void setUninstalled(const bool value) {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         isUninstalled = value;
@@ -285,6 +296,7 @@ public:
 
     std::vector<Source> sources;
     bool listen_activate = true;
+    bool listen_crosshair = true;
     bool listen_container_change = true;
     bool listen_menuopenclose = true;
 
@@ -293,10 +305,15 @@ public:
 
     std::mutex mutex;
 
-    void setListenMenuOpenClose(const bool value) {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
-        listen_menuopenclose = value;
-    }
+    void setListenCrosshair(const bool value) {
+		std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+		listen_crosshair = value;
+	}
+
+    [[nodiscard]] bool getListenCrosshair() {
+		std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+		return listen_crosshair;
+	}
 
     [[nodiscard]] bool getListenMenuOpenClose() {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
@@ -314,10 +331,6 @@ public:
         return listen_container_change;
     }
 
-    void setListenContainerChange(const bool value) {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
-        listen_container_change = value;
-    }
 
     [[nodiscard]] bool getUninstalled() {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
@@ -447,10 +460,13 @@ public:
 			return a->start_time < b->start_time;
 		});
 
+
+        auto fake_bound = RE::TESForm::LookupByID<RE::TESBoundObject>(formid);
+        //ref->SetObjectReference(fake_bound);
+
         if (worldobjectsspoil) {
             auto player_ch = RE::PlayerCharacter::GetSingleton();
             if (!PickUpItem(ref, count,1)) return RaiseMngrErr("HandleDrop: Item not picked up.");
-            auto fake_bound = RE::TESForm::LookupByID<RE::TESBoundObject>(formid);
             for (const auto& instance : instances_candidates) {
                 if (count <= instance->count) {
 				    instance->count -= count;
