@@ -143,9 +143,10 @@ public:
         if (event->oldContainer != 20 && event->newContainer != 20) return RE::BSEventNotifyControl::kContinue;
         
         logger::trace("Container change event.");
+        logger::trace("IsFake: {}", M->IsFake(event->baseObj));
 
         // to player inventory <-
-        if (event->newContainer == 20 && M->IsFake(event->baseObj)) {
+        if (event->newContainer == 20 && M->IsItem(event->baseObj)) {
             logger::trace("Item entered player inventory.");
             if (M->IsExternalContainer(event->baseObj,event->oldContainer)) {
                 M->UnLinkExternalContainer(event->baseObj,event->itemCount,event->oldContainer);

@@ -360,7 +360,7 @@ struct Source {
             }
             const StageNo old_no = instance.no;
             if (_UpdateStage(instance)) updated_instances.emplace_back(old_no,instance.no,instance.count);
-            else logger::info("You need to handle this.");
+            else logger::info("You need to handle this for the possible the critical err in _UpdateStage regarding diff.");
         }
         CleanUpData();
         return updated_instances;

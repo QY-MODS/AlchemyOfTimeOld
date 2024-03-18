@@ -584,10 +584,15 @@ namespace Utilities{
             return mergedVec;
         }
 
-        bool includesString(const std::string& input, const std::vector<std::string>& strings) {
-            std::string lowerInput = input;
-            std::transform(lowerInput.begin(), lowerInput.end(), lowerInput.begin(),
+        std::string toLowercase(const std::string& str) {
+            std::string result = str;
+            std::transform(result.begin(), result.end(), result.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            return result;
+        }
+
+        bool includesString(const std::string& input, const std::vector<std::string>& strings) {
+            std::string lowerInput = toLowercase(input);
 
             for (const auto& str : strings) {
                 std::string lowerStr = str;
@@ -599,6 +604,30 @@ namespace Utilities{
             }
             return false;  // None of the strings in 'strings' were found in the input string
         }
+
+        bool includesWord(const std::string& input, const std::vector<std::string>& strings) {
+            std::istringstream iss(input);
+            std::vector<std::string> inputWords{std::istream_iterator<std::string>{iss},
+                                                std::istream_iterator<std::string>{}};
+
+            for (const auto& str : strings) {
+                std::istringstream iss2(str);
+                std::vector<std::string> strWords{std::istream_iterator<std::string>{iss2},
+                                                  std::istream_iterator<std::string>{}};
+
+                for (const auto& word : strWords) {
+                    std::string lowercaseWord = toLowercase(word);
+                    if (std::find_if(inputWords.begin(), inputWords.end(),
+                                     [&lowercaseWord](const std::string& inputWord) {
+                                         return toLowercase(inputWord) == lowercaseWord;
+                                     }) != inputWords.end()) {
+                        return true;  // The input string includes one of the strings
+                    }
+                }
+            }
+            return false;  // None of the strings in 'strings' were found in the input string
+        }
+
 
         template <typename T>
         bool VectorHasElement(const std::vector<T>& vec, const T& element) {

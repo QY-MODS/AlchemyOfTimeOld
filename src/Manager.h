@@ -118,26 +118,26 @@ class Manager {
         float afMagnitude = 100;*/
         /*auto args = RE::MakeFunctionArguments(std::move(afX), std::move(afY), std::move(afZ), std::move(afMagnitude));
         vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);*/
-        SKSE::GetTaskInterface()->AddTask(
-            [ref, fake_form]() { 
-                ref->SetObjectReference(static_cast<RE::TESBoundObject*>(fake_form)); 
+  //      SKSE::GetTaskInterface()->AddTask(
+  //          [ref, fake_form]() { 
+  //              ref->SetObjectReference(static_cast<RE::TESBoundObject*>(fake_form)); 
 
-            //auto player_ch = RE::PlayerCharacter::GetSingleton();
-            //player_ch->StartGrabObject();
-            ref->Disable();
-            ref->Enable(false);
-            auto vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
-            auto policy = vm->GetObjectHandlePolicy();
-            auto handle = policy->GetHandleForObject(ref->GetFormType(), ref);
-            RE::BSTSmartPointer<RE::BSScript::Object> object = nullptr;
-            vm->CreateObject2("ObjectReference", object);
-            vm->BindObject(object, handle, false);
-            if (!object) logger::warn("Object is null");
-            else logger::trace("FUSRODAH");
-            auto args = RE::MakeFunctionArguments(std::move(0.f), std::move(0.f), std::move(0.f), std::move(0.f));
-            RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
-            vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);
-		});
+  //          //auto player_ch = RE::PlayerCharacter::GetSingleton();
+  //          //player_ch->StartGrabObject();
+  //          ref->Disable();
+  //          ref->Enable(false);
+  //          auto vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+  //          auto policy = vm->GetObjectHandlePolicy();
+  //          auto handle = policy->GetHandleForObject(ref->GetFormType(), ref);
+  //          RE::BSTSmartPointer<RE::BSScript::Object> object = nullptr;
+  //          vm->CreateObject2("ObjectReference", object);
+  //          vm->BindObject(object, handle, false);
+  //          if (!object) logger::warn("Object is null");
+  //          else logger::trace("FUSRODAH");
+  //          auto args = RE::MakeFunctionArguments(std::move(0.f), std::move(0.f), std::move(0.f), std::move(0.f));
+  //          RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
+  //          vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);
+		//});
 	}
 
     const RE::ObjectRefHandle RemoveItemReverse(RE::TESObjectREFR* moveFrom, RE::TESObjectREFR* moveTo, FormID item_id, Count count,
@@ -176,9 +176,10 @@ class Manager {
     }
 
     [[nodiscard]] const bool PickUpItem(RE::TESObjectREFR* item, Count count,const unsigned int max_try = 3) {
+        //std::lock_guard<std::mutex> lock(mutex);
+        
         logger::trace("PickUpItem");
 
-        // std::lock_guard<std::mutex> lock(mutex);
         if (!item) {
             logger::warn("Item is null");
             return false;
@@ -188,8 +189,11 @@ class Manager {
             return false;
         }
 
-        setListenContainerChange(false);
+        logger::trace("PickUpItem: Setting listen container change to false.");
+        //setListenContainerChange(false);
+        listen_container_change = false;
 
+        logger::trace("PickUpItem: Getting item bound.");
         auto item_bound = item->GetBaseObject();
         const auto item_count = Utilities::FunctionsSkyrim::GetItemCount(item_bound, player_ref);
         logger::trace("Item count: {}", item_count);
@@ -198,12 +202,16 @@ class Manager {
             logger::warn("Item bound is null");
             return false;
         }
+
+        item->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+        logger::trace("PickUpItem: Picking up item.");
         while (i < max_try) {
             logger::trace("Critical: PickUpItem");
-            RE::PlayerCharacter::GetSingleton()->PickUpObject(item, count, false, false);
+            RE::PlayerCharacter::GetSingleton()->PickUpObject(item, count, true, false);
             logger::trace("Item picked up. Checking if it is in inventory...");
-            if (Utilities::FunctionsSkyrim::GetItemCount(item_bound, player_ref) > item_count) {
-                if (i) logger::warn("Item picked up. Took {} extra tries.", i);
+            auto new_item_count = Utilities::FunctionsSkyrim::GetItemCount(item_bound, player_ref);
+            if (new_item_count > item_count) {
+                if (i) logger::warn("Item picked up with new item count: {}. Took {} extra tries.", new_item_count, i);
                 setListenContainerChange(true);
                 return true;
             } else
@@ -211,9 +219,38 @@ class Manager {
             i++;
         }
 
-        setListenContainerChange(true);
+        logger::warn("Item not picked up.");
+        //setListenContainerChange(true);
+        listen_container_change = true;
         return false;
     }
+
+    RE::TESObjectREFR* DropObjectIntoTheWorld(RE::TESBoundObject* obj, Count count, RE::ExtraDataList*) {
+        auto player_pos = player_ref->GetPosition();
+        // distance in the xy-plane
+        const auto multiplier = 100.0f;
+        player_pos += {multiplier, multiplier, 70};
+        auto player_cell = player_ref->GetParentCell();
+        auto player_ws = player_ref->GetWorldspace();
+        if (!player_cell && !player_ws) RaiseMngrErr("Player cell AND player world is null.");
+        auto newPropRef = RE::TESDataHandler::GetSingleton()
+                ->CreateReferenceAtLocation(obj, player_pos, {0.0f, 0.0f, 0.0f}, player_ref->GetParentCell(), player_ws,
+                                                          nullptr,
+                                                          nullptr, {}, true, false)
+                              .get()
+                              .get();
+        if (!newPropRef) RaiseMngrErr("New prop ref is null.");
+        newPropRef->extraList.SetCount(static_cast<uint16_t>(count));
+        newPropRef->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+        return newPropRef;
+    }
+
+    void AddExtraText(RE::TESObjectREFR* ref, const std::string& text) {
+		if (!ref) return RaiseMngrErr("Ref is null.");
+		auto textDisplayData = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
+        textDisplayData->SetName((std::string(ref->GetDisplayFullName()) + text).c_str());
+		ref->extraList.Add(textDisplayData);
+	}
 
     [[nodiscard]] const bool IsInExclude(const FormID formid) {
         auto form = RE::TESForm::LookupByID(formid);
@@ -222,7 +259,10 @@ class Manager {
             return false;
         }
         std::string form_string = std::string(form->GetName());
-        if (Utilities::Functions::includesString(form_string, exlude_list)) return true;
+        if (Utilities::Functions::includesWord(form_string, exlude_list)) {
+            logger::trace("Form is in exclude list.form_string: {}", form_string);
+            return true;
+        }
 		return false;
     }
 
@@ -362,7 +402,10 @@ public:
     }
 
 	[[nodiscard]] const bool IsFake(const FormID formid) {
-        if (!IsItem(formid)) return false;
+        if (!IsItem(formid)) {
+            logger::trace("Not an item.");
+            return false;
+        }
 		for (const auto& src : sources) {   
             for (const auto& stage : src.stages) {
                 if (stage.second.formid == formid) return true;
@@ -382,7 +425,10 @@ public:
     }
 
     [[nodiscard]] const bool RefIsRegistered(const RefID refid) {
-        if (!refid) return false;
+        if (!refid) {
+            logger::warn("Refid is null.");
+            return false;
+        }
         for (auto& src : sources) {
             for (auto& st_inst : src.data) {
                 if (st_inst.location == refid) return true;
@@ -461,26 +507,42 @@ public:
 		});
 
 
-        auto fake_bound = RE::TESForm::LookupByID<RE::TESBoundObject>(formid);
-        //ref->SetObjectReference(fake_bound);
+        // do this only if the ref is fake form
+        auto real_bound = source->GetBoundObject();
+        ref->SetObjectReference(real_bound);
 
         if (worldobjectsspoil) {
-            auto player_ch = RE::PlayerCharacter::GetSingleton();
-            if (!PickUpItem(ref, count,1)) return RaiseMngrErr("HandleDrop: Item not picked up.");
+            logger::trace("HandleDrop: setting count");
+            bool handled_first_stack = false;
             for (const auto& instance : instances_candidates) {
                 if (count <= instance->count) {
-				    instance->count -= count;
-                    auto ref_ = RemoveItemReverse(player_ch, nullptr, formid, count, RE::ITEM_REMOVE_REASON::kDropping);
-                    if (!ref_) return RaiseMngrErr("HandleDrop: Item not removed ref null.");
-                    source->data.emplace_back(instance->start_time, instance->no, count, ref_.get()->GetFormID());
-                    return;
-			    }
-			    else {
-				    count -= instance->count;
-                    auto ref_ = player_ch->RemoveItem(fake_bound,instance->count,RE::ITEM_REMOVE_REASON::kDropping,nullptr,nullptr);
-                    if (!ref_) return RaiseMngrErr("HandleDrop: Item not removed ref null.");
-                    instance->location = ref_.get()->GetFormID();
-			    }
+                    logger::trace("SADSJFHÖADF 1");
+                    instance->count -= count;
+                    if (!handled_first_stack) {
+                        ref->extraList.SetCount(static_cast<uint16_t>(count));
+                        ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+                        source->data.emplace_back(instance->start_time, instance->no, count, ref->GetFormID());
+                        handled_first_stack = true;
+                    } else {
+                        logger::trace("SADSJFHÖADF 2");
+                        auto new_ref = DropObjectIntoTheWorld(real_bound, count,nullptr);
+						source->data.emplace_back(instance->start_time, instance->no, count, new_ref->GetFormID());
+                    }
+                    break;
+                } else {
+                    count -= instance->count;
+                    if (!handled_first_stack) {
+                        logger::trace("SADSJFHÖADF 3");
+                        ref->extraList.SetCount(static_cast<uint16_t>(instance->count));
+                        ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+                        instance->location = ref->GetFormID();
+                        handled_first_stack = true;
+                    } else {
+                        logger::trace("SADSJFHÖADF 4");
+                        auto new_ref = DropObjectIntoTheWorld(real_bound, instance->count, nullptr);
+                        instance->location = new_ref->GetFormID();
+                    }
+                }
             }
         } 
         else {
@@ -488,7 +550,7 @@ public:
                 if (count <= instance->count) {
                     instance->count -= count;
                     source->data.emplace_back(instance->start_time, instance->no, count, ref->GetFormID());
-                    return;
+                    break;
                 } else {
                     count -= instance->count;
                     instance->location = ref->GetFormID();
@@ -501,20 +563,31 @@ public:
     void HandlePickUp(const FormID formid, const Count count, const RefID refid) {
         ENABLE_IF_NOT_UNINSTALLED
         logger::info("HandlePickUp: Formid {} , Count {} , Refid {}", formid, count, refid);
-        if (!IsFake(formid)) {
-            logger::warn("HandlePickUp: Not a fake.");
+        if (!IsItem(formid)) {
+            logger::warn("HandlePickUp: Not Item.");
             return;
         }
         if (!RefIsRegistered(refid)) {
             if (worldobjectsspoil){
+                // bcs it shoulda been registered already before picking up
                 logger::warn("HandlePickUp: Not registered.");
                 return;
             }
             return Register(formid,count,20);
         }
-        for (auto st_inst: GetRefSourceData(refid)) {
-            st_inst->location = 20;
-        }
+        // so it was registered before
+        auto source = GetSource(formid);
+        if (!source) return RaiseMngrErr("Source not found.");
+        for (auto& st_inst: source->data) {
+			if (st_inst.location == refid) {
+                st_inst.location = 20;
+                // try to replace it with fake form
+                RemoveItemReverse(player_ref,nullptr,formid,count,RE::ITEM_REMOVE_REASON::kRemove);
+                player_ref->AddObjectToContainer(RE::TESForm::LookupByID<RE::TESBoundObject>(source->stages[st_inst.no].formid), nullptr,
+                                                 count,
+                                                 nullptr);
+			}
+		}
     }
 
     void HandleConsume(const FormID fake_formid, Count count) {
