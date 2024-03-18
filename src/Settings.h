@@ -4,18 +4,183 @@
 
 using namespace Utilities::Types;
 
+namespace Settings {
+
+    constexpr auto exclude_path = L"Data/SKSE/Plugins/exclude.txt";
+    constexpr auto defaults_path = "Data/SKSE/Plugins/defaults.json";
+
+
+    struct DefaultSettings {
+        std::map<StageNo, FormID> items = {};
+        std::map<StageNo, Duration> durations = {};
+        std::map<StageNo, StageName> stage_names = {};
+        std::map<StageNo, std::vector<StageEffect>> effects = {};
+        std::vector<StageNo> numbers = {};
+        FormID decayed_id = 0;
+
+        [[nodiscard]] const bool CheckIntegrity() {
+            if (items.empty() || durations.empty() || stage_names.empty() || effects.empty() || numbers.empty()) {
+                logger::error("One of the maps is empty.");
+                // list sizes of each
+                logger::info("Items size: {}", items.size());
+                logger::info("Durations size: {}", durations.size());
+                logger::info("Stage names size: {}", stage_names.size());
+                logger::info("Effects size: {}", effects.size());
+                logger::info("Numbers size: {}", numbers.size());
+
+                return false;
+            }
+            if (items.size() != durations.size() || items.size() != stage_names.size() || items.size() != numbers.size()) {
+				logger::error("Sizes do not match.");
+				return false;
+			}
+            for (auto i = 0; i < numbers.size(); i++) {
+                if (!Utilities::Functions::VectorHasElement<StageNo>(numbers, i)) {
+                    logger::error("Key {} not found in numbers.", i);
+                    return false;
+                }
+                if (!items.count(i) || !items.count(i) || !durations.count(i) || !stage_names.count(i) ||
+                    !effects.count(i)) {
+					logger::error("Key {} not found in all maps.", i);
+					return false;
+				}
+			}
+            if (!decayed_id) {
+                logger::error("Decayed id is 0.");
+                return false;
+            }
+			return true;
+        }
+    };
+
+    std::vector<std::string> LoadExcludeList() {
+        std::ifstream file(exclude_path);
+        std::vector<std::string> strings;
+        std::string line;
+        while (std::getline(file, line)) {
+            strings.push_back(line);
+        }
+        return strings;
+    }
+
+    DefaultSettings parseDefaults(const char* filename = defaults_path) {
+
+        DefaultSettings settings;
+
+        // Open the JSON file
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Failed to open file: " << filename << std::endl;
+            return settings;
+        }
+
+        // Read the entire file into a string
+        std::string jsonStr;
+        file.seekg(0, std::ios::end);
+        jsonStr.reserve(file.tellg());
+        file.seekg(0, std::ios::beg);
+        jsonStr.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        file.close();
+
+        // Parse the JSON string
+        rapidjson::Document doc;
+        doc.Parse(jsonStr.c_str());
+        if (doc.HasParseError()) {
+            std::cerr << "JSON parse error: " << doc.GetParseError() << std::endl;
+            return settings;
+        }
+
+        // Access the "stages" array
+        if (doc.HasMember("stages") && doc["stages"].IsArray()) {
+            const rapidjson::Value& stages = doc["stages"];
+            for (rapidjson::SizeType i = 0; i < stages.Size(); i++) {
+                const rapidjson::Value& stage = stages[i];
+
+                // Parse stage properties
+                if (!stage.HasMember("no")) {
+				    logger::error("No is missing for stage {}", i);
+					return settings;
+				}
+                StageNo no = stage["no"].GetUint();
+                FormID formid;
+                auto temp_formid = Utilities::FunctionsJSON::GetFormEditorID(stage, "FormEditorID");
+                if (temp_formid < 0) {
+					logger::error("FormEditorID is missing for stage {}", no);
+					return DefaultSettings();
+                } else formid = temp_formid;
+                Duration duration;
+                if (stage.HasMember("duration")) duration = stage["duration"].GetUint();
+                else {
+                    logger::error("Duration is missing for stage {}", no);
+                    return DefaultSettings();
+                }
+                StageName name;
+                if (stage.HasMember("name")) name = stage["name"].GetString();
+                else {
+                    logger::error("name is missing for stage {}", no);
+                    return DefaultSettings();
+                }
+                // Parse mgeffect
+                std::vector<StageEffect> effects;
+                if (stage.HasMember("mgeffect") && stage["mgeffect"].IsArray()) {
+                    const rapidjson::Value& mgeffect = stage["mgeffect"];
+                    for (rapidjson::SizeType j = 0; j < mgeffect.Size(); j++) {
+                        const rapidjson::Value& effect = mgeffect[j];
+                        FormID beffect;
+                        temp_formid = Utilities::FunctionsJSON::GetFormEditorID(effect, "FormEditorID");
+                        if (temp_formid < 0) continue;
+                        else beffect = temp_formid;
+                        if (!effect.HasMember("magnitude") || !effect.HasMember("duration")) {
+							logger::error("Magnitude or duration is missing for effect {}", j);
+							return DefaultSettings();
+						}
+                        float magnitude = effect["magnitude"].GetFloat();
+                        Duration effectDuration = effect["duration"].GetUint();
+                        effects.push_back(StageEffect(beffect, magnitude, effectDuration));
+                    }
+                }
+
+                // Populate settings with parsed data
+                // if no exist already raise error
+                if (Utilities::Functions::VectorHasElement<StageNo>(settings.numbers, no)) {
+                    logger::error("No {} already exists.", no);
+                    return DefaultSettings();
+                }
+                settings.numbers.push_back(no);
+                settings.items[no] = formid;
+                settings.durations[no] = duration;
+                settings.stage_names[no] = name;
+                settings.effects[no] = effects;
+            }
+        }
+
+        auto temp_decayed_id = Utilities::FunctionsJSON::GetFormEditorID(doc, "decayedFormEditorID");
+        if (temp_decayed_id < 0) {
+            logger::error("DecayedFormEditorID is missing.");
+            return DefaultSettings();
+        } else settings.decayed_id = temp_decayed_id;
+
+        if (!settings.CheckIntegrity()) {
+			logger::critical("Settings integrity check failed.");
+			return DefaultSettings();
+		}
+        return settings;
+    }
+}
 
 struct Source {
     // TODO: reconsider consts here
     FormID formid=0;
     std::string editorid="";
-    std::vector<Stage> stages; // spoilage stages
-    SourceData data;
+    StageDict stages; // spoilage stages
+    SourceData data = {};
+    RE::EffectSetting* empty_mgeff;
+    Settings::DefaultSettings defaultsettings;
 
     bool init_failed = false;
 
-    Source(const FormID id, const std::string id_str)
-        : formid(id), editorid(id_str) {
+    Source(const FormID id, const std::string id_str, RE::EffectSetting* e_m,StageDict sd = {})
+        : formid(id), editorid(id_str), stages(sd), empty_mgeff(e_m){
         if (!formid) {
             auto form = RE::TESForm::LookupByEditorID<RE::TESForm>(editorid);
             if (form) {
@@ -35,7 +200,136 @@ struct Source {
             InitFailed();
             return;
         }
+
+        defaultsettings = Settings::parseDefaults();
+        if (!defaultsettings.CheckIntegrity()) {
+			InitFailed();
+			return;
+		}
+
+        //make sure the keys in stages are 0 to length-1 with increment 1
+        if (stages.size() == 0) {
+            // get stages
+            GatherSpoilageStages();
+        } 
+        else {
+            // check if formids exist in the game
+            for (auto& [key, value] : stages) {
+                if (!Utilities::FunctionsSkyrim::GetFormByID<RE::AlchemyItem>(value.formid, "")) {
+                    // make one and replace formid
+					logger::warn("Formid {} for stage {} does not exist.", value.formid, key);
+                    value.formid = CreateFake(bound_->As<RE::AlchemyItem>());
+                    if (!value.formid) {
+                        InitFailed();
+                        return;
+                    }
+					
+				}
+			}
+        }
+
+        if (stages.size() == 0) {
+            logger::error("No spoilage stages found");
+            InitFailed();
+			return;
+        }
+        for (auto i = 0; i < stages.size(); i++) {
+			if (!stages.count(i)) {
+				InitFailed();
+				return;
+			}
+		}
     };
+
+    // simdilik boyle sonra formidye ozel yapcam
+    void GatherSpoilageStages() {
+        // for now use default stages
+        if (!empty_mgeff) {
+            logger::error("Empty mgeff is null.");
+            return;
+        }
+
+
+        for (auto i = 0; i < defaultsettings.numbers.size(); i++) {
+            // create fake form
+            auto alch_item = GetBoundObject()->As<RE::AlchemyItem>();
+            FormID fake_formid;
+            if (!defaultsettings.items[i]) fake_formid = CreateFake(alch_item);
+            else fake_formid = Utilities::FunctionsSkyrim::GetFormByID<RE::AlchemyItem>(defaultsettings.items[i], "")->GetFormID();
+            if (!fake_formid) {
+				logger::error("Could not create fake form for stage {}", i);
+				return;
+			}
+            if (fake_formid == formid) {
+				logger::warn("Fake formid is the same as the real formid.");
+				fake_formid = CreateFake(alch_item);
+			}
+            auto duration = defaultsettings.durations[i];
+            auto name = defaultsettings.stage_names[i];
+
+            Stage stage(fake_formid, duration, i, name, defaultsettings.effects[i]);
+            if (!stages.insert({i, stage}).second) {
+				logger::error("Could not insert stage");
+				return;
+			}
+            // Update name of the fake form
+            auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<RE::AlchemyItem>(fake_formid, "");
+            if (fake_form) {
+                fake_form->fullName = std::string(fake_form->fullName.c_str()) + " (" + name + ")";
+				logger::info("Updated name of fake form to {}", name);
+            }
+            else {
+                logger::error("Fake form is null.");
+                return;
+            }
+
+            // change mgeff of fake form
+
+            std::vector<RE::EffectSetting*> MGEFFs;
+            std::vector<uint32_t*> pMGEFFdurations;
+            std::vector<float*> pMGEFFmagnitudes;
+
+            // i need this many empty effects
+            int n_empties = static_cast<int>(fake_form->effects.size()) - static_cast<int>(defaultsettings.effects[i].size());
+            if (n_empties < 0) n_empties = 0;
+
+            for (int j = 0; j < defaultsettings.effects[i].size(); j++) {
+                auto fake_mgeff_id = defaultsettings.effects[i][j].beffect;
+                if (!fake_mgeff_id){
+                    MGEFFs.push_back(empty_mgeff);
+                    pMGEFFdurations.push_back(nullptr);
+                    pMGEFFmagnitudes.push_back(nullptr);
+                } else {
+                    auto fake_mgeffect = Utilities::FunctionsSkyrim::GetFormByID<RE::EffectSetting>(fake_mgeff_id, "");
+				    MGEFFs.push_back(fake_mgeffect);
+                    pMGEFFdurations.push_back(&defaultsettings.effects[i][j].duration);
+                    pMGEFFmagnitudes.push_back(&defaultsettings.effects[i][j].magnitude);
+                }
+			}
+
+            for (int j = 0; j < n_empties; j++) {
+				MGEFFs.push_back(empty_mgeff);
+                pMGEFFdurations.push_back(nullptr);
+                pMGEFFmagnitudes.push_back(nullptr);
+			}
+            Utilities::FunctionsSkyrim::OverrideMGEFFs(fake_form->effects,MGEFFs, pMGEFFdurations, pMGEFFmagnitudes);
+
+            //int mg_count = 0;
+            //for (auto& mgeffect : fake_form->effects) {
+            //    logger::trace("Updating mgeffect {}", mg_count);
+            //    if (!mg_count) {
+            //        mgeffect->baseEffect = fake_mgeffect;
+            //        mgeffect->effectItem.magnitude = 10;
+            //        mgeffect->effectItem.duration = 20;
+            //    }
+            //    else mgeffect->baseEffect = empty_mgeff;
+            //    mg_count++;
+            //}
+            //fake_form->effects.push_back(fake_form->effects.front()); // works
+		}
+        // update mgeffs
+		
+    }
     
     const std::string_view GetName() {
         auto form = Utilities::FunctionsSkyrim::GetFormByID(formid, editorid);
@@ -47,27 +341,117 @@ struct Source {
         return Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid, editorid);
     };
 
-    std::vector<SourceDataKey> UpdateAllStages(const std::vector<RefID>& filter = {}){
-        logger::trace("Updating all stages");
+    const std::vector<StageUpdate> UpdateAllStages(const std::vector<RefID>& filter = {}) {
+        logger::trace("Updating all stages.");
         // save the updated instances
-        std::vector<SourceDataKey> updated_instances;
-        for (auto& instance_refid : data) {
+        std::vector<StageUpdate> updated_instances;
+        if (data.empty()) {
+			logger::trace("No data found for source {}", editorid);
+			return updated_instances;
+		}
+        for (auto& instance : data) {
             // if the refid is not in the filter, skip
-            if (!filter.empty() && std::find(filter.begin(), filter.end(), instance_refid.refid) == filter.end()) continue;
-            if (_UpdateStage(instance_refid)) updated_instances.push_back(instance_refid.instance);
+            if (!filter.empty() && std::find(filter.begin(), filter.end(), instance.location) == filter.end()) {
+                //logger::trace("Refid {} not in filter. Skipping.", instance.location);
+                for (auto& reffid : filter) {
+                    logger::trace("Refid in filter: {}", reffid);
+                }
+                continue;
+            }
+            const StageNo old_no = instance.no;
+            if (_UpdateStage(instance)) updated_instances.emplace_back(old_no,instance.no,instance.count);
+            else logger::info("You need to handle this.");
         }
+        CleanUpData();
         return updated_instances;
     }
 
+    void CleanUpData() {
+		logger::trace("Cleaning up data.");
+        // size before cleanup
+        logger::trace("Size before cleanup: {}", data.size());
+        // if there are instances with same stage no and location, and start_time, merge them
+        for (auto it = data.begin(); it != data.end(); ++it) {
+			for (auto it2 = it; it2 != data.end(); ++it2) {
+				if (it == it2) continue;
+                if (it2->count <= 0) continue;
+				if (it->no == it2->no && it->location == it2->location && it->start_time == it2->start_time) {
+					it->count += it2->count;
+					it2->count = 0;
+				}
+			}
+		}
+		// erase instances with count <= 0
+		for (auto it = data.begin(); it != data.end();) {
+			if (it->count <= 0) {
+				logger::trace("Erasing stage instance with count {}", it->count);
+				it = data.erase(it);
+            } else if (!stages.count(it->no)) {
+				logger::trace("Erasing decayed stage instance with no {}", it->no);
+				it = data.erase(it);
+            }
+            else {
+				++it;
+			}
+		}
+        logger::trace("Size after cleanup: {}", data.size());
+	}
+
 private:
-    [[nodiscard]] const bool _UpdateStage(SourceDataKeyVal& st_inst_ref){
-        bool updated = st_inst_ref.instance.Update();
-        if (st_inst_ref.instance.IsAtLastStage()) {
-            auto it = std::find(data.begin(), data.end(), st_inst_ref);
-            if (it != data.end()) data.erase(it);
+    // counta karismiyor
+    [[nodiscard]] const bool _UpdateStage(StageInstance& st_inst) {
+        if (!stages.count(st_inst.no)) return false; //decayed
+        const auto current_stage = stages[st_inst.no];
+        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+        float diff = curr_time - st_inst.start_time;
+        if (diff < 0) {
+            logger::critical("Time difference is negative. This should not happen!!!!");
+            return false;
         }
+        bool updated = false;
+        logger::trace("C«urrent time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff, stages[st_inst.no].duration);
+        while (diff > stages[st_inst.no].duration) {
+            logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no + 1);
+			diff -= stages[st_inst.no].duration;
+			st_inst.no++;
+            updated = true;
+            if (!stages.count(st_inst.no)) {
+			    logger::trace("Decayed");
+                st_inst.no++;
+                // make decayed stage
+                Stage decayed_stage;
+                decayed_stage.formid = defaultsettings.decayed_id;
+                stages[st_inst.no] = decayed_stage;
+                break;
+		    }
+		}
+        if (updated) st_inst.start_time = curr_time;
         return updated;
     }
+
+    const FormID CreateFake(RE::AlchemyItem* real) {
+        logger::trace("CreateFakeContainer");
+        if (!real) {
+			logger::error("Real form is null.");
+			return 0;
+		}
+        RE::AlchemyItem* new_form = nullptr;
+        new_form = real->CreateDuplicateForm(true, (void*)new_form)->As<RE::AlchemyItem>();
+
+        if (!new_form) {
+            logger::error("Failed to create new form.");
+            return 0;
+        }
+        new_form->Copy(real);
+
+        new_form->fullName = real->GetFullName();
+        logger::info("Created form with type: {}, Base ID: {:x}, Ref ID: {:x}, Name: {}",
+                     RE::FormTypeToString(new_form->GetFormType()), new_form->GetFormID(), new_form->GetFormID(),
+                     new_form->GetName());
+
+        return new_form->GetFormID();
+    }
+    
     void InitFailed(){
         logger::error("Initialisation failed.");
         formid = 0;
@@ -77,11 +461,3 @@ private:
         init_failed = true;
     }
 };
-
-
-namespace Settings {
-    std::map<StageNo, Duration> default_durations = {{0,0.01f},{1,12.f},{2,6.f},{3,120.f},{4,0.f}}; // 0:Fresh, 1:Stale, 2:Spoiled, 3:Rotten, 4:Decayed
-    std::map<StageNo, StageName> default_stage_names = {
-        {0, "Fresh"}, {1, "Stale"}, {2, "Spoiled"}, {3, "Rotten"}, {4, "Decayed"}};
-    const FormID rot_scale_formid = 0x0100306D; // 0x0100306d: "Rot Scale"
-}

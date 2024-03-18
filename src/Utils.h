@@ -13,15 +13,19 @@
 #include <mutex>  // for std::mutex
 #include <algorithm>
 #include <ClibUtil/editorID.hpp>
+#include "rapidjson/document.h"
+
 
 
 namespace Utilities{
 
     const auto mod_name = static_cast<std::string>(SKSE::PluginDeclaration::GetSingleton()->GetName());
     constexpr auto po3path = "Data/SKSE/Plugins/po3_Tweaks.dll";
+    bool IsPo3Installed() { return std::filesystem::exists(po3path); };
 
-    const auto no_src_msgbox = std::format(
-        "{}: You currently do not have any container set up. Check your ini file or see the mod page for instructions.",
+    const auto po3_err_msgbox = std::format(
+        "{}: If you are trying to use Editor IDs, but you must have powerofthree's Tweaks "
+        "installed. See mod page for further instructions.",
         mod_name);
 
     const auto general_err_msgbox = std::format("{}: Something went wrong. Please contact the mod author.", mod_name);
@@ -34,6 +38,114 @@ namespace Utilities{
         return hexString;
     };
 
+    std::string dec2hex(unsigned int dec) {
+		    std::stringstream stream;
+		    stream << std::hex << dec;
+		    std::string hexString = stream.str();
+		    return hexString;
+    };
+
+    namespace MsgBoxesNotifs {
+
+        // https://github.com/SkyrimScripting/MessageBox/blob/ac0ea32af02766582209e784689eb0dd7d731d57/include/SkyrimScripting/MessageBox.h#L9
+        class SkyrimMessageBox {
+            class MessageBoxResultCallback : public RE::IMessageBoxCallback {
+                std::function<void(unsigned int)> _callback;
+
+            public:
+                ~MessageBoxResultCallback() override {}
+                MessageBoxResultCallback(std::function<void(unsigned int)> callback) : _callback(callback) {}
+                void Run(RE::IMessageBoxCallback::Message message) override {
+                    _callback(static_cast<unsigned int>(message));
+                }
+            };
+
+        public:
+            static void Show(const std::string& bodyText, std::vector<std::string> buttonTextValues,
+                             std::function<void(unsigned int)> callback) {
+                auto* factoryManager = RE::MessageDataFactoryManager::GetSingleton();
+                auto* uiStringHolder = RE::InterfaceStrings::GetSingleton();
+                auto* factory = factoryManager->GetCreator<RE::MessageBoxData>(
+                    uiStringHolder->messageBoxData);  // "MessageBoxData" <--- can we just use this string?
+                auto* messagebox = factory->Create();
+                RE::BSTSmartPointer<RE::IMessageBoxCallback> messageCallback =
+                    RE::make_smart<MessageBoxResultCallback>(callback);
+                messagebox->callback = messageCallback;
+                messagebox->bodyText = bodyText;
+                for (auto& text : buttonTextValues) messagebox->buttonText.push_back(text.c_str());
+                messagebox->QueueMessage();
+            }
+        };
+
+        void ShowMessageBox(const std::string& bodyText, std::vector<std::string> buttonTextValues,
+                            std::function<void(unsigned int)> callback) {
+            SkyrimMessageBox::Show(bodyText, buttonTextValues, callback);
+        }
+
+        namespace Windows {
+
+            int GeneralErr() {
+                MessageBoxA(nullptr, general_err_msgbox.c_str(), "Error", MB_OK | MB_ICONERROR);
+                return 1;
+            };
+
+            int Po3ErrMsg() {
+                MessageBoxA(nullptr, po3_err_msgbox.c_str(), "Error", MB_OK | MB_ICONERROR);
+                return 1;
+            };
+        };
+
+        namespace InGame {
+
+            void IniCreated() { RE::DebugMessageBox("INI created. Customize it to your liking."); };
+
+            void InitErr() { RE::DebugMessageBox(init_err_msgbox.c_str()); };
+
+            void GeneralErr() { RE::DebugMessageBox(general_err_msgbox.c_str()); };
+
+            void FormTypeErr(RE::FormID id) {
+                RE::DebugMessageBox(std::format("{}: The form type of the item with FormID ({}) is not supported. "
+                                                "Please contact the mod author.",
+                                                Utilities::mod_name, Utilities::dec2hex(id))
+                                        .c_str());
+            };
+
+            void FormIDError(RE::FormID id) {
+                RE::DebugMessageBox(std::format("{}: The ID ({}) could not have been found.", Utilities::mod_name,
+                                                Utilities::dec2hex(id))
+                                        .c_str());
+            }
+
+            void EditorIDError(std::string id) {
+                RE::DebugMessageBox(
+                    std::format("{}: The ID ({}) could not have been found.", Utilities::mod_name, id).c_str());
+            }
+
+            void ProblemWithContainer(std::string id) {
+                RE::DebugMessageBox(
+                    std::format(
+                        "{}: Problem with one of the items with the form id ({}). This is expected if you have changed "
+                        "the list of containers in the INI file between saves. Corresponding items will be returned to "
+                        "your inventory. You can suppress this message by changing the setting in your INI.",
+                        Utilities::mod_name, id)
+                        .c_str());
+            };
+
+            void UninstallSuccessful() {
+                RE::DebugMessageBox(
+                    std::format("{}: Uninstall successful. You can now safely remove the mod.", Utilities::mod_name)
+                        .c_str());
+            };
+
+            void UninstallFailed() {
+                RE::DebugMessageBox(
+                    std::format("{}: Uninstall failed. Please contact the mod author.", Utilities::mod_name).c_str());
+            };
+
+            void CustomErrMsg(const std::string& msg) { RE::DebugMessageBox((mod_name + ": " + msg).c_str()); };
+        };
+    };
+
     namespace Types {
 
         //using EditorID = std::string;
@@ -41,21 +153,35 @@ namespace Utilities{
         using FormID = RE::FormID;
         using RefID = RE::FormID;
         using Count = RE::TESObjectREFR::Count;
-        using Duration = float;
+        using Duration = std::uint32_t;
         using StageNo = unsigned int;
         using StageName = std::string;
 
+        struct StageEffect {
+            FormID beffect; // base effect
+            float magnitude; // in effectitem
+            std::uint32_t duration; // in effectitem
 
-        struct Stage{
+            StageEffect() : beffect(0), magnitude(0), duration(0) {}
+            StageEffect(FormID be, float mag, Duration dur) : beffect(be), magnitude(mag), duration(dur) {}
+
+            [[nodiscard]] const bool IsNull() {return beffect == 0;}
+            [[nodiscard]] const bool HasMagnitude() { return magnitude == 0; }
+            [[nodiscard]] const bool HasDuration() { return duration == 0; }
+        };
+
+        struct Stage {
             FormID formid=0; // with which item is it represented
             Duration duration; // duration of the stage
             StageNo no; // used for sorting when multiple stages are present
             StageName name; // name of the stage
+            std::vector<StageEffect> mgeffect;
             
             Stage(){};
-            Stage(FormID f, Duration d, StageNo s, StageName n)
-                : formid(f), duration(d) , no(s), name(n) {
-                    logger::trace("Stage: FormID {}, Duration {}, StageNo {}, Name {}", formid, duration, no, name);
+            Stage(FormID f, Duration d, StageNo s, StageName n, std::vector<StageEffect> e)
+                : formid(f), duration(d) , no(s), name(n), mgeffect(e){
+                    if (!formid) logger::critical("FormID is null");
+                    else logger::trace("Stage: FormID {}, Duration {}, StageNo {}, Name {}", formid, duration, no, name);
                 }
 
             bool operator<(const Stage& other) const {
@@ -71,125 +197,30 @@ namespace Utilities{
 
         using Stages = std::vector<Stage>;
         using StageDict = std::map<StageNo,Stage>;
-        struct SomethingWithStages {
-            StageDict stages; // consider just using formid
+
+
+        struct StageInstance {
             float start_time;
-            StageNo current_stage;
+            StageNo no;
             Count count;
-            
-            SomethingWithStages(){};
-            SomethingWithStages(Stages s, float time, Count c, StageNo stage=0)
-                : start_time(time), count(c) , current_stage(stage){
-                    for (auto& stage : s) {
-                        stages[stage.no] = stage;
-                    }
-                    logger::trace("Something with stages: Start time {}, Count {}, Current stage {}", start_time, count, current_stage);
-                }
+            RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is out in the world
 
-            // Define comparison operator for sorting in maps
-            bool operator<(const SomethingWithStages& other) const {
-                // Compare each member in the desired order
-                if (current_stage < other.current_stage) return true;
-                if (other.current_stage < current_stage) return false;
-                if (start_time < other.start_time) return true;
-                if (start_time > other.start_time) return false;
-                return count < other.count;
-            }
+            StageInstance() : start_time(0), no(0), count(0), location(0) {}
+            StageInstance(float st, StageNo n, Count c, RefID l) : start_time(st), no(n), count(c), location(l) {}
 
-            bool operator==(const SomethingWithStages& other) {
-                // Compare each member for equality
-                if (stages.size() != other.stages.size()) return false;
-                for (const auto& [other_no,other_stage] : other.stages) {
-                    if (stages.find(other_no) == stages.end()) return false;
-                    if (other_stage != stages[other_no]) return false;
-                }
-                return  start_time == other.start_time &&
-                        current_stage == other.current_stage &&
-                        count == other.count;
-            }
+		};
 
-            [[nodiscard]] const bool IsDue() {
-                const auto curr_stage = GetCurrentStage();
-                const auto duration_allowed = curr_stage.duration;
-                if (!duration_allowed) return false;
-                const auto time_passed = RE::Calendar::GetSingleton()->GetHoursPassed() - start_time;
-                return time_passed > duration_allowed;
-            }
+        struct StageUpdate {
+			StageNo old_no;
+            StageNo new_no;
+			Count count;
+		};
 
-            [[nodiscard]] const bool Update() {
-                if (IsAtLastStage()){
-                    logger::warn("Update: At last stage, this should not happen!");
-                    return false;
-                } 
-                if (!IsDue()) return false;
-                const auto curr_stage = GetCurrentStage();
-                // need to see how many stages do i need to jump
-                const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
-                const auto time_passed = curr_time - start_time;
-                Duration cumulative_stage_duration = curr_stage.duration;
-                while (time_passed > cumulative_stage_duration){
-                    current_stage++;
-                    cumulative_stage_duration += stages[current_stage].duration;
-                }
-                start_time = curr_time;
-                return true;
-                
-            }
-
-            [[nodiscard]] const bool isInitialized() const {
-                return stages.size() > 0;
-            }
-
-            Stage GetCurrentStage() {
-                return stages[current_stage];
-            }
-
-            [[nodiscard]] const bool IsAtLastStage() {
-                // get stage with highest stage_no
-                const auto curr_stage = GetCurrentStage();
-                if (curr_stage.duration == 0) return true;
-                unsigned int maxKey = 0;
-                bool flag = false;
-                // Iterate through the map to find the highest key
-                for (const auto& pair : stages) {
-                    if (pair.first > maxKey) {
-                        maxKey = pair.first;
-                        flag = true;
-                    }
-                }
-                if (!flag){
-                    logger::critical("IsAtLastStage: No stages found!");
-                    return false;
-                }
-                if (current_stage == maxKey){
-                    logger::warn("IsAtLastStage: At last stage but duration is not ZERO!");
-                    return true;
-                }
-                return false;
-            }
-        };
-
-
-        using SourceDataKey = SomethingWithStages; //
-        using SourceDataVal = RefID; // RefID of the container where the fake food is stored or the real food itself when it is out in the world
         
-        struct SourceDataKeyVal {
-            SourceDataKey instance;
-            SourceDataVal refid;
+        using SourceData = std::vector<StageInstance>;  // 
+        using SaveDataLHS = FormID;
+        using SaveDataRHS = StageInstance;
 
-            bool operator==(const SourceDataKeyVal& other) {
-                // Compare each member for equality
-                // return instance.start_time==other.instance.start_time &&
-                //         instance.count==other.instance.count &&
-                //         instance.stages==other.instance.stages &&
-                //         refid==other.refid;
-                return instance==other.instance &&
-                        refid==other.refid;
-            }
-        };
-        using SourceData = std::vector<SourceDataKeyVal>; // 
-        using SaveDataLHS = SourceDataKey;
-        using SaveDataRHS = SourceDataVal;
     }
 
     namespace FunctionsSkyrim {
@@ -227,9 +258,22 @@ namespace Utilities{
 
             return length;
         }
+        
+        template <typename T>
+        std::size_t GetListLength(RE::BSSimpleList<T>* dataList) {
+            std::size_t length = 0;
+
+            for (auto it = dataList->begin(); it != dataList->end(); ++it) {
+                // Increment the length for each element in the list
+                ++length;
+            }
+
+            return length;
+        }
 
 
         bool FormIsOfType(RE::TESForm* form, RE::FormType type) {
+            if (!form) return false;
 		    return form->GetFormType() == type;
 	    }
 
@@ -253,6 +297,10 @@ namespace Utilities{
             else return false;
             return true;
         }
+
+        bool IsFoodItem(const Types::FormID formid) {
+			return IsFoodItem(GetFormByID(formid));
+		}
 
         bool IsCONT(Types::RefID refid) {
             return RE::FormTypeToString(
@@ -388,8 +436,19 @@ namespace Utilities{
             logger::error("Item not found in inventory");
         }
 
+        [[nodiscard]] const bool HasItemPlusCleanUp(RE::TESBoundObject* item, RE::TESObjectREFR* item_owner,RE::ExtraDataList* xList=nullptr) {
+            logger::trace("HasItemPlusCleanUp");
+
+            if (HasItem(item, item_owner)) return true;
+            if (HasItemEntry(item, item_owner)) {
+                item_owner->RemoveItem(item, 1, RE::ITEM_REMOVE_REASON::kRemove, xList, nullptr);
+                logger::trace("Item with zero count removed from player.");
+            }
+            return false;
+        }
+
         
-    [[nodiscard]] const bool IsFavorited(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner) {
+        [[nodiscard]] const bool IsFavorited(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner) {
             if (!item) {
                 logger::warn("Item is null");
                 return false;
@@ -406,6 +465,81 @@ namespace Utilities{
             }
             return false;
         }
+
+        void OverrideMGEFFs(RE::BSTArray<RE::Effect*>& effect_array, std::vector<RE::EffectSetting*> new_effects,
+                            std::vector<uint32_t*> durations, std::vector<float*> magnitudes) {
+            
+            const unsigned int n_current_effects = static_cast<unsigned int>(effect_array.size());
+            if (!n_current_effects) {
+				logger::warn("No effects found");
+				return;
+			}
+            const unsigned int n_new_effects = static_cast<unsigned int>(new_effects.size());
+            unsigned int i = 0;
+            while (i<n_new_effects) {
+                if (i < n_current_effects) {
+					if (new_effects[i]) effect_array[i]->baseEffect = new_effects[i];
+                    if (durations[i]) effect_array[i]->effectItem.duration = *durations[i];
+                    if (magnitudes[i]) effect_array[i]->effectItem.magnitude = *magnitudes[i];
+                } else {
+                    effect_array.push_back(effect_array.front());
+                    if (new_effects[i]) effect_array.back()->baseEffect = new_effects[i];
+                    if (durations[i]) effect_array.back()->effectItem.duration = *durations[i];
+                    if (magnitudes[i]) effect_array.back()->effectItem.magnitude = *magnitudes[i];
+                }
+                i++;
+            }
+            
+        }
+
+    };
+    namespace FunctionsPapyrus {
+     //   using VM = RE::BSScript::Internal::VirtualMachine;
+	    //using ObjectPtr = RE::BSTSmartPointer<RE::BSScript::Object>;
+
+     //   // https:// github.com/clayne/GTS_Plugin/blob/master/src/utils/papyrusUtils.hpp#L12
+     //   inline RE::VMHandle GetHandle(RE::TESForm* a_form) {
+     //       auto vm = VM::GetSingleton();
+     //       auto policy = vm->GetObjectHandlePolicy();
+     //       return policy->GetHandleForObject(a_form->GetFormType(), a_form);
+     //   }
+
+     //   // https://github.com/clayne/GTS_Plugin/blob/master/src/utils/papyrusUtils.hpp#L19
+     //   inline ObjectPtr GetObjectPtr(RE::TESForm* a_form, const char* a_class, bool a_create) {
+     //       auto vm = VM::GetSingleton();
+     //       auto handle = GetHandle(a_form);
+
+     //       ObjectPtr object = nullptr;
+     //       bool found = vm->FindBoundObject(handle, a_class, object);
+     //       if (!found && a_create) {
+     //           vm->CreateObject2(a_class, object);
+     //           vm->BindObject(object, handle, false);
+     //       }
+
+     //       return object;
+     //   }
+
+     //   // https://github.com/clayne/GTS_Plugin/blob/master/src/utils/papyrusUtils.hpp#L35
+     //   template <class... Args>
+     //   inline void CallFunctionOn(RE::TESForm* a_form, std::string_view formKind, std::string_view function,
+     //                              Args... a_args) {
+     //       const auto skyrimVM = RE::SkyrimVM::GetSingleton();
+     //       auto vm = skyrimVM ? skyrimVM->impl : nullptr;
+     //       if (vm) {
+     //           RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
+     //           auto args = RE::MakeFunctionArguments(std::forward<Args>(a_args)...);
+     //           auto objectPtr = GetObjectPtr(a_form, std::string(formKind).c_str(), false);
+     //           if (!objectPtr) {
+     //               logger::error("Could not bind form");
+     //           }
+     //           vm->DispatchMethodCall(objectPtr, std::string(function).c_str(), args, callback);
+     //       }
+     //   }
+
+     //   typedef void (*_ApplyHavokImpulse)(RE::BSScript::VMState* registry, uint32_t stackID, RE::TESObjectREFR* target, float afX,
+     //                                      float afY, float afZ, float magnitude);
+     //   const _ApplyHavokImpulse ApplyHavokImpulse = (_ApplyHavokImpulse)0x00908260;
+     //   RE::SkyrimVM*& g_skyrimVM = *(RE::SkyrimVM**)0x012E568C;
     };
 
         // Utility functions
@@ -432,112 +566,91 @@ namespace Utilities{
             if (n_stellen == ++i) return version;
             version += "." + std::to_string(fullVersion.build());
             return version;
-
-            
         }
 
-    };
+        template <typename T>
+        std::vector<T> mergeVectors(const std::vector<T>& vec1, const std::vector<T>& vec2) {
+            std::vector<T> mergedVec;
 
+            // Reserve enough space to avoid frequent reallocation
+            mergedVec.reserve(vec1.size() + vec2.size());
 
-    namespace MsgBoxesNotifs {
+            // Insert elements from vec1
+            mergedVec.insert(mergedVec.end(), vec1.begin(), vec1.end());
 
-        // https://github.com/SkyrimScripting/MessageBox/blob/ac0ea32af02766582209e784689eb0dd7d731d57/include/SkyrimScripting/MessageBox.h#L9
-        class SkyrimMessageBox {
-            class MessageBoxResultCallback : public RE::IMessageBoxCallback {
-                std::function<void(unsigned int)> _callback;
+            // Insert elements from vec2
+            mergedVec.insert(mergedVec.end(), vec2.begin(), vec2.end());
 
-            public:
-                ~MessageBoxResultCallback() override {}
-                MessageBoxResultCallback(std::function<void(unsigned int)> callback) : _callback(callback) {}
-                void Run(RE::IMessageBoxCallback::Message message) override {
-                    _callback(static_cast<unsigned int>(message));
+            return mergedVec;
+        }
+
+        bool includesString(const std::string& input, const std::vector<std::string>& strings) {
+            std::string lowerInput = input;
+            std::transform(lowerInput.begin(), lowerInput.end(), lowerInput.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+            for (const auto& str : strings) {
+                std::string lowerStr = str;
+                std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (lowerInput.find(lowerStr) != std::string::npos) {
+                    return true;  // The input string includes one of the strings
                 }
-            };
-
-        public:
-            static void Show(const std::string& bodyText, std::vector<std::string> buttonTextValues,
-                             std::function<void(unsigned int)> callback) {
-                auto* factoryManager = RE::MessageDataFactoryManager::GetSingleton();
-                auto* uiStringHolder = RE::InterfaceStrings::GetSingleton();
-                auto* factory = factoryManager->GetCreator<RE::MessageBoxData>(
-                    uiStringHolder->messageBoxData);  // "MessageBoxData" <--- can we just use this string?
-                auto* messagebox = factory->Create();
-                RE::BSTSmartPointer<RE::IMessageBoxCallback> messageCallback =
-                    RE::make_smart<MessageBoxResultCallback>(callback);
-                messagebox->callback = messageCallback;
-                messagebox->bodyText = bodyText;
-                for (auto& text : buttonTextValues) messagebox->buttonText.push_back(text.c_str());
-                messagebox->QueueMessage();
             }
-        };
-
-        void ShowMessageBox(const std::string& bodyText, std::vector<std::string> buttonTextValues,
-                            std::function<void(unsigned int)> callback) {
-            SkyrimMessageBox::Show(bodyText, buttonTextValues, callback);
+            return false;  // None of the strings in 'strings' were found in the input string
         }
 
-        namespace Windows {
+        template <typename T>
+        bool VectorHasElement(const std::vector<T>& vec, const T& element) {
+			return std::find(vec.begin(), vec.end(), element) != vec.end();
+		}
 
-            int GeneralErr() {
-                MessageBoxA(nullptr, general_err_msgbox.c_str(), "Error", MB_OK | MB_ICONERROR);
-                return 1;
-            };
-        };
-
-        namespace InGame {
-
-            void IniCreated() { 
-                RE::DebugMessageBox("INI created. Customize it to your liking."); 
-            };
-
-            void InitErr() { RE::DebugMessageBox(init_err_msgbox.c_str()); };
-
-            void GeneralErr() { RE::DebugMessageBox(general_err_msgbox.c_str()); };
-
-            void NoSourceFound() { RE::DebugMessageBox(no_src_msgbox.c_str()); };
-
-            void FormTypeErr(RE::FormID id) {
-				RE::DebugMessageBox(
-					std::format("{}: The form type of the item with FormID ({}) is not supported. Please contact the mod author.",
-						Utilities::mod_name, Utilities::dec2hex(id)).c_str());
-			};
-            
-            void FormIDError(RE::FormID id) {
-                RE::DebugMessageBox(
-                    std::format("{}: The ID ({}) could not have been found.",
-                                Utilities::mod_name, Utilities::dec2hex(id))
-                        .c_str());
-            }
-
-            void EditorIDError(std::string id) {
-                RE::DebugMessageBox(
-                    std::format("{}: The ID ({}) could not have been found.",
-                                Utilities::mod_name, id)
-                        .c_str());
-            }
-
-            void ProblemWithContainer(std::string id) {
-                RE::DebugMessageBox(
-					std::format("{}: Problem with one of the items with the form id ({}). This is expected if you have changed the list of containers in the INI file between saves. Corresponding items will be returned to your inventory. You can suppress this message by changing the setting in your INI.",
-                        								Utilities::mod_name, id)
-						.c_str());
-            };
-
-            void UninstallSuccessful() {
-				RE::DebugMessageBox(
-					std::format("{}: Uninstall successful. You can now safely remove the mod.",
-								Utilities::mod_name)
-						.c_str());
-			};
-
-            void UninstallFailed() {
-                RE::DebugMessageBox(
-                    std::format("{}: Uninstall failed. Please contact the mod author.", Utilities::mod_name).c_str());
-            };
-
-            void CustomErrMsg(const std::string& msg) { RE::DebugMessageBox((mod_name + ": " + msg).c_str()); };
-        };
+        bool isValidHexWithLength7or8(const char* input) {
+            std::string inputStr(input);
+            std::regex hexRegex("^[0-9A-Fa-f]{7,8}$");  // Allow 7 to 8 characters
+            bool isValid = std::regex_match(inputStr, hexRegex);
+            return isValid;
+        }
     };
+
+    namespace FunctionsJSON {
+        
+        int GetFormEditorID(const rapidjson::Value& section, const char* memberName) {
+            if (!section.HasMember(memberName)) {
+                logger::error("Member {} not found", memberName);
+                return -1;
+            }
+            if (section[memberName].IsString()) {
+                const std::string formEditorId = section[memberName].GetString();
+                if (Utilities::Functions::isValidHexWithLength7or8(formEditorId.c_str())) {
+                    int form_id_;
+                    std::stringstream ss;
+                    ss << std::hex << formEditorId;
+                    ss >> form_id_;
+                    auto temp_form = FunctionsSkyrim::GetFormByID(form_id_, "");
+                    if (temp_form) return temp_form->GetFormID();
+                    else {
+                        logger::error("Formid is null for editorid {}", formEditorId);
+						return -1;
+                    }
+                }
+                if (formEditorId.empty()) return 0;
+                else if (!IsPo3Installed()) {
+                    logger::error("Po3 is not installed.");
+                    MsgBoxesNotifs::Windows::Po3ErrMsg();
+                    return -1;
+                }
+                auto temp_form = FunctionsSkyrim::GetFormByID(0, formEditorId);
+                if (temp_form) return temp_form->GetFormID();
+                else {
+                    logger::error("Formid is null for editorid {}", formEditorId);
+                    return -1;
+                }
+            } 
+            else if (section[memberName].IsInt()) return section[memberName].GetInt();
+			return -1;
+        }
+    }
 
     // https :  // github.com/ozooma10/OSLAroused/blob/29ac62f220fadc63c829f6933e04be429d4f96b0/src/PersistedData.cpp
     // template <typename T,typename U>
