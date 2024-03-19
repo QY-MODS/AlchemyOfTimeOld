@@ -289,11 +289,11 @@ namespace Utilities{
                 if (!form_as_->IsFood()) return false;
 
             }
-            else if(FormIsOfType(form,RE::MagicItem::FORMTYPE)){
-                RE::MagicItem* form_as_ = form->As<RE::MagicItem>();
-                if (!form_as_) return false;
-                if (!form_as_->IsFood()) return false;
-            }
+            //else if(FormIsOfType(form,RE::MagicItem::FORMTYPE)){
+            //    RE::MagicItem* form_as_ = form->As<RE::MagicItem>();
+            //    if (!form_as_) return false;
+            //    if (!form_as_->IsFood()) return false;
+            //}
             else return false;
             return true;
         }
@@ -492,7 +492,36 @@ namespace Utilities{
             
         }
 
+
+        RE::TESObjectREFR* DropObjectIntoTheWorld(RE::TESBoundObject* obj, Types::Count count, RE::ExtraDataList*) {
+            auto player_ch = RE::PlayerCharacter::GetSingleton();
+            auto player_pos = player_ch->GetPosition();
+            // distance in the xy-plane
+            const auto multiplier = 100.0f;
+            player_pos += {multiplier, multiplier, 70};
+            auto player_cell = player_ch->GetParentCell();
+            auto player_ws = player_ch->GetWorldspace();
+            if (!player_cell && !player_ws) {
+                logger::critical("Player cell AND player world is null.");
+                return nullptr;
+            }
+            auto newPropRef =
+                RE::TESDataHandler::GetSingleton()
+                                  ->CreateReferenceAtLocation(obj, player_pos, {0.0f, 0.0f, 0.0f}, player_cell,
+                                                player_ws, nullptr, nullptr, {}, true, false)
+                    .get()
+                    .get();
+            if (!newPropRef) {
+                logger::critical("New prop ref is null.");
+                return nullptr;
+            }
+            newPropRef->extraList.SetCount(static_cast<uint16_t>(count));
+            newPropRef->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+            return newPropRef;
+        }
+
     };
+    
     namespace FunctionsPapyrus {
      //   using VM = RE::BSScript::Internal::VirtualMachine;
 	    //using ObjectPtr = RE::BSTSmartPointer<RE::BSScript::Object>;

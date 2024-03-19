@@ -178,6 +178,8 @@ struct Source {
     Settings::DefaultSettings defaultsettings;
 
     bool init_failed = false;
+    RE::FormType formtype;
+    std::vector<StageNo> fake_stages = {};
 
     Source(const FormID id, const std::string id_str, RE::EffectSetting* e_m,StageDict sd = {})
         : formid(id), editorid(id_str), stages(sd), empty_mgeff(e_m){
@@ -207,6 +209,8 @@ struct Source {
 			return;
 		}
 
+        formtype = form->GetFormType();
+
         //make sure the keys in stages are 0 to length-1 with increment 1
         if (stages.size() == 0) {
             // get stages
@@ -215,15 +219,21 @@ struct Source {
         else {
             // check if formids exist in the game
             for (auto& [key, value] : stages) {
-                if (!Utilities::FunctionsSkyrim::GetFormByID<RE::AlchemyItem>(value.formid, "")) {
+                if (!Utilities::FunctionsSkyrim::GetFormByID(value.formid, "")) {
                     // make one and replace formid
 					logger::warn("Formid {} for stage {} does not exist.", value.formid, key);
-                    value.formid = CreateFake(bound_->As<RE::AlchemyItem>());
+                    if (formtype == RE::FormType::AlchemyItem) value.formid = CreateFake<RE::AlchemyItem>(form->As<RE::AlchemyItem>());
+                    else if (formtype == RE::FormType::Ingredient) value.formid = CreateFake<RE::IngredientItem>(form->As<RE::IngredientItem>());
+                    //else if (formtype == RE::FormType::magi) value.formid = CreateFake<RE::MagicItem>(form->As<RE::MagicItem>());
+					else {
+						InitFailed();
+						return;
+					}
                     if (!value.formid) {
                         InitFailed();
                         return;
                     }
-					
+                    fake_stages.push_back(key);
 				}
 			}
         }
@@ -254,15 +264,28 @@ struct Source {
             // create fake form
             auto alch_item = GetBoundObject()->As<RE::AlchemyItem>();
             FormID fake_formid;
-            if (!defaultsettings.items[i]) fake_formid = CreateFake(alch_item);
-            else fake_formid = Utilities::FunctionsSkyrim::GetFormByID<RE::AlchemyItem>(defaultsettings.items[i], "")->GetFormID();
+            if (!defaultsettings.items[i]) {
+                fake_formid = CreateFake(alch_item);
+                fake_stages.push_back(defaultsettings.numbers[i]);
+            } else {
+                auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<RE::AlchemyItem>(defaultsettings.items[i], "");
+                fake_formid = fake_form ? fake_form->GetFormID() : 0;
+            }
             if (!fake_formid) {
 				logger::error("Could not create fake form for stage {}", i);
 				return;
 			}
+            // or if this fake_formid is already in the stages return error
+            for (auto& [key, value] : stages) {
+				if (fake_formid == value.formid) {
+                    logger::error("Fake formid is already in the stages.");
+                    return;
+                }
+            }
             if (fake_formid == formid) {
 				logger::warn("Fake formid is the same as the real formid.");
 				fake_formid = CreateFake(alch_item);
+                fake_stages.push_back(defaultsettings.numbers[i]);
 			}
             auto duration = defaultsettings.durations[i];
             auto name = defaultsettings.stage_names[i];
@@ -300,8 +323,30 @@ struct Source {
                     pMGEFFdurations.push_back(nullptr);
                     pMGEFFmagnitudes.push_back(nullptr);
                 } else {
-                    auto fake_mgeffect = Utilities::FunctionsSkyrim::GetFormByID<RE::EffectSetting>(fake_mgeff_id, "");
-				    MGEFFs.push_back(fake_mgeffect);
+                    RE::EffectSetting* fake_mgeffect =
+                        Utilities::FunctionsSkyrim::GetFormByID<RE::EffectSetting>(fake_mgeff_id);
+                    if (defaultsettings.effects[i][j].duration &&
+                        !Utilities::Functions::includesString(std::string(fake_mgeffect->magicItemDescription.c_str()),
+                                                            {"<dur>"}) &&
+                        !fake_mgeffect->data.flags.any(RE::EffectSetting::EffectSettingData::Flag::kNoDuration)
+                        ) {
+                        auto descr_str = std::string(fake_mgeffect->magicItemDescription.c_str());
+                        descr_str = descr_str.substr(0, descr_str.length() - 1);
+                        RE::EffectSetting* new_form = nullptr;
+                        new_form = fake_mgeffect->CreateDuplicateForm(true, (void*)new_form)->As<RE::EffectSetting>();
+
+                        if (!new_form) {
+                            logger::error("Failed to create new form.");
+                            return;
+                        }
+                        new_form->Copy(fake_mgeffect);
+                        new_form->fullName = fake_mgeffect->GetFullName();
+                        new_form->magicItemDescription = (descr_str + " for <dur> second(s).").c_str();
+                        fake_mgeffect = new_form;
+                        logger::critical("FORM {} FORM {}", fake_mgeffect->GetFormID(),
+                                         new_form->GetFormID());
+                    }
+                    MGEFFs.push_back(fake_mgeffect);
                     pMGEFFdurations.push_back(&defaultsettings.effects[i][j].duration);
                     pMGEFFmagnitudes.push_back(&defaultsettings.effects[i][j].magnitude);
                 }
@@ -425,18 +470,19 @@ private:
                 break;
 		    }
 		}
-        if (updated) st_inst.start_time = curr_time;
+        if (updated) st_inst.start_time = curr_time - diff;
         return updated;
     }
 
-    const FormID CreateFake(RE::AlchemyItem* real) {
+    template <typename T>
+    const FormID CreateFake(T* real) {
         logger::trace("CreateFakeContainer");
         if (!real) {
 			logger::error("Real form is null.");
 			return 0;
 		}
-        RE::AlchemyItem* new_form = nullptr;
-        new_form = real->CreateDuplicateForm(true, (void*)new_form)->As<RE::AlchemyItem>();
+        T* new_form = nullptr;
+        new_form = real->CreateDuplicateForm(true, (void*)new_form)->As<T>();
 
         if (!new_form) {
             logger::error("Failed to create new form.");

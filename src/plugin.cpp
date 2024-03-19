@@ -70,13 +70,14 @@ public:
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->crosshairRef) return RE::BSEventNotifyControl::kContinue;
         if (!M->getListenCrosshair()) return RE::BSEventNotifyControl::kContinue;
+        
+        // buraya external cont muhabbeti gelcek
+
         if (!M->IsItem(event->crosshairRef.get())) return RE::BSEventNotifyControl::kContinue;
-
-
+        
         if (!M->RefIsRegistered(event->crosshairRef->GetFormID())) {
             logger::trace("Item not registered.");
-            M->Register(event->crosshairRef->GetBaseObject()->GetFormID(), event->crosshairRef->extraList.GetCount(),
-                        event->crosshairRef.get());
+            M->RegisterWorldObject(event->crosshairRef.get());
         }
         else M->UpdateSpoilage(event->crosshairRef.get());
         
@@ -167,8 +168,11 @@ public:
                         if (!ref_) {
                             logger::error("Could not find reference with RefID {}", picked_up_refid);
                             return RE::BSEventNotifyControl::kContinue;
+                        } else {
+                            logger::trace("PickedUp: {}", ref_->GetName());
+                            picked_up_refid = 0;
+                            picked_up_time = 0;
                         }
-                        else logger::trace("PickedUp: {}", ref_->GetName());
                     }
                     else logger::trace("Reference found: {}", ref_->GetFormID());
                 }
@@ -206,7 +210,10 @@ public:
                     }
                 } 
                 if (ref) M->HandleDrop(event->baseObj,event->itemCount,ref);
-                else if (event->baseObj == fake_equipped_id) M->HandleConsume(event->baseObj,event->itemCount);
+                else if (event->baseObj == fake_equipped_id) {
+                    M->HandleConsume(event->baseObj, event->itemCount);
+                    fake_equipped_id = 0;
+                }
                 else logger::warn("Ref not found at HandleDrop! Hopefully due to consume.");
             }
             // Barter transfer
