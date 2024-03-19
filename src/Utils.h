@@ -21,7 +21,9 @@ namespace Utilities{
 
     const auto mod_name = static_cast<std::string>(SKSE::PluginDeclaration::GetSingleton()->GetName());
     constexpr auto po3path = "Data/SKSE/Plugins/po3_Tweaks.dll";
+    constexpr auto po3_UoTpath = "Data/SKSE/Plugins/po3_UseOrTake.dll";
     bool IsPo3Installed() { return std::filesystem::exists(po3path); };
+    bool IsPo3_UoTInstalled() { return std::filesystem::exists(po3_UoTpath); };
 
     const auto po3_err_msgbox = std::format(
         "{}: If you are trying to use Editor IDs, but you must have powerofthree's Tweaks "
@@ -182,6 +184,7 @@ namespace Utilities{
                 : formid(f), duration(d) , no(s), name(n), mgeffect(e){
                     if (!formid) logger::critical("FormID is null");
                     else logger::trace("Stage: FormID {}, Duration {}, StageNo {}, Name {}", formid, duration, no, name);
+                    if (e.empty()) mgeffect.clear();
                 }
 
             bool operator<(const Stage& other) const {

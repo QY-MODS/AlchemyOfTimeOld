@@ -21,6 +21,7 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
     FormID fake_equipped_id;  // set in equip event only when equipped and used in container event (consume)
     RefID picked_up_refid;
     float picked_up_time;
+    bool activate_eat = false;
 
 public:
     static OurEventSink* GetSingleton() {
@@ -54,7 +55,15 @@ public:
         if (event->objectActivated == RE::PlayerCharacter::GetSingleton()->GetGrabbedRef()) return RE::BSEventNotifyControl::kContinue;
         if (!event->actionRef->IsPlayerRef()) return RE::BSEventNotifyControl::kContinue;
         if (!M->IsItem(event->objectActivated.get())) return RE::BSEventNotifyControl::kContinue;
-
+        
+        if (M->getPO3UoTInstalled()) {
+            if (auto base = event->objectActivated->GetBaseObject()) {
+                RE::BSString str;
+                base->GetActivateText(RE::PlayerCharacter::GetSingleton(), str);
+                if (Utilities::Functions::includesWord(str.c_str(), {"Eat"})) activate_eat = true;
+            }
+        }
+            
         picked_up_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         picked_up_refid = event->objectActivated->GetFormID();
         logger::trace("Picked up: {} at time {}", picked_up_refid, picked_up_time);
@@ -71,6 +80,7 @@ public:
         if (!event->crosshairRef) return RE::BSEventNotifyControl::kContinue;
         if (!M->getListenCrosshair()) return RE::BSEventNotifyControl::kContinue;
         
+
         // buraya external cont muhabbeti gelcek
 
         if (!M->IsItem(event->crosshairRef.get())) return RE::BSEventNotifyControl::kContinue;
@@ -157,10 +167,10 @@ public:
                 logger::trace("Reference: {}", reference_.native_handle());
                 auto ref_ = RE::TESObjectREFR::LookupByHandle(reference_.native_handle()).get();
                 if (!ref_) {
-                    logger::warn("Could not find reference for handle {}", reference_.native_handle());
+                    logger::info("Could not find reference for handle {}", reference_.native_handle());
                     ref_ = reference_.get().get();
                     if (!ref_) {
-                        logger::warn("Could not find reference");
+                        logger::info("Could not find reference");
                         ref_ = RE::TESForm::LookupByID<RE::TESObjectREFR>(picked_up_refid);
                         if (std::abs(picked_up_time - RE::Calendar::GetSingleton()->GetHoursPassed())>0.01f) {
                             logger::warn("Picked up time: {}, calendar time: {}", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
@@ -177,7 +187,8 @@ public:
                     else logger::trace("Reference found: {}", ref_->GetFormID());
                 }
                 else logger::trace("Reference found by handle: {}", ref_->GetFormID());
-                M->HandlePickUp(event->baseObj,event->itemCount,ref_->GetFormID());
+                M->HandlePickUp(event->baseObj,event->itemCount,ref_->GetFormID(),activate_eat);
+                activate_eat = false;
             }
             else {
                 Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported behaviour. Please put back the container you removed from your inventory.");

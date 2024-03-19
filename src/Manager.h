@@ -13,6 +13,9 @@ class Manager {
     bool worldobjectsspoil;
     std::vector<std::string> exlude_list;
 
+    // Use Or Take Compatibility
+    bool po3_use_or_take = false;
+
     // 0x0003eb42 damage health
 
 #define ENABLE_IF_NOT_UNINSTALLED if (isUninstalled) return;
@@ -43,7 +46,7 @@ class Manager {
                 return &src;
             }
         }
-        logger::warn("Container source not found");
+        logger::info("Container source not found");
         return nullptr;
     };
 
@@ -288,6 +291,8 @@ class Manager {
         worldobjectsspoil = true;
         exlude_list = Settings::LoadExcludeList();
 
+        po3_use_or_take = Utilities::IsPo3_UoTInstalled();
+
         // Load also other settings...
         // _other_settings = Settings::LoadOtherSettings();
         logger::info("Manager initialized.");
@@ -369,6 +374,10 @@ public:
         return listen_container_change;
     }
 
+    [[nodiscard]] bool getPO3UoTInstalled() {
+        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        return po3_use_or_take;
+    }
 
     [[nodiscard]] bool getUninstalled() {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
@@ -569,7 +578,7 @@ public:
         source->CleanUpData();
     }
 
-    void HandlePickUp(const FormID formid, const Count count, const RefID refid) {
+    void HandlePickUp(const FormID formid, const Count count, const RefID refid, const bool eat) {
         ENABLE_IF_NOT_UNINSTALLED
         logger::info("HandlePickUp: Formid {} , Count {} , Refid {}", formid, count, refid);
         if (!IsItem(formid)) {
@@ -586,17 +595,24 @@ public:
         }
         // so it was registered before
         auto source = GetSource(formid);
+        if (!source) source = GetStageSource(formid);
         if (!source) return RaiseMngrErr("Source not found.");
         for (auto& st_inst: source->data) {
 			if (st_inst.location == refid) {
                 st_inst.location = 20;
-                // try to replace it with fake form
-                RemoveItemReverse(player_ref,nullptr,formid,count,RE::ITEM_REMOVE_REASON::kRemove);
-                setListenContainerChange(false);
-                player_ref->AddObjectToContainer(RE::TESForm::LookupByID<RE::TESBoundObject>(source->stages[st_inst.no].formid), nullptr,
-                                                 count,
-                                                 nullptr);
-                setListenContainerChange(true);
+                if (Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages, st_inst.no)) {
+                    // try to replace it with fake form
+                    RemoveItemReverse(player_ref,nullptr,formid,count,RE::ITEM_REMOVE_REASON::kRemove);
+                    setListenContainerChange(false);
+                    auto bound_ = RE::TESForm::LookupByID<RE::TESBoundObject>(source->stages[st_inst.no].formid);
+                    player_ref->AddObjectToContainer(bound_, nullptr,
+                                                     count,
+                                                     nullptr);
+                    setListenContainerChange(true);
+                    if (eat) RE::ActorEquipManager::GetSingleton()->EquipObject(RE::PlayerCharacter::GetSingleton(), bound_,
+                                                                           nullptr, count);
+                }
+                return;
 			}
 		}
     }
@@ -854,7 +870,7 @@ public:
         }
 
         if (!update_took_place) {
-            logger::info("No update");
+            logger::trace("No update");
             return false;
         }
 

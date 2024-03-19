@@ -6,8 +6,8 @@ using namespace Utilities::Types;
 
 namespace Settings {
 
-    constexpr auto exclude_path = L"Data/SKSE/Plugins/exclude.txt";
-    constexpr auto defaults_path = "Data/SKSE/Plugins/defaults.json";
+    constexpr auto exclude_path = L"Data/SKSE/Plugins/FoodSpoilageNG_exclude.txt";
+    constexpr auto defaults_path = "Data/SKSE/Plugins/FoodSpoilageNG_default.json";
 
 
     struct DefaultSettings {
@@ -306,11 +306,14 @@ struct Source {
                 return;
             }
 
+            if (defaultsettings.effects[i].empty()) continue;
+
             // change mgeff of fake form
 
             std::vector<RE::EffectSetting*> MGEFFs;
             std::vector<uint32_t*> pMGEFFdurations;
             std::vector<float*> pMGEFFmagnitudes;
+
 
             // i need this many empty effects
             int n_empties = static_cast<int>(fake_form->effects.size()) - static_cast<int>(defaultsettings.effects[i].size());
@@ -343,8 +346,6 @@ struct Source {
                         new_form->fullName = fake_mgeffect->GetFullName();
                         new_form->magicItemDescription = (descr_str + " for <dur> second(s).").c_str();
                         fake_mgeffect = new_form;
-                        logger::critical("FORM {} FORM {}", fake_mgeffect->GetFormID(),
-                                         new_form->GetFormID());
                     }
                     MGEFFs.push_back(fake_mgeffect);
                     pMGEFFdurations.push_back(&defaultsettings.effects[i][j].duration);
@@ -405,7 +406,6 @@ struct Source {
             }
             const StageNo old_no = instance.no;
             if (_UpdateStage(instance)) updated_instances.emplace_back(old_no,instance.no,instance.count);
-            else logger::info("You need to handle this for the possible the critical err in _UpdateStage regarding diff.");
         }
         CleanUpData();
         return updated_instances;
