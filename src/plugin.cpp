@@ -82,6 +82,7 @@ public:
         
 
         // buraya external cont muhabbeti gelcek
+        if (M->IsExternalContainer(event->crosshairRef.get())) M->UpdateSpoilage(event->crosshairRef.get());
 
         if (!M->IsItem(event->crosshairRef.get())) return RE::BSEventNotifyControl::kContinue;
         
@@ -151,13 +152,16 @@ public:
         if (!M->getListenContainerChange()) return RE::BSEventNotifyControl::kContinue;
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->itemCount) return RE::BSEventNotifyControl::kContinue;
+        if (!event->baseObj) return RE::BSEventNotifyControl::kContinue;
+        if (!M->IsItem(event->baseObj)) return RE::BSEventNotifyControl::kContinue;
+        
         if (event->oldContainer != 20 && event->newContainer != 20) return RE::BSEventNotifyControl::kContinue;
         
         logger::trace("Container change event.");
         logger::trace("IsFake: {}", M->IsFake(event->baseObj));
 
         // to player inventory <-
-        if (event->newContainer == 20 && M->IsItem(event->baseObj)) {
+        if (event->newContainer == 20) {
             logger::trace("Item entered player inventory.");
             if (M->IsExternalContainer(event->baseObj,event->oldContainer)) {
                 M->UnLinkExternalContainer(event->baseObj,event->itemCount,event->oldContainer);
@@ -191,8 +195,20 @@ public:
                 activate_eat = false;
             }
             else {
-                Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported behaviour. Please put back the container you removed from your inventory.");
-                logger::error("Unsupported. Please put back the container you removed from your inventory.");
+                // NPC: you dropped this...
+                auto reference_ = event->reference;
+                if (!reference_) {
+                    Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported behaviour.");
+                    logger::error("Unsupported!");
+                } else if (!reference_.native_handle()) {
+                    Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported behaviour.");
+                    logger::error("Unsupported!");
+                } else {
+                    logger::trace("Reference handle: {}", reference_.native_handle());
+                    if (auto npc_ref = RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->oldContainer)) {
+                        M->HandlePickUp(event->baseObj, event->itemCount, reference_.native_handle(), false, npc_ref);
+                    } else M->HandlePickUp(event->baseObj, event->itemCount, reference_.native_handle(), false);
+                }
             }   
             return RE::BSEventNotifyControl::kContinue;
         }

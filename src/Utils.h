@@ -210,7 +210,6 @@ namespace Utilities{
 
             StageInstance() : start_time(0), no(0), count(0), location(0) {}
             StageInstance(float st, StageNo n, Count c, RefID l) : start_time(st), no(n), count(c), location(l) {}
-
 		};
 
         struct StageUpdate {

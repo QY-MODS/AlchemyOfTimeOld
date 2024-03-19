@@ -82,7 +82,7 @@ class Manager {
 
     [[nodiscard]] const bool ExternalContainerIsRegistered(const FormID fake_formid,
                                                            const RefID external_container_id) {
-        const auto src = GetSource(fake_formid);
+        const auto src = GetStageSource(fake_formid);
         if (!src) return false;
         for (const auto& st_inst: src->data) {
             if (st_inst.location == external_container_id) return true;
@@ -244,12 +244,12 @@ class Manager {
         return false;
     }
 
-    void AddExtraText(RE::TESObjectREFR* ref, const std::string& text) {
+    /*void AddExtraText(RE::TESObjectREFR* ref, const std::string& text) {
 		if (!ref) return RaiseMngrErr("Ref is null.");
 		auto textDisplayData = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
         textDisplayData->SetName((std::string(ref->GetDisplayFullName()) + text).c_str());
 		ref->extraList.Add(textDisplayData);
-	}
+	}*/
 
     [[nodiscard]] const bool IsInExclude(const FormID formid) {
         auto form = RE::TESForm::LookupByID(formid);
@@ -296,6 +296,8 @@ class Manager {
         // Load also other settings...
         // _other_settings = Settings::LoadOtherSettings();
         logger::info("Manager initialized.");
+
+        // add safety check for the sources size say 5 million
     }
 
     void Uninstall() {
@@ -485,7 +487,6 @@ public:
         ref->extraList.Add(textDisplayData);*/
     }
 
-
     void HandleDrop(const FormID fakeformid, Count count, RE::TESObjectREFR* ref){
         ENABLE_IF_NOT_UNINSTALLED
         logger::trace("HandleDrop: fakeformid {} , Count {}", fakeformid, count);
@@ -578,7 +579,7 @@ public:
         source->CleanUpData();
     }
 
-    void HandlePickUp(const FormID formid, const Count count, const RefID refid, const bool eat) {
+    void HandlePickUp(const FormID formid, const Count count, const RefID refid, const bool eat, RE::TESObjectREFR* npc_ref = nullptr) {
         ENABLE_IF_NOT_UNINSTALLED
         logger::info("HandlePickUp: Formid {} , Count {} , Refid {}", formid, count, refid);
         if (!IsItem(formid)) {
@@ -611,10 +612,19 @@ public:
                     setListenContainerChange(true);
                     if (eat) RE::ActorEquipManager::GetSingleton()->EquipObject(RE::PlayerCharacter::GetSingleton(), bound_,
                                                                            nullptr, count);
+                    const int count_diff = st_inst.count - count;
+                    if (count_diff > 0 && npc_ref && npc_ref->HasContainer()) {
+                        logger::trace("HandlePickUp: Adding the rest {} to the npc container.", count_diff);
+                        st_inst.count = count; // bcs of NPCs..
+                        RemoveItemReverse(npc_ref, nullptr, formid, count_diff, RE::ITEM_REMOVE_REASON::kRemove);
+                        npc_ref->AddObjectToContainer(bound_, nullptr, count_diff, nullptr);
+                        source->data.emplace_back(st_inst.start_time, st_inst.no, count_diff, npc_ref->GetFormID());
+				    }
                 }
-                return;
+                break;
 			}
 		}
+		source->CleanUpData();
     }
 
     void HandleConsume(const FormID fake_formid, Count count) {
@@ -698,45 +708,57 @@ public:
         return ExternalContainerIsRegistered(fake_id,refid);
     }
 
+    [[nodiscard]] const bool IsExternalContainer(RE::TESObjectREFR* external_ref) {
+        if (!external_ref) return false;
+        if (!external_ref->HasContainer()) return false;
+        for (const auto& src : sources) {
+			for (const auto& st_inst : src.data) {
+				if (st_inst.location == external_ref->GetFormID()) return true;
+			}
+		}
+        return false;
+    }
+
     void LinkExternalContainer(const FormID formid, Count item_count, const RefID externalcontainer) {
+        ENABLE_IF_NOT_UNINSTALLED
+        const auto external_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(externalcontainer);
+        if (!external_ref) return RaiseMngrErr("External ref is null.");
+        if (!external_ref->HasContainer()) {
+            logger::error("External container does not have a container.");
+            return;
+        }
 
-         if (!RE::TESForm::LookupByID<RE::TESObjectREFR>(externalcontainer)->HasContainer()) {
-             logger::warn("External container does not have a container.");
-             return;
-         }
+        logger::trace("Linking external container.");
+        const auto source = GetStageSource(formid);
+        if (!source) return RaiseMngrErr("Source not found.");
+        int stage_no = -1;
+        for (const auto& [st_no, stage] : source->stages) {
+            if (stage.formid == formid) {
+                stage_no = st_no;
+                break;
+            }
+        }
+        if (stage_no == -1) return RaiseMngrErr("LinkExternalContainer: Stage not found.");
+        std::vector<StageInstance*> instances_candidates;
+        for (auto& st_inst : source->data) {
+            if (static_cast<int>(st_inst.no) != stage_no) continue;
+            if (st_inst.location == 20) instances_candidates.push_back(&st_inst);
+        }
+        // need to now order the instances_candidates by their start_time
+        std::sort(instances_candidates.begin(), instances_candidates.end(),
+                [](StageInstance* a, StageInstance* b) { return a->start_time > b->start_time; });
 
-         logger::trace("Linking external container.");
-         const auto external_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(externalcontainer);
-         if (!external_ref) return RaiseMngrErr("External ref is null.");
-         const auto source = GetStageSource(formid);
-         if (!source) return RaiseMngrErr("Source not found.");
-         int stage_no = -1;
-         for (const auto& [st_no, stage] : source->stages) {
-             if (stage.formid == formid) {
-                 stage_no = st_no;
-                 break;
-             }
-         }
-         if (stage_no == -1) return RaiseMngrErr("HandleDrop: Stage not found.");
-         std::vector<StageInstance*> instances_candidates;
-         for (auto& st_inst : source->data) {
-             if (static_cast<int>(st_inst.no) != stage_no) continue;
-             if (st_inst.location == 20) instances_candidates.push_back(&st_inst);
-         }
-         // need to now order the instances_candidates by their start_time
-         std::sort(instances_candidates.begin(), instances_candidates.end(),
-                   [](StageInstance* a, StageInstance* b) { return a->start_time > b->start_time; });
-
-         for (const auto& instance : instances_candidates) {
-             if (item_count <= instance->count) {
-                 instance->count -= item_count;
-                 source->data.emplace_back(instance->start_time, instance->no, item_count, externalcontainer);
-                 return;
-             } else {
-                 item_count -= instance->count;
-                 instance->location = externalcontainer;
-             }
-         }
+        for (const auto& instance : instances_candidates) {
+            if (item_count <= instance->count) {
+                instance->count -= item_count;
+                source->data.emplace_back(instance->start_time, instance->no, item_count, externalcontainer);
+                logger::trace("Linked external container.");
+                break;
+            } else {
+                item_count -= instance->count;
+                instance->location = externalcontainer;
+            }
+        }
 
         source->CleanUpData();
         // Stage new_stage(formid, item_count, externalcontainer);
@@ -752,8 +774,6 @@ public:
         //     logger::trace("Faved item successfully transferred to external container.");
         //     external_favs.push_back(fakecontainer);
         // }
-
-
     }
 
     void UnLinkExternalContainer(const FormID fake_formid, Count count,const RefID externalcontainer) { 
