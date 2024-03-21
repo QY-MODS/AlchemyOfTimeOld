@@ -6,7 +6,6 @@
 class Manager {
     
     RE::TESObjectREFR* player_ref = RE::PlayerCharacter::GetSingleton()->As<RE::TESObjectREFR>();
-    const RefID player_refid = 20;
     RE::EffectSetting* empty_mgeff;
     
     
@@ -80,9 +79,9 @@ class Manager {
     };
     
 
-    [[nodiscard]] const bool ExternalContainerIsRegistered(const FormID fake_formid,
+    [[nodiscard]] const bool ExternalContainerIsRegistered(const FormID stage_formid,
                                                            const RefID external_container_id) {
-        const auto src = GetStageSource(fake_formid);
+        const auto src = GetStageSource(stage_formid);
         if (!src) return false;
         for (const auto& st_inst: src->data) {
             if (st_inst.location == external_container_id) return true;
@@ -401,16 +400,16 @@ public:
         return IsItem(base->GetFormID());
     }
 
-    [[nodiscard]] const bool IsFake(const RE::TESObjectREFR* ref) {
+    [[nodiscard]] const bool IsStage(const RE::TESObjectREFR* ref) {
         if (!ref) return false;
         const auto base = ref->GetBaseObject();
         if (!base) return false;
         const auto formid = base->GetFormID();
         if (!IsItem(formid)) return false;
-        return IsFake(formid);
+        return IsStage(formid);
     }
 
-	[[nodiscard]] const bool IsFake(const FormID formid) {
+	[[nodiscard]] const bool IsStage(const FormID formid) {
         if (!IsItem(formid)) {
             logger::trace("Not an item.");
             return false;
@@ -491,7 +490,7 @@ public:
         ENABLE_IF_NOT_UNINSTALLED
         logger::trace("HandleDrop: fakeformid {} , Count {}", fakeformid, count);
         if (!ref) return RaiseMngrErr("Ref is null.");
-        if (!IsFake(fakeformid)) {
+        if (!IsStage(fakeformid)) {
             logger::warn("HandleDrop: Not a fake item.");
             return;
         }
@@ -579,31 +578,35 @@ public:
         source->CleanUpData();
     }
 
-    void HandlePickUp(const FormID formid, const Count count, const RefID refid, const bool eat, RE::TESObjectREFR* npc_ref = nullptr) {
+    void HandlePickUp(const FormID formid, const Count count, const RefID wo_refid, const bool eat, RE::TESObjectREFR* npc_ref = nullptr) {
         ENABLE_IF_NOT_UNINSTALLED
-        logger::info("HandlePickUp: Formid {} , Count {} , Refid {}", formid, count, refid);
+        logger::info("HandlePickUp: Formid {} , Count {} , world object Refid {}", formid, count, wo_refid);
         if (!IsItem(formid)) {
             logger::warn("HandlePickUp: Not Item.");
             return;
         }
-        if (!RefIsRegistered(refid)) {
+        if (!RefIsRegistered(wo_refid)) {
             if (worldobjectsspoil){
                 // bcs it shoulda been registered already before picking up
-                logger::warn("HandlePickUp: Not registered refid: {}, formid: {}", refid, formid);
+                logger::warn("HandlePickUp: Not registered world object refid: {}, formid: {}", wo_refid, formid);
+                return;
+            } else if (npc_ref != nullptr) {
+                logger::warn("If npc_ref is given, the world object refid should be registered!");
                 return;
             }
-            return Register(formid,count,20);
+            return Register(formid,count,player_refid);
         }
         // so it was registered before
-        auto source = GetSource(formid);
+        auto source = GetSource(formid); // if the stage is represented by a fake, then ouside object is real
         if (!source) source = GetStageSource(formid);
         if (!source) return RaiseMngrErr("Source not found.");
         for (auto& st_inst: source->data) {
-			if (st_inst.location == refid) {
-                st_inst.location = 20;
+            if (st_inst.location == wo_refid) {
+                st_inst.location = player_refid;
+                // if it needs to be replaced by a created form
                 if (Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages, st_inst.no)) {
                     // try to replace it with fake form
-                    RemoveItemReverse(player_ref,nullptr,formid,count,RE::ITEM_REMOVE_REASON::kRemove);
+                    RemoveItemReverse(player_ref, nullptr, formid, count, RE::ITEM_REMOVE_REASON::kRemove);
                     setListenContainerChange(false);
                     auto bound_ = RE::TESForm::LookupByID<RE::TESBoundObject>(source->stages[st_inst.no].formid);
                     player_ref->AddObjectToContainer(bound_, nullptr,
@@ -630,7 +633,7 @@ public:
     void HandleConsume(const FormID fake_formid, Count count) {
         ENABLE_IF_NOT_UNINSTALLED
         logger::trace("HandleConsume");
-        if (!IsFake(fake_formid)) {
+        if (!IsStage(fake_formid)) {
             logger::warn("HandleConsume: Not a fake item.");
             return;
         }
@@ -776,6 +779,54 @@ public:
         // }
     }
 
+  //  void LinkExternalContainer(const FormID formid, Count item_count, const RefID externalcontainer,
+  //                             const RefID item_refid) {
+  //      ENABLE_IF_NOT_UNINSTALLED
+  //      const auto external_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(externalcontainer);
+  //      if (!external_ref) return RaiseMngrErr("External ref is null.");
+  //      if (!external_ref->HasContainer()) {
+  //          logger::error("External container does not have a container.");
+  //          return;
+  //      }
+
+  //      logger::trace("Linking external container.");
+  //      // get ref source
+  //      Source* source = nullptr;
+  //      for (auto& src : sources) {
+  //          for (auto& instance : src.data) {
+  //              if (instance.location == item_refid) {
+		//			source = &src;
+		//			break;
+		//		}
+  //          }
+		//}
+  //      if (!source) return RaiseMngrErr("Source not found.");
+  //      const auto instances_candidates = GetRefSourceData(item_refid);
+  //      // need to now order the instances_candidates by their start_time
+  //      std::sort(instances_candidates.begin(), instances_candidates.end(),
+  //                [](StageInstance* a, StageInstance* b) { return a->start_time > b->start_time; });
+
+  //      for (const auto& instance : instances_candidates) {
+  //          if (item_count <= instance->count) {
+  //              instance->count -= item_count;
+  //              source->data.emplace_back(instance->start_time, instance->no, item_count, externalcontainer);
+  //              logger::trace("Linked external container.");
+  //              break;
+  //          } else {
+  //              item_count -= instance->count;
+  //              instance->location = externalcontainer;
+  //          }
+  //      }
+
+  //      source->CleanUpData();
+  //      // Stage new_stage(formid, item_count, externalcontainer);
+  //      // SourceDataKey new_sourcedatakey()
+  //      // src->data[chest_refid] = externalcontainer;
+
+  //      // // add it to handled_external_conts
+  //      // //handled_external_conts.insert(externalcontainer);
+  //  }
+
     void UnLinkExternalContainer(const FormID fake_formid, Count count,const RefID externalcontainer) { 
         if (!externalcontainer) return RaiseMngrErr("External container is null.");
         if (!fake_formid) {
@@ -809,11 +860,11 @@ public:
         for (const auto& instance : instances_candidates) {
             if (count <= instance->count) {
                 instance->count -= count;
-                source->data.emplace_back(instance->start_time, instance->no, count, 20);
+                source->data.emplace_back(instance->start_time, instance->no, count, player_refid);
 				return;
 			} else {
                 count -= instance->count;
-				instance->location = 20;
+                instance->location = player_refid;
 			}
         }
         

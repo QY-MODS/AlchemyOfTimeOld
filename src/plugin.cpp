@@ -34,7 +34,7 @@ public:
          if (!event) return RE::BSEventNotifyControl::kContinue;
          if (!event->actor->IsPlayerRef()) return RE::BSEventNotifyControl::kContinue;
         
-         if (!M->IsFake(event->baseObject)) return RE::BSEventNotifyControl::kContinue;
+         if (!M->IsStage(event->baseObject)) return RE::BSEventNotifyControl::kContinue;
 
          fake_equipped_id = event->equipped ? event->baseObject : 0;
          logger::trace("Fake equipped: {}", fake_equipped_id);
@@ -60,7 +60,7 @@ public:
             if (auto base = event->objectActivated->GetBaseObject()) {
                 RE::BSString str;
                 base->GetActivateText(RE::PlayerCharacter::GetSingleton(), str);
-                if (Utilities::Functions::includesWord(str.c_str(), {"Eat"})) activate_eat = true;
+                if (Utilities::Functions::includesWord(str.c_str(), {"Eat", "Drink"})) activate_eat = true;
             }
         }
             
@@ -79,12 +79,50 @@ public:
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->crosshairRef) return RE::BSEventNotifyControl::kContinue;
         if (!M->getListenCrosshair()) return RE::BSEventNotifyControl::kContinue;
+
+        logger::trace("NAME: {}", event->crosshairRef->GetName());
+        // extradata
+		for (auto& x : event->crosshairRef->extraList) {
+            logger::trace("ExtraData: {}", Utilities::ExtraDataTypeNames[static_cast<int>(x.GetType())]);
+		}
+
+        if (event->crosshairRef->extraList.HasType(RE::ExtraDataType::kLinkedRef)) {
+            auto linked_ref = event->crosshairRef->extraList.GetByType<RE::ExtraLinkedRef>();
+            for (auto& ref : linked_ref->linkedRefs) {
+                if (ref.refr) {
+				    logger::trace("LinkedRef NAME: {}", ref.refr->GetName());
+				    logger::trace("LinkedRef ID: {}", ref.refr->GetFormID());
+                }
+                if (ref.keyword) logger::trace("LinkedRef KW: {}", ref.keyword->GetName());
+			}
+        }
+        if (event->crosshairRef->extraList.HasType(RE::ExtraDataType::kMissingLinkedRefIDs)) {
+            auto linked_ref = event->crosshairRef->extraList.GetByType<RE::ExtraMissingLinkedRefIDs>();
+            for (auto& ref : linked_ref->entries) {
+                logger::trace("MissingLinkedRefID: {}", ref.linkedRefID);
+                if (auto refff = RE::TESForm::LookupByID(ref.linkedRefID))
+                    logger::trace("MissingLinkedRef Name 1: {}", refff->GetName());
+                else if (auto reff = RE::TESForm::LookupByID<RE::TESObjectREFR>(ref.linkedRefID))
+                    logger::trace("MissingLinkedRef Name 2: {}", reff->GetName());
+
+            }
+        }
+
+        if (event->crosshairRef->extraList.HasType(RE::ExtraDataType::kLastFinishedSequence)) {
+            auto last_finished_seq = event->crosshairRef->extraList.GetByType<RE::ExtraLastFinishedSequence>();
+            logger::trace("last_finished_seq->lastSequenceName: {}",last_finished_seq->lastSequenceName.c_str());
+        }
+
+        if (event->crosshairRef->extraList.GetOwner())
+            logger::trace("{}", event->crosshairRef->extraList.GetOwner()->GetName());
+
+        return RE::BSEventNotifyControl::kContinue;
         
 
-        // buraya external cont muhabbeti gelcek
         if (M->IsExternalContainer(event->crosshairRef.get())) M->UpdateSpoilage(event->crosshairRef.get());
 
         if (!M->IsItem(event->crosshairRef.get())) return RE::BSEventNotifyControl::kContinue;
+        
         
         if (!M->RefIsRegistered(event->crosshairRef->GetFormID())) {
             logger::trace("Item not registered.");
@@ -149,30 +187,58 @@ public:
         
         logger::trace("ListenContainerChange: {}",
                       M->getListenContainerChange());
-        if (!M->getListenContainerChange()) return RE::BSEventNotifyControl::kContinue;
         if (!event) return RE::BSEventNotifyControl::kContinue;
+        logger::trace("Item count: {}", event->itemCount);
+        logger::trace("BaseObj: {}", event->baseObj);
+        logger::trace("OldContainer: {}", event->oldContainer);
+        logger::trace("NewContainer: {}", event->newContainer);
+        logger::trace("Reference: {}", Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(event->reference));
+        logger::trace("uniqueID: {}", event->uniqueID);
+        logger::trace("pad16: {}", event->pad16);
+
+        if (!M->getListenContainerChange()) return RE::BSEventNotifyControl::kContinue;
         if (!event->itemCount) return RE::BSEventNotifyControl::kContinue;
         if (!event->baseObj) return RE::BSEventNotifyControl::kContinue;
         if (!M->IsItem(event->baseObj)) return RE::BSEventNotifyControl::kContinue;
+
+   //     if (M->RefIsRegistered(event->reference.native_handle()) && event->newContainer) {
+   //         auto external_ref = RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->newContainer);
+   //         if (external_ref && external_ref->HasContainer()) {
+   //             M->HandlePickUp(event->baseObj, event->itemCount, event->reference.native_handle(),false,external_ref);
+   //         }
+			//else logger::trace("ExternalRef not found.");
+   //     }
+   //     else if (event->reference.get() && M->RefIsRegistered(event->reference.get()->GetFormID()) && event->newContainer) {
+   //         logger::trace("Ref id: {}", event->reference.get()->GetFormID());
+   //         auto external_ref = RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->newContainer);
+   //         if (external_ref && external_ref->HasContainer()) {
+   //             logger::trace("ExternalRef: {}", external_ref->GetFormID());
+   //             M->LinkExternalContainer(event->baseObj, event->itemCount, event->newContainer,
+   //                                      event->reference.get()->GetFormID());
+   //         } else logger::trace("ExternalRef not found.");
+   //     }
         
-        if (event->oldContainer != 20 && event->newContainer != 20) return RE::BSEventNotifyControl::kContinue;
+        if (event->oldContainer != player_refid && event->newContainer != player_refid)
+            return RE::BSEventNotifyControl::kContinue;
         
         logger::trace("Container change event.");
-        logger::trace("IsFake: {}", M->IsFake(event->baseObj));
+        logger::trace("IsStage: {}", M->IsStage(event->baseObj));
 
         // to player inventory <-
-        if (event->newContainer == 20) {
+        if (event->newContainer == player_refid) {
             logger::trace("Item entered player inventory.");
             if (M->IsExternalContainer(event->baseObj,event->oldContainer)) {
                 M->UnLinkExternalContainer(event->baseObj,event->itemCount,event->oldContainer);
             }
             else if (!event->oldContainer) {
-                auto reference_ = event->reference;
-                logger::trace("Reference: {}", reference_.native_handle());
-                auto ref_ = RE::TESObjectREFR::LookupByHandle(reference_.native_handle()).get();
-                if (!ref_) {
-                    logger::info("Could not find reference for handle {}", reference_.native_handle());
-                    ref_ = reference_.get().get();
+                if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME) && !M->IsStage(event->baseObj)) {
+                    logger::info("Bought new item.");
+                    M->Register(event->baseObj, event->itemCount, player_refid);
+                } 
+                else {
+                    auto reference_ = event->reference;
+                    logger::trace("Reference: {}", reference_.native_handle());
+                    auto ref_ = Utilities::FunctionsSkyrim::TryToGetRefFromHandle(reference_);
                     if (!ref_) {
                         logger::info("Could not find reference");
                         ref_ = RE::TESForm::LookupByID<RE::TESObjectREFR>(picked_up_refid);
@@ -182,39 +248,37 @@ public:
                         if (!ref_) {
                             logger::error("Could not find reference with RefID {}", picked_up_refid);
                             return RE::BSEventNotifyControl::kContinue;
-                        } else {
+                        } 
+                        else {
                             logger::trace("PickedUp: {}", ref_->GetName());
                             picked_up_refid = 0;
                             picked_up_time = 0;
                         }
                     }
                     else logger::trace("Reference found: {}", ref_->GetFormID());
+                    M->HandlePickUp(event->baseObj,event->itemCount,ref_->GetFormID(),activate_eat);
+                    activate_eat = false;
                 }
-                else logger::trace("Reference found by handle: {}", ref_->GetFormID());
-                M->HandlePickUp(event->baseObj,event->itemCount,ref_->GetFormID(),activate_eat);
-                activate_eat = false;
+            }
+            // NPC: you dropped this...
+            else if (auto ref_id__ = Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(event->reference)) {
+                logger::trace("Reference handle refid: {}", ref_id__);
+                if (auto npc_ref = RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->oldContainer)) {
+                    M->HandlePickUp(event->baseObj, event->itemCount, ref_id__, false, npc_ref);
+                } //else M->HandlePickUp(event->baseObj, event->itemCount, ref_id__, false);
+            } 
+            else if (!M->IsStage(event->baseObj)) {
+                M->Register(event->baseObj, event->itemCount, player_refid);
             }
             else {
-                // NPC: you dropped this...
-                auto reference_ = event->reference;
-                if (!reference_) {
-                    Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported behaviour.");
-                    logger::error("Unsupported!");
-                } else if (!reference_.native_handle()) {
-                    Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported behaviour.");
-                    logger::error("Unsupported!");
-                } else {
-                    logger::trace("Reference handle: {}", reference_.native_handle());
-                    if (auto npc_ref = RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->oldContainer)) {
-                        M->HandlePickUp(event->baseObj, event->itemCount, reference_.native_handle(), false, npc_ref);
-                    } else M->HandlePickUp(event->baseObj, event->itemCount, reference_.native_handle(), false);
-                }
-            }   
+                Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported!");
+				logger::error("Unsupported!");
+            }
             return RE::BSEventNotifyControl::kContinue;
         }
 
         // from player inventory ->
-        if (event->oldContainer == 20 && M->IsFake(event->baseObj)) {
+        if (event->oldContainer == 20 && M->IsStage(event->baseObj)) {
             // a fake container left player inventory
             logger::trace("Fake container left player inventory.");
             // drop event
@@ -283,11 +347,11 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         // EventSink
         auto* eventSink = OurEventSink::GetSingleton();
         auto* eventSourceHolder = RE::ScriptEventSourceHolder::GetSingleton();
-        eventSourceHolder->AddEventSink<RE::TESEquipEvent>(eventSink);
-        eventSourceHolder->AddEventSink<RE::TESActivateEvent>(eventSink);
-        eventSourceHolder->AddEventSink<RE::TESContainerChangedEvent>(eventSink);
+        //eventSourceHolder->AddEventSink<RE::TESEquipEvent>(eventSink);
+        //eventSourceHolder->AddEventSink<RE::TESActivateEvent>(eventSink);
+        //eventSourceHolder->AddEventSink<RE::TESContainerChangedEvent>(eventSink);
          //eventSourceHolder->AddEventSink<RE::TESFurnitureEvent>(eventSink);
-        RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(OurEventSink::GetSingleton());
+        //RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(OurEventSink::GetSingleton());
         // RE::BSInputDeviceManager::GetSingleton()->AddEventSink(eventSink);
         SKSE::GetCrosshairRefEventSource()->AddEventSink(eventSink);
     }
