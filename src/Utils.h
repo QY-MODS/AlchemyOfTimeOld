@@ -563,6 +563,31 @@ namespace Utilities{
             return newPropRef;
         }
 
+        RE::TESObjectREFR* TryToGetRefFromHandle(RE::ObjectRefHandle handle) {
+            RE::TESObjectREFR* ref = nullptr;
+            if (!handle) {
+				logger::warn("Handle is null");
+				return nullptr;
+			}
+            if (!handle.native_handle() && handle.get()) {
+                logger::warn("Handle native handle is null");
+                ref = handle.get().get();
+            }
+            else if (auto handle_ref = RE::TESObjectREFR::LookupByHandle(handle.native_handle())) {
+                ref = handle_ref.get();
+                if (!ref && handle.get()) ref = handle.get().get();
+            }
+            return ref;
+		}
+
+        Types::RefID TryToGetRefIDFromHandle(RE::ObjectRefHandle handle) {
+            if (handle.native_handle() && 
+                RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(handle.native_handle())) {
+                return handle.native_handle();
+            }
+            if (handle.get()) return handle.get()->GetFormID();
+            return 0;
+        }
     };
     
     namespace FunctionsPapyrus {

@@ -610,9 +610,10 @@ public:
         source->CleanUpData();
     }
 
-    void HandlePickUp(const FormID formid, const Count count, const RefID refid, const bool eat, RE::TESObjectREFR* npc_ref = nullptr) {
+    void HandlePickUp(const FormID formid, const Count count, const RefID wo_refid, const bool eat,
+                      RE::TESObjectREFR* npc_ref = nullptr) {
         ENABLE_IF_NOT_UNINSTALLED
-        logger::info("HandlePickUp: Formid {} , Count {} , Refid {}", formid, count, refid);
+        logger::info("HandlePickUp: Formid {} , Count {} , Refid {}", formid, count, wo_refid);
         if (!IsItem(formid)) {
             logger::warn("HandlePickUp: Not Item.");
             return;
