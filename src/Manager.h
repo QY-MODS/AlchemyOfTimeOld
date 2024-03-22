@@ -91,17 +91,25 @@ class Manager {
     }
 
     void UpdateSpoilageInInventory(RE::TESObjectREFR* inventory_owner, Count update_count, FormID old_item, FormID new_item){
+        if (new_item == old_item) return;
         if (!inventory_owner) return RaiseMngrErr("Inventory owner is null.");
-        logger::trace("Updating spoilage in inventory. Count {} , Old item {} , New item {}", update_count, old_item, new_item);
+        logger::trace("Updating spoilage in inventory of {} Count {} , Old item {} , New item {}",
+                      inventory_owner->GetName(),
+                      update_count, old_item, new_item);
 
-        setListenContainerChange(false);
         auto inventory = inventory_owner->GetInventory();
         auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
+        /*if (entry != inventory.end() && entry->second.second->extraLists && entry->second.second->extraLists->front()) {
+			AddItem(inventory_owner, nullptr, new_item, update_count, entry->second.second->extraLists->front());
+		} 
+        else AddItem(inventory_owner, nullptr, new_item, update_count);*/
         if (entry == inventory.end()) logger::error("Item not found in inventory.");
-        else inventory_owner->RemoveItem(entry->first, std::min(update_count,entry->second.first), RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
-        inventory_owner->AddObjectToContainer(RE::TESForm::LookupByID<RE::TESBoundObject>(new_item), nullptr, update_count, nullptr);
+        else {
+            RemoveItemReverse(inventory_owner, nullptr, old_item, std::min(update_count, entry->second.first),
+                              RE::ITEM_REMOVE_REASON::kRemove);
+        }
+        AddItem(inventory_owner, nullptr, new_item, update_count);
         logger::trace("Spoilage updated in inventory.");
-        setListenContainerChange(true);
     }
 
     void UpdateSpoilageInWorld(RE::TESObjectREFR* ref, const FormID stage_formid, const bool is_fake_stage) {
@@ -182,8 +190,17 @@ class Manager {
                 if (!inv_data) RaiseMngrErr("Item data is null");
                 auto asd = inv_data->extraLists;
                 if (!asd || asd->empty()) {
+                    logger::trace("Removing item reverse without extra data.");
                     ref_handle = moveFrom->RemoveItem(item_obj, count, reason, nullptr, moveTo);
                 } else {
+                    /*logger::trace("Removing item reverse with extra data.");
+                    for (auto& extra : *asd) {
+						if (extra->HasType(RE::ExtraDataType::kOwnership)) {
+                            logger::trace("Removing item reverse with ownership.");
+						} else {
+							logger::trace("Removing item reverse without ownership.");
+						}
+					}*/
                     ref_handle = moveFrom->RemoveItem(item_obj, count, reason, asd->front(), moveTo);
                 }
                 setListenContainerChange(true);
@@ -192,6 +209,20 @@ class Manager {
         }
         setListenContainerChange(true);
         return ref_handle;
+    }
+
+    void AddItem(RE::TESObjectREFR* addTo, RE::TESObjectREFR* addFrom, FormID item_id,
+                                                Count count, RE::ExtraDataList* xList=nullptr) {
+        logger::trace("AddItem");
+        //xList = nullptr;
+        if (!addTo && !addFrom) return RaiseMngrErr("moveFrom and moveTo are both null!");
+        
+        logger::trace("Adding item.");
+
+        setListenContainerChange(false);
+        auto bound = RE::TESForm::LookupByID<RE::TESBoundObject>(item_id);
+        addTo->AddObjectToContainer(bound, xList, count, addFrom);
+        setListenContainerChange(true);
     }
 
     [[nodiscard]] const bool PickUpItem(RE::TESObjectREFR* item, Count count,const unsigned int max_try = 3) {
@@ -513,7 +544,7 @@ public:
         std::vector<StageInstance*> instances_candidates;
         for (auto& st_inst : source->data) {
             if (static_cast<int>(st_inst.no) != stage_no) continue;
-            if (st_inst.location == 20) instances_candidates.push_back(&st_inst);
+            if (st_inst.location == player_refid) instances_candidates.push_back(&st_inst);
 		}
         // need to now order the instances_candidates by their start_time
         std::sort(instances_candidates.begin(), instances_candidates.end(), [](StageInstance* a, StageInstance* b) {
@@ -586,6 +617,7 @@ public:
             logger::warn("HandlePickUp: Not Item.");
             return;
         }
+<<<<<<< Updated upstream
         if (!RefIsRegistered(refid)) {
             if (worldobjectsspoil){
                 // bcs it shoulda been registered already before picking up
@@ -593,12 +625,26 @@ public:
                 return;
             }
             return Register(formid,count,20);
+=======
+        const RefID npc_refid = npc_ref ? npc_ref->GetFormID() : player_refid;
+        npc_ref = npc_ref ? npc_ref : player_ref; // for the sake of functionality
+        if (!RefIsRegistered(wo_refid)) {
+            if (worldobjectsspoil){
+                // bcs it shoulda been registered already before picking up
+                logger::warn("HandlePickUp: Not registered world object refid: {}, formid: {}", wo_refid, formid);
+            } /*else if (npc_ref != nullptr) {
+                logger::warn("If npc_ref is given, the world object refid should be registered!");
+                return;
+            }*/
+            return Register(formid, count, npc_refid);
+>>>>>>> Stashed changes
         }
         // so it was registered before
         auto source = GetSource(formid);
         if (!source) source = GetStageSource(formid);
-        if (!source) return RaiseMngrErr("Source not found.");
+        if (!source) return RaiseMngrErr("HandlePickUp: Source not found.");
         for (auto& st_inst: source->data) {
+<<<<<<< Updated upstream
 			if (st_inst.location == refid) {
                 st_inst.location = 20;
                 if (Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages, st_inst.no)) {
@@ -620,6 +666,25 @@ public:
                         npc_ref->AddObjectToContainer(bound_, nullptr, count_diff, nullptr);
                         source->data.emplace_back(st_inst.start_time, st_inst.no, count_diff, npc_ref->GetFormID());
 				    }
+=======
+            if (st_inst.location == wo_refid) {
+                st_inst.location = npc_refid;
+                // if it needs to be replaced by a created form
+                if (Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages, st_inst.no)) {
+                    // try to replace it with fake form
+                    auto new_f = source->stages[st_inst.no].formid;
+                    UpdateSpoilageInInventory(npc_ref, count, formid, new_f);
+                    if (eat && npc_refid == player_refid) RE::ActorEquipManager::GetSingleton()->EquipObject(RE::PlayerCharacter::GetSingleton(), 
+                        RE::TESForm::LookupByID<RE::TESBoundObject>(new_f), nullptr,count);
+        //            const int count_diff = st_inst.count - count;
+        //            if (count_diff > 0 && npc_ref && npc_ref->HasContainer()) {
+        //                logger::trace("HandlePickUp: Adding the rest {} to the npc container.", count_diff);
+        //                st_inst.count = count; // bcs of NPCs..
+        //                RemoveItemReverse(npc_ref, nullptr, formid, count_diff, RE::ITEM_REMOVE_REASON::kRemove);
+        //                AddItem(npc_ref, nullptr, source->stages[st_inst.no].formid, count_diff);
+        //                source->data.emplace_back(st_inst.start_time, st_inst.no, count_diff, npc_ref->GetFormID());
+				    //}
+>>>>>>> Stashed changes
                 }
                 break;
 			}
@@ -698,8 +763,6 @@ public:
         logger::trace("HandleConsume: updated.");
     }
 
-    void HandleSell(){}
-
     [[nodiscard]] const bool IsExternalContainer(FormID fake_id,RefID refid){
         if (!refid) return false;
         auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(refid);
@@ -730,7 +793,7 @@ public:
 
         logger::trace("Linking external container.");
         const auto source = GetStageSource(formid);
-        if (!source) return RaiseMngrErr("Source not found.");
+        if (!source) return RaiseMngrErr("LinkExternalContainer: Source not found.");
         int stage_no = -1;
         for (const auto& [st_no, stage] : source->stages) {
             if (stage.formid == formid) {
@@ -788,7 +851,7 @@ public:
         }
 
         auto source = GetStageSource(fake_formid);
-        if (!source) return RaiseMngrErr("Source not found.");
+        if (!source) return RaiseMngrErr("UnLinkExternalContainer: Source not found.");
         int stage_no = -1;
         for (const auto& [st_no, stage] : source->stages) {
 			if (stage.formid == fake_formid) {
@@ -897,6 +960,36 @@ public:
         return true;
     }
 
+    void SwapWithStage(RE::TESObjectREFR* wo_ref, RE::TESObjectREFR* activator=nullptr) {
+        if (!wo_ref) return RaiseMngrErr("Ref is null.");
+        if (!IsItem(wo_ref)) return;
+        if (IsStage(wo_ref)) return;
+        const auto wo_refid = wo_ref->GetFormID();
+        const auto formid = wo_ref->GetBaseObject()->GetFormID();
+        const auto activator_refid = activator ? activator->GetFormID() : player_refid;
+        activator = activator ? activator : player_ref;
+        if (!RefIsRegistered(wo_ref->GetFormID())) {
+            if (worldobjectsspoil) {
+                // bcs it shoulda been registered already before picking up
+                logger::warn("SwapWithStage: Not registered world object refid: {}, formid: {}", wo_refid, formid);
+            }
+            Register(formid, wo_ref->extraList.GetCount(), activator_refid);
+            auto source = GetSource(formid);
+            if (Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages,0)) wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
+            wo_ref->SetObjectReference(RE::TESForm::LookupByID<RE::TESBoundObject>(source->stages[0].formid));
+            return;
+		}
+        auto source = GetSource(formid);
+        if (!source) return RaiseMngrErr("Source not found.");
+        for (auto& st_inst : source->data) {
+            if (st_inst.location == wo_ref->GetFormID()) {
+                if (Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages, st_inst.no))
+                    wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
+				wo_ref->SetObjectReference(RE::TESForm::LookupByID<RE::TESBoundObject>(source->stages[st_inst.no].formid));
+				return;
+			}
+		}
+    }
 
     //void ReceiveData() {
     //    logger::info("--------Receiving data---------");

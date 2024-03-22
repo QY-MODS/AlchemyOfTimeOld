@@ -352,6 +352,16 @@ namespace Utilities{
             }
         };
 
+        void RefreshMenu(const std::string_view menuname) {
+            if (auto ui = RE::UI::GetSingleton()) {
+                if (!ui->IsMenuOpen(menuname)) return;
+            }
+            if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
+                queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kHide, nullptr);
+                queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kShow, nullptr);
+            }
+		}
+
 	    // https:// github.com/Exit-9B/Dont-Eat-Spell-Tomes/blob/7b7f97353cc6e7ccfad813661f39710b46d82972/src/SpellTomeManager.cpp#L23-L32
         template <typename T>
         RE::TESObjectREFR* GetMenuOwner() {
@@ -374,6 +384,37 @@ namespace Utilities{
             }
             return reference;
 	    }
+
+        RE::TESObjectREFR* GetContainerFromMenu() {
+            if (auto ui_refid = RE::UI::GetSingleton()->GetMenu<RE::ContainerMenu>()->GetTargetRefHandle()) {
+                logger::trace("UI Reference id {}", ui_refid);
+                if (auto ui_ref = RE::TESObjectREFR::LookupByHandle(ui_refid)) {
+                    logger::trace("UI Reference name {}", ui_ref->GetDisplayFullName());
+                    return ui_ref.get();
+                }
+            }
+            return nullptr;
+        }
+
+        RE::TESObjectREFR* GetVendorChestFromMenu(){
+            if (auto ui_refid = RE::UI::GetSingleton()->GetMenu<RE::BarterMenu>()->GetTargetRefHandle()) {
+                logger::trace("UI Reference id {}", ui_refid);
+                if (auto ui_ref = RE::TESObjectREFR::LookupByHandle(ui_refid)) {
+                    logger::trace("UI Reference name {}", ui_ref->GetDisplayFullName());
+                    if (auto barter_npc = ui_ref->GetBaseObject()->As<RE::TESNPC>()) {
+                        for (auto& faction_rank : barter_npc->factions) {
+                            if (auto merchant_chest = faction_rank.faction->vendorData.merchantContainer) {
+                                logger::trace("Found chest with refid {}", merchant_chest->GetFormID());
+                                return merchant_chest;
+                            }
+                        };
+                    }
+                }
+            }
+            return nullptr;
+        }
+
+
 
         // credits to Qudix on xSE RE Discord for this
         void OpenContainer(RE::TESObjectREFR* a_this, std::uint32_t a_openType) {

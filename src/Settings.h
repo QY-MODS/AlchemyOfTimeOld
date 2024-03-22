@@ -214,8 +214,9 @@ struct Source {
         //make sure the keys in stages are 0 to length-1 with increment 1
         if (stages.size() == 0) {
             // get stages
-            GatherSpoilageStages();
-        } 
+            if (formtype == RE::FormType::AlchemyItem) GatherSpoilageStages<RE::AlchemyItem>();
+			else if (formtype == RE::FormType::Ingredient) GatherSpoilageStages<RE::IngredientItem>();
+        }
         else {
             // check if formids exist in the game
             for (auto& [key, value] : stages) {
@@ -251,7 +252,7 @@ struct Source {
 		}
     };
 
-    // simdilik boyle sonra formidye ozel yapcam
+    template <typename T>
     void GatherSpoilageStages() {
         // for now use default stages
         if (!empty_mgeff) {
@@ -262,13 +263,13 @@ struct Source {
 
         for (auto i = 0; i < defaultsettings.numbers.size(); i++) {
             // create fake form
-            auto alch_item = GetBoundObject()->As<RE::AlchemyItem>();
+            auto alch_item = GetBoundObject()->As<T>();
             FormID fake_formid;
             if (!defaultsettings.items[i]) {
                 fake_formid = CreateFake(alch_item);
                 fake_stages.push_back(defaultsettings.numbers[i]);
             } else {
-                auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<RE::AlchemyItem>(defaultsettings.items[i], "");
+                auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<T>(defaultsettings.items[i], "");
                 fake_formid = fake_form ? fake_form->GetFormID() : 0;
             }
             if (!fake_formid) {
@@ -295,15 +296,20 @@ struct Source {
 				logger::error("Could not insert stage");
 				return;
 			}
-            // Update name of the fake form
-            auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<RE::AlchemyItem>(fake_formid, "");
-            if (fake_form) {
+
+            auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<T>(fake_formid);
+            if (!fake_form) {
+				logger::error("Fake form is null.");
+				return;
+			}
+            if (Utilities::Functions::VectorHasElement<StageNo>(fake_stages, i)) {
+                // Update name of the fake form
                 fake_form->fullName = std::string(fake_form->fullName.c_str()) + " (" + name + ")";
 				logger::info("Updated name of fake form to {}", name);
-            }
-            else {
-                logger::error("Fake form is null.");
-                return;
+                // Update value of the fake form
+                if (i == 1) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(fake_form, 1);
+                else if (i>1) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(fake_form, 0);
+                    
             }
 
             if (defaultsettings.effects[i].empty()) continue;
