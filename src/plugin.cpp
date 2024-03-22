@@ -34,7 +34,7 @@ public:
          if (!event) return RE::BSEventNotifyControl::kContinue;
          if (!event->actor->IsPlayerRef()) return RE::BSEventNotifyControl::kContinue;
         
-         if (!M->IsFake(event->baseObject)) return RE::BSEventNotifyControl::kContinue;
+         if (!M->IsStage(event->baseObject)) return RE::BSEventNotifyControl::kContinue;
 
          fake_equipped_id = event->equipped ? event->baseObject : 0;
          logger::trace("Fake equipped: {}", fake_equipped_id);
@@ -85,15 +85,6 @@ public:
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->crosshairRef) return RE::BSEventNotifyControl::kContinue;
         if (!M->getListenCrosshair()) return RE::BSEventNotifyControl::kContinue;
-<<<<<<< Updated upstream
-        
-
-        // buraya external cont muhabbeti gelcek
-        if (M->IsExternalContainer(event->crosshairRef.get())) M->UpdateSpoilage(event->crosshairRef.get());
-
-        if (!M->IsItem(event->crosshairRef.get())) return RE::BSEventNotifyControl::kContinue;
-        
-=======
 
         if (M->IsExternalContainer(event->crosshairRef.get())) M->UpdateSpoilage(event->crosshairRef.get());
 
@@ -119,7 +110,6 @@ public:
 			logger::trace("Position: {}", starting_pos->startPosition.pos.z);*/
         }
 
->>>>>>> Stashed changes
         if (!M->RefIsRegistered(event->crosshairRef->GetFormID())) {
             logger::trace("Item not registered.");
             M->RegisterWorldObject(event->crosshairRef.get());
@@ -186,8 +176,6 @@ public:
         if (!event->itemCount) return RE::BSEventNotifyControl::kContinue;
         if (!event->baseObj) return RE::BSEventNotifyControl::kContinue;
         if (!M->IsItem(event->baseObj)) return RE::BSEventNotifyControl::kContinue;
-<<<<<<< Updated upstream
-=======
 
         if (event->oldContainer != player_refid && event->newContainer != player_refid && event->reference &&
             M->RefIsRegistered(event->reference.native_handle()) && event->newContainer) {
@@ -206,12 +194,11 @@ public:
    //                                      event->reference.get()->GetFormID());
    //         } else logger::trace("ExternalRef not found.");
    //     }
->>>>>>> Stashed changes
         
         if (event->oldContainer != 20 && event->newContainer != 20) return RE::BSEventNotifyControl::kContinue;
         
         logger::trace("Container change event.");
-        logger::trace("IsFake: {}", M->IsFake(event->baseObj));
+        logger::trace("IsStage: {}", M->IsStage(event->baseObj));
 
         // to player inventory <-
         if (event->newContainer == 20) {
@@ -220,14 +207,6 @@ public:
                 M->UnLinkExternalContainer(event->baseObj,event->itemCount,event->oldContainer);
             }
             else if (!event->oldContainer) {
-<<<<<<< Updated upstream
-                auto reference_ = event->reference;
-                logger::trace("Reference: {}", reference_.native_handle());
-                auto ref_ = RE::TESObjectREFR::LookupByHandle(reference_.native_handle()).get();
-                if (!ref_) {
-                    logger::info("Could not find reference for handle {}", reference_.native_handle());
-                    ref_ = reference_.get().get();
-=======
                 if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)) {
                     if (M->IsStage(event->baseObj)) {
                         if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()) {
@@ -244,7 +223,6 @@ public:
                     auto reference_ = event->reference;
                     logger::trace("Reference: {}", reference_.native_handle());
                     auto ref_ = Utilities::FunctionsSkyrim::TryToGetRefFromHandle(reference_);
->>>>>>> Stashed changes
                     if (!ref_) {
                         logger::info("Could not find reference");
                         ref_ = RE::TESForm::LookupByID<RE::TESObjectREFR>(picked_up_refid);
@@ -262,28 +240,6 @@ public:
                     }
                     else logger::trace("Reference found: {}", ref_->GetFormID());
                 }
-<<<<<<< Updated upstream
-                else logger::trace("Reference found by handle: {}", ref_->GetFormID());
-                M->HandlePickUp(event->baseObj,event->itemCount,ref_->GetFormID(),activate_eat);
-                activate_eat = false;
-            }
-            else {
-                // NPC: you dropped this...
-                auto reference_ = event->reference;
-                if (!reference_) {
-                    Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported behaviour.");
-                    logger::error("Unsupported!");
-                } else if (!reference_.native_handle()) {
-                    Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported behaviour.");
-                    logger::error("Unsupported!");
-                } else {
-                    logger::trace("Reference handle: {}", reference_.native_handle());
-                    if (auto npc_ref = RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->oldContainer)) {
-                        M->HandlePickUp(event->baseObj, event->itemCount, reference_.native_handle(), false, npc_ref);
-                    } else M->HandlePickUp(event->baseObj, event->itemCount, reference_.native_handle(), false);
-                }
-            }   
-=======
             }
             else if (!M->IsStage(event->baseObj)) {
                 M->Register(event->baseObj, event->itemCount, player_refid);
@@ -302,13 +258,11 @@ public:
                 Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported!");
 #endif  // !NDEBUG
             }
-
->>>>>>> Stashed changes
             return RE::BSEventNotifyControl::kContinue;
         }
 
         // from player inventory ->
-        if (event->oldContainer == 20 && M->IsFake(event->baseObj)) {
+        if (event->oldContainer == 20 && M->IsStage(event->baseObj)) {
             // a fake container left player inventory
             logger::trace("Fake container left player inventory.");
             // drop event

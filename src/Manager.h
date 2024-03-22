@@ -432,16 +432,16 @@ public:
         return IsItem(base->GetFormID());
     }
 
-    [[nodiscard]] const bool IsFake(const RE::TESObjectREFR* ref) {
+    [[nodiscard]] const bool IsStage(const RE::TESObjectREFR* ref) {
         if (!ref) return false;
         const auto base = ref->GetBaseObject();
         if (!base) return false;
         const auto formid = base->GetFormID();
         if (!IsItem(formid)) return false;
-        return IsFake(formid);
+        return IsStage(formid);
     }
 
-	[[nodiscard]] const bool IsFake(const FormID formid) {
+	[[nodiscard]] const bool IsStage(const FormID formid) {
         if (!IsItem(formid)) {
             logger::trace("Not an item.");
             return false;
@@ -522,7 +522,7 @@ public:
         ENABLE_IF_NOT_UNINSTALLED
         logger::trace("HandleDrop: fakeformid {} , Count {}", fakeformid, count);
         if (!ref) return RaiseMngrErr("Ref is null.");
-        if (!IsFake(fakeformid)) {
+        if (!IsStage(fakeformid)) {
             logger::warn("HandleDrop: Not a fake item.");
             return;
         }
@@ -617,15 +617,6 @@ public:
             logger::warn("HandlePickUp: Not Item.");
             return;
         }
-<<<<<<< Updated upstream
-        if (!RefIsRegistered(refid)) {
-            if (worldobjectsspoil){
-                // bcs it shoulda been registered already before picking up
-                logger::warn("HandlePickUp: Not registered refid: {}, formid: {}", refid, formid);
-                return;
-            }
-            return Register(formid,count,20);
-=======
         const RefID npc_refid = npc_ref ? npc_ref->GetFormID() : player_refid;
         npc_ref = npc_ref ? npc_ref : player_ref; // for the sake of functionality
         if (!RefIsRegistered(wo_refid)) {
@@ -637,36 +628,12 @@ public:
                 return;
             }*/
             return Register(formid, count, npc_refid);
->>>>>>> Stashed changes
         }
         // so it was registered before
         auto source = GetSource(formid);
         if (!source) source = GetStageSource(formid);
         if (!source) return RaiseMngrErr("HandlePickUp: Source not found.");
         for (auto& st_inst: source->data) {
-<<<<<<< Updated upstream
-			if (st_inst.location == refid) {
-                st_inst.location = 20;
-                if (Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages, st_inst.no)) {
-                    // try to replace it with fake form
-                    RemoveItemReverse(player_ref,nullptr,formid,count,RE::ITEM_REMOVE_REASON::kRemove);
-                    setListenContainerChange(false);
-                    auto bound_ = RE::TESForm::LookupByID<RE::TESBoundObject>(source->stages[st_inst.no].formid);
-                    player_ref->AddObjectToContainer(bound_, nullptr,
-                                                     count,
-                                                     nullptr);
-                    setListenContainerChange(true);
-                    if (eat) RE::ActorEquipManager::GetSingleton()->EquipObject(RE::PlayerCharacter::GetSingleton(), bound_,
-                                                                           nullptr, count);
-                    const int count_diff = st_inst.count - count;
-                    if (count_diff > 0 && npc_ref && npc_ref->HasContainer()) {
-                        logger::trace("HandlePickUp: Adding the rest {} to the npc container.", count_diff);
-                        st_inst.count = count; // bcs of NPCs..
-                        RemoveItemReverse(npc_ref, nullptr, formid, count_diff, RE::ITEM_REMOVE_REASON::kRemove);
-                        npc_ref->AddObjectToContainer(bound_, nullptr, count_diff, nullptr);
-                        source->data.emplace_back(st_inst.start_time, st_inst.no, count_diff, npc_ref->GetFormID());
-				    }
-=======
             if (st_inst.location == wo_refid) {
                 st_inst.location = npc_refid;
                 // if it needs to be replaced by a created form
@@ -684,7 +651,6 @@ public:
         //                AddItem(npc_ref, nullptr, source->stages[st_inst.no].formid, count_diff);
         //                source->data.emplace_back(st_inst.start_time, st_inst.no, count_diff, npc_ref->GetFormID());
 				    //}
->>>>>>> Stashed changes
                 }
                 break;
 			}
@@ -695,7 +661,7 @@ public:
     void HandleConsume(const FormID fake_formid, Count count) {
         ENABLE_IF_NOT_UNINSTALLED
         logger::trace("HandleConsume");
-        if (!IsFake(fake_formid)) {
+        if (!IsStage(fake_formid)) {
             logger::warn("HandleConsume: Not a fake item.");
             return;
         }
