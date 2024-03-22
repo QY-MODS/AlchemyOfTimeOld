@@ -148,83 +148,6 @@ namespace Utilities{
         };
     };
 
-    namespace Types {
-
-        //using EditorID = std::string;
-        using NameID = std::string;
-        using FormID = RE::FormID;
-        using RefID = RE::FormID;
-        using Count = RE::TESObjectREFR::Count;
-        using Duration = std::uint32_t;
-        using StageNo = unsigned int;
-        using StageName = std::string;
-
-        struct StageEffect {
-            FormID beffect; // base effect
-            float magnitude; // in effectitem
-            std::uint32_t duration; // in effectitem
-
-            StageEffect() : beffect(0), magnitude(0), duration(0) {}
-            StageEffect(FormID be, float mag, Duration dur) : beffect(be), magnitude(mag), duration(dur) {}
-
-            [[nodiscard]] const bool IsNull() {return beffect == 0;}
-            [[nodiscard]] const bool HasMagnitude() { return magnitude == 0; }
-            [[nodiscard]] const bool HasDuration() { return duration == 0; }
-        };
-
-        struct Stage {
-            FormID formid=0; // with which item is it represented
-            Duration duration; // duration of the stage
-            StageNo no; // used for sorting when multiple stages are present
-            StageName name; // name of the stage
-            std::vector<StageEffect> mgeffect;
-            
-            Stage(){};
-            Stage(FormID f, Duration d, StageNo s, StageName n, std::vector<StageEffect> e)
-                : formid(f), duration(d) , no(s), name(n), mgeffect(e){
-                    if (!formid) logger::critical("FormID is null");
-                    else logger::trace("Stage: FormID {}, Duration {}, StageNo {}, Name {}", formid, duration, no, name);
-                    if (e.empty()) mgeffect.clear();
-                }
-
-            bool operator<(const Stage& other) const {
-                if (formid < other.formid) return true;
-                if (other.formid < formid) return false;
-                return no < other.no;
-            }
-
-            bool operator==(const Stage& other) const {
-                return no == other.no && formid == other.formid && duration == other.duration;
-            }
-        };
-
-        using Stages = std::vector<Stage>;
-        using StageDict = std::map<StageNo,Stage>;
-
-
-        struct StageInstance {
-            float start_time;
-            StageNo no;
-            Count count;
-            RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is out in the world
-
-            StageInstance() : start_time(0), no(0), count(0), location(0) {}
-            StageInstance(float st, StageNo n, Count c, RefID l) : start_time(st), no(n), count(c), location(l) {}
-		};
-
-        struct StageUpdate {
-			StageNo old_no;
-            StageNo new_no;
-			Count count;
-		};
-
-        
-        using SourceData = std::vector<StageInstance>;  // 
-        using SaveDataLHS = FormID;
-        using SaveDataRHS = StageInstance;
-
-    }
-
     namespace FunctionsSkyrim {
 
         RE::TESForm* GetFormByID(const RE::FormID& id, const std::string& editor_id="") {
@@ -281,9 +204,9 @@ namespace Utilities{
 
         bool IsFoodItem(RE::TESForm* form) {
             if (FormIsOfType(form,RE::AlchemyItem::FORMTYPE)){
-            RE::AlchemyItem* form_as_ = form->As<RE::AlchemyItem>();
-            if (!form_as_) return false;
-            if (!form_as_->IsFood()) return false;
+                RE::AlchemyItem* form_as_ = form->As<RE::AlchemyItem>();
+                if (!form_as_) return false;
+                if (!form_as_->IsFood()) return false;
             }
             else if (FormIsOfType(form,RE::IngredientItem::FORMTYPE)){
                 RE::IngredientItem* form_as_ = form->As<RE::IngredientItem>();
@@ -300,11 +223,11 @@ namespace Utilities{
             return true;
         }
 
-        bool IsFoodItem(const Types::FormID formid) {
+        bool IsFoodItem(const FormID formid) {
 			return IsFoodItem(GetFormByID(formid));
 		}
 
-        bool IsCONT(Types::RefID refid) {
+        bool IsCONT(RefID refid) {
             return RE::FormTypeToString(
                    RE::TESForm::LookupByID<RE::TESObjectREFR>(refid)->GetObjectReference()->GetFormType()) == "CONT";
         }
@@ -536,7 +459,7 @@ namespace Utilities{
         }
 
 
-        RE::TESObjectREFR* DropObjectIntoTheWorld(RE::TESBoundObject* obj, Types::Count count, RE::ExtraDataList*) {
+        RE::TESObjectREFR* DropObjectIntoTheWorld(RE::TESBoundObject* obj, Count count, RE::ExtraDataList*) {
             auto player_ch = RE::PlayerCharacter::GetSingleton();
             auto player_pos = player_ch->GetPosition();
             // distance in the xy-plane
@@ -563,29 +486,69 @@ namespace Utilities{
             return newPropRef;
         }
 
-        RE::TESObjectREFR* TryToGetRefFromHandle(RE::ObjectRefHandle handle) {
-            RE::TESObjectREFR* ref = nullptr;
-            if (!handle) {
-				logger::warn("Handle is null");
-				return nullptr;
+        void SwapObjects(RE::TESObjectREFR* a_from, RE::TESBoundObject* a_to, const bool apply_havok=true) {
+            if (!a_from) {
+                logger::error("Ref is null.");
+                return;
+            }
+            auto ref_base = a_from->GetBaseObject();
+            if (!ref_base) {
+                logger::error("Ref base is null.");
+				return;
+            }
+            if (ref_base->GetFormID() == a_to->GetFormID()) {
+				logger::warn("Ref and base are the same.");
+				return;
 			}
-            if (!handle.native_handle() && handle.get()) {
+            a_from->SetObjectReference(a_to);
+            if (!apply_havok) return;
+
+            /*float afX = 100;
+            float afY = 100;
+            float afZ = 100;
+            float afMagnitude = 100;*/
+            /*auto args = RE::MakeFunctionArguments(std::move(afX), std::move(afY), std::move(afZ),
+            std::move(afMagnitude)); vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);*/
+            // Looked up here (wSkeever): https:  // www.nexusmods.com/skyrimspecialedition/mods/73607
+            SKSE::GetTaskInterface()->AddTask([a_from]() {
+                // auto player_ch = RE::PlayerCharacter::GetSingleton();
+                // player_ch->StartGrabObject();
+                a_from->Disable();
+                a_from->Enable(false);
+                auto vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+                auto policy = vm->GetObjectHandlePolicy();
+                auto handle = policy->GetHandleForObject(a_from->GetFormType(), a_from);
+                RE::BSTSmartPointer<RE::BSScript::Object> object = nullptr;
+                vm->CreateObject2("ObjectReference", object);
+                vm->BindObject(object, handle, false);
+                if (!object)
+                    logger::warn("Object is null");
+                else
+                    logger::trace("FUSRODAH");
+                auto args = RE::MakeFunctionArguments(std::move(0.f), std::move(0.f), std::move(0.f), std::move(0.f));
+                RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
+                vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);
+            });
+        }
+
+        RE::TESObjectREFR* TryToGetRefFromHandle(RE::ObjectRefHandle& handle) {
+            if (auto handle_ref = RE::TESObjectREFR::LookupByHandle(handle.native_handle())) {
+                logger::trace("Handle ref found");
+                return handle_ref.get();
+                //if (!ref && handle.get()) ref = handle.get().get();
+            }
+            else if (handle.get()) {
                 logger::warn("Handle native handle is null");
-                ref = handle.get().get();
+                return handle.get().get();
             }
-            else if (auto handle_ref = RE::TESObjectREFR::LookupByHandle(handle.native_handle())) {
-                ref = handle_ref.get();
-                if (!ref && handle.get()) ref = handle.get().get();
-            }
-            return ref;
+            return nullptr;
 		}
 
-        Types::RefID TryToGetRefIDFromHandle(RE::ObjectRefHandle handle) {
-            if (handle.native_handle() && 
-                RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(handle.native_handle())) {
-                return handle.native_handle();
-            }
-            if (handle.get()) return handle.get()->GetFormID();
+        RefID TryToGetRefIDFromHandle(RE::ObjectRefHandle handle) {
+            if (handle.get() && handle.get()->GetFormID()) return handle.get()->GetFormID();
+            if (handle.native_handle()
+                //&& RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(handle.native_handle())
+                ) return handle.native_handle();
             return 0;
         }
     };
@@ -777,6 +740,92 @@ namespace Utilities{
 			return -1;
         }
     }
+
+    namespace Types {
+
+        // using EditorID = std::string;
+        using NameID = std::string;
+        using Duration = std::uint32_t;
+        using StageNo = unsigned int;
+        using StageName = std::string;
+
+        struct StageEffect {
+            FormID beffect;          // base effect
+            float magnitude;         // in effectitem
+            std::uint32_t duration;  // in effectitem
+
+            StageEffect() : beffect(0), magnitude(0), duration(0) {}
+            StageEffect(FormID be, float mag, Duration dur) : beffect(be), magnitude(mag), duration(dur) {}
+
+            [[nodiscard]] const bool IsNull() { return beffect == 0; }
+            [[nodiscard]] const bool HasMagnitude() { return magnitude != 0; }
+            [[nodiscard]] const bool HasDuration() { return duration != 0; }
+        };
+
+        struct Stage {
+            FormID formid = 0;  // with which item is it represented
+            Duration duration;  // duration of the stage
+            StageNo no;         // used for sorting when multiple stages are present
+            StageName name;     // name of the stage
+            std::vector<StageEffect> mgeffect;
+
+            Stage(){};
+            Stage(FormID f, Duration d, StageNo s, StageName n, std::vector<StageEffect> e)
+                : formid(f), duration(d), no(s), name(n), mgeffect(e) {
+                if (!formid)
+                    logger::critical("FormID is null");
+                else
+                    logger::trace("Stage: FormID {}, Duration {}, StageNo {}, Name {}", formid, duration, no, name);
+                if (e.empty()) mgeffect.clear();
+            }
+
+            bool operator<(const Stage& other) const {
+                if (formid < other.formid) return true;
+                if (other.formid < formid) return false;
+                return no < other.no;
+            }
+
+            bool operator==(const Stage& other) const {
+                return no == other.no && formid == other.formid && duration == other.duration;
+            }
+
+            RE::TESBoundObject* GetBound() { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid); };
+
+            [[nodiscard]] const bool CheckIntegrity() {
+                if (!formid || !GetBound()) {
+					logger::error("FormID or bound is null");
+					return false;
+				}
+				return true;
+            }
+        };
+
+        using Stages = std::vector<Stage>;
+        using StageDict = std::map<StageNo, Stage>;
+
+        struct StageInstance {
+            float start_time;
+            StageNo no;
+            Count count;
+            RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is
+                             // out in the world
+
+            StageInstance() : start_time(0), no(0), count(0), location(0) {}
+            StageInstance(float st, StageNo n, Count c, RefID l) : start_time(st), no(n), count(c), location(l) {}
+        };
+
+        struct StageUpdate {
+            StageNo old_no;
+            StageNo new_no;
+            Count count;
+        };
+
+        using SourceData = std::vector<StageInstance>;  //
+        using SaveDataLHS = FormID;
+        using SaveDataRHS = StageInstance;
+
+    }
+
 
     // https :  // github.com/ozooma10/OSLAroused/blob/29ac62f220fadc63c829f6933e04be429d4f96b0/src/PersistedData.cpp
     // template <typename T,typename U>

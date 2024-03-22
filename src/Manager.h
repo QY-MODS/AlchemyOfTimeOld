@@ -11,12 +11,25 @@ class Manager {
     
     
     bool worldobjectsspoil;
-    std::vector<std::string> exlude_list;
 
     // Use Or Take Compatibility
     bool po3_use_or_take = false;
 
     // 0x0003eb42 damage health
+
+    bool listen_activate = true;
+    bool listen_crosshair = true;
+    bool listen_container_change = true;
+    bool listen_menuopenclose = true;
+
+    bool isUninstalled = false;
+
+    std::mutex mutex;
+    
+    std::vector<Source> sources;
+
+    std::unordered_map<std::string, bool> _other_settings;
+
 
 #define ENABLE_IF_NOT_UNINSTALLED if (isUninstalled) return;
 
@@ -42,43 +55,77 @@ class Manager {
 
     [[nodiscard]] Source* GetSource(const FormID real_formid) {
         for (auto& src : sources) {
-            if (src.formid == real_formid) {
+            if (src.formid == real_formid && !src.init_failed) {
                 return &src;
             }
         }
-        logger::info("Container source not found");
+        logger::info("Source not found");
         return nullptr;
     };
 
-    // USE IT ONLY FOR REFS IN THE WORLD
-    [[nodiscard]] std::vector<StageInstance*> GetRefSourceData(const RefID refid) {
-        std::vector<StageInstance*> instances_candidates;
-        bool source_found = false;
-        for (auto& src : sources) {
-            for (auto& st_inst : src.data) {
-				if (st_inst.location == refid) {
-                    instances_candidates.push_back(&st_inst);
-                    source_found = true;
-				}
-			}
-            if (source_found) return instances_candidates;
-        }
-        logger::warn("Container source not found");
-        return instances_candidates;
-    };
-
-    [[nodiscard]] Source* GetStageSource(const FormID fake_formid) {
-        if (!fake_formid) return nullptr;
+    [[nodiscard]] Source* GetStageSource(const FormID stage_formid) {
+        if (!stage_formid) return nullptr;
         for (auto& src : sources) {
             for (auto& stage : src.stages) {
-                if (stage.second.formid == fake_formid) {
+                if (stage.second.formid == stage_formid && !src.init_failed) {
                     return &src;
                 }
             }
         }
+        logger::warn("Stage source not found");
         return nullptr;
     };
-    
+
+    [[nodiscard]] const StageNo GetStageNoFromSource(Source* src,const FormID stage_id) {
+        StageNo stage_no=0; // doesnt matter
+        if (!src) {
+            RaiseMngrErr("Source is null.");
+            return stage_no;
+        }
+        if (auto p_stage_no = src->GetStageNo(stage_id)) stage_no = *p_stage_no;
+        else RaiseMngrErr("Stage not found.");
+        return stage_no;
+	}
+
+    [[nodiscard]] const StageInstance GetWOStageInstance(RefID wo_refid) {
+        if (!wo_refid) {
+            RaiseMngrErr("Ref is null.");
+			return StageInstance();
+        }
+        for (const auto& src : sources) {
+            for (const auto& st_inst : src.data) {
+                if (st_inst.location == wo_refid) return st_inst;
+            }
+        }
+        RaiseMngrErr("Stage instance not found.");
+        return StageInstance();
+    }
+
+    [[nodiscard]] const StageInstance GetWOStageInstance(RE::TESObjectREFR* wo_ref) {
+        if (!wo_ref) {
+            RaiseMngrErr("Ref is null.");
+            return StageInstance();
+        }
+        return GetWOStageInstance(wo_ref->GetFormID());
+	}
+
+    [[nodiscard]] Source* GetWOSource(RefID wo_refid) {
+        if (!wo_refid) return nullptr;
+        for (auto& src : sources) {
+            for (const auto& st_inst : src.data) {
+                if (st_inst.location == wo_refid) return &src;
+            }
+        }
+        return nullptr;
+    }
+
+    [[nodiscard]] Source* GetWOSource(RE::TESObjectREFR* wo_ref) {
+        if (!wo_ref) {
+            RaiseMngrErr("Ref is null.");
+            return nullptr;
+        }
+        return GetWOSource(wo_ref->GetFormID());
+    }
 
     [[nodiscard]] const bool ExternalContainerIsRegistered(const FormID fake_formid,
                                                            const RefID external_container_id) {
@@ -112,59 +159,52 @@ class Manager {
         logger::trace("Spoilage updated in inventory.");
     }
 
-    void UpdateSpoilageInWorld(RE::TESObjectREFR* ref, const FormID stage_formid, const bool is_fake_stage) {
-        logger::trace("Updating spoilage in world.");
-        if (!ref) return RaiseMngrErr("Ref is null.");
-        auto ref_base = ref->GetBaseObject();
-        if (!ref_base) return RaiseMngrErr("Ref base is null.");
-        if (ref->extraList.HasType<RE::ExtraTextDisplayData>()) {
-            ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
-        }
-        auto fake_form = RE::TESForm::LookupByID(stage_formid);
-        if (!fake_form) return RaiseMngrErr("Fake form not found.");
-        if (is_fake_stage) {
-            auto source = GetStageSource(stage_formid);
-            if (!source) return RaiseMngrErr("UpdateSpoilageInWorld: Source not found.");
-            auto source_bound = source->GetBoundObject();
-            if (!source_bound) return RaiseMngrErr("UpdateSpoilageInWorld: Source bound not found.");
-            logger::trace("Setting text display data.");
-            if (ref_base->GetFormID() != source->formid) ref->SetObjectReference(source_bound);
-            auto textDisplayData = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
-            textDisplayData->SetName(fake_form->GetName());
-            ref->extraList.Add(textDisplayData);
-            return;
-        }
-        
-        logger::trace("Setting ObjectReference to custom fake form.");
-        if (ref_base->GetFormID()!=stage_formid) ref->SetObjectReference(static_cast<RE::TESBoundObject*>(fake_form));  // po3 papyrustweaks
-        
-        //Looked up here (wSkeever): https:  // www.nexusmods.com/skyrimspecialedition/mods/73607
-        /*float afX = 100;
-        float afY = 100;
-        float afZ = 100;
-        float afMagnitude = 100;*/
-        /*auto args = RE::MakeFunctionArguments(std::move(afX), std::move(afY), std::move(afZ), std::move(afMagnitude));
-        vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);*/
-        SKSE::GetTaskInterface()->AddTask(
-            [ref, fake_form]() { 
-                ref->SetObjectReference(static_cast<RE::TESBoundObject*>(fake_form)); 
+    void _UpdateSpoilageInWorld_Fake(RE::TESObjectREFR* wo_ref,RE::TESBoundObject* stage_bound) {
+        logger::trace("Setting text display data.");
+        wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
+        auto textDisplayData = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
+        textDisplayData->SetName(stage_bound->GetName());
+        wo_ref->extraList.Add(textDisplayData);
+    }
 
-            //auto player_ch = RE::PlayerCharacter::GetSingleton();
-            //player_ch->StartGrabObject();
-            ref->Disable();
-            ref->Enable(false);
-            auto vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
-            auto policy = vm->GetObjectHandlePolicy();
-            auto handle = policy->GetHandleForObject(ref->GetFormType(), ref);
-            RE::BSTSmartPointer<RE::BSScript::Object> object = nullptr;
-            vm->CreateObject2("ObjectReference", object);
-            vm->BindObject(object, handle, false);
-            if (!object) logger::warn("Object is null");
-            else logger::trace("FUSRODAH");
-            auto args = RE::MakeFunctionArguments(std::move(0.f), std::move(0.f), std::move(0.f), std::move(0.f));
-            RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
-            vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);
-		});
+    void _UpdateSpoilageInWorld_Custom(RE::TESObjectREFR* wo_ref, RE::TESBoundObject* stage_bound) {
+        wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
+        logger::trace("Setting ObjectReference to custom stage form.");
+        Utilities::FunctionsSkyrim::SwapObjects(wo_ref, stage_bound);
+    }
+
+    void _UpdateSpoilageInWorld(RE::TESObjectREFR* wo_ref, RE::TESBoundObject* stage_bound, bool is_fake){
+        if (is_fake) _UpdateSpoilageInWorld_Fake(wo_ref, stage_bound);
+		else _UpdateSpoilageInWorld_Custom(wo_ref, stage_bound);
+    };
+
+    // updates and makes them take effect in the world
+    void UpdateSpoilageInWorld(RE::TESObjectREFR* wo_ref) {
+        logger::trace("Updating spoilage in world.");
+        if (!wo_ref) return RaiseMngrErr("Ref is null.");
+        const auto wo_refid = wo_ref->GetFormID();
+        auto wo_ref_base = wo_ref->GetBaseObject();
+        if (!wo_ref_base) return RaiseMngrErr("Ref base is null.");
+        
+        // registered olmak zorunda
+        if (!RefIsRegistered(wo_ref->GetFormID())) return RaiseMngrErr("UpdateSpoilageInWorld:Ref is not registered.");
+        // get the registered stage instance
+        Source* source = GetWOSource(wo_ref);
+        if (!source) return RaiseMngrErr("UpdateSpoilageInWorld 2: Source not found.");
+        const auto st_inst = GetWOStageInstance(wo_ref);
+        
+        StageNo new_st_no;
+
+        auto updates = source->UpdateAllStages({wo_refid});
+        if (updates.empty()) new_st_no = st_inst.no;
+        else if (updates.size() > 1) RaiseMngrErr("More than one update.");
+        else new_st_no = updates.front().new_no;
+
+        const auto bound = source->stages[new_st_no].GetBound();
+        const bool new_is_fake_stage = source->IsFakeStage(new_st_no);
+
+        if (IsStage(wo_ref) && new_is_fake_stage) Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source->GetBoundObject());
+        _UpdateSpoilageInWorld(wo_ref, bound, new_is_fake_stage);
 	}
 
     const RE::ObjectRefHandle RemoveItemReverse(RE::TESObjectREFR* moveFrom, RE::TESObjectREFR* moveTo, FormID item_id, Count count,
@@ -282,18 +322,22 @@ class Manager {
 		ref->extraList.Add(textDisplayData);
 	}*/
 
-    [[nodiscard]] const bool IsInExclude(const FormID formid) {
-        auto form = RE::TESForm::LookupByID(formid);
-        if (!form) {
-            logger::warn("Form not found.");
-            return false;
-        }
-        std::string form_string = std::string(form->GetName());
-        if (Utilities::Functions::includesWord(form_string, exlude_list)) {
-            logger::trace("Form is in exclude list.form_string: {}", form_string);
-            return true;
-        }
-		return false;
+    // registers a new instance to an existing source or creates a new source and registers the instance
+    void Register(const FormID source_formid, const Count count, const RefID location_refid) {
+        // create stages for this instance
+        logger::trace("Registering new instance.");
+        if (!location_refid) return RaiseMngrErr("Location refid is null.");
+        const float curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+        // make new registry
+        auto src = GetSource(source_formid);
+        if (!src) {
+            Source new_source(source_formid, "", empty_mgeff);
+            if (new_source.init_failed) return RaiseMngrErr("Register: New source init failed.");
+            new_source.data.emplace_back(curr_time, 0, count, location_refid);
+            sources.push_back(new_source);
+            logger::trace("New source created.");
+            src = &sources.back();
+        } else src->data.emplace_back(curr_time, 0, count, location_refid);
     }
 
     void RaiseMngrErr(const std::string err_msg_ = "Error") {
@@ -320,7 +364,6 @@ class Manager {
         if (init_failed) InitFailed();
 
         worldobjectsspoil = true;
-        exlude_list = Settings::LoadExcludeList();
 
         po3_use_or_take = Utilities::IsPo3_UoTInstalled();
 
@@ -357,19 +400,6 @@ class Manager {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         isUninstalled = value;
     }
-
-    bool listen_activate = true;
-    bool listen_crosshair = true;
-    bool listen_container_change = true;
-    bool listen_menuopenclose = true;
-    
-    bool isUninstalled = false;
-    
-    std::mutex mutex;
-    
-    std::vector<Source> sources;
-
-    std::unordered_map<std::string, bool> _other_settings;
 
 public:
     Manager(std::vector<Source>& data) : sources(data) { Init(); };
@@ -417,36 +447,22 @@ public:
         return isUninstalled;
     }
 
-    [[nodiscard]] const bool IsItem(const FormID formid) {
-        if (Utilities::FunctionsSkyrim::IsFoodItem(formid) && !IsInExclude(formid)) return true;
-        return false;
-    }
-
-    // is it an item that fits to our criteria
-    [[nodiscard]] const bool IsItem(const RE::TESObjectREFR* ref) {
-        if (!ref) return false;
-        if (ref->IsDisabled()) return false;
-        if (ref->IsDeleted()) return false;
-        const auto base = ref->GetBaseObject();
-        if (!base) return false;
-        return IsItem(base->GetFormID());
-    }
-
     [[nodiscard]] const bool IsStage(const RE::TESObjectREFR* ref) {
         if (!ref) return false;
         const auto base = ref->GetBaseObject();
         if (!base) return false;
         const auto formid = base->GetFormID();
-        if (!IsItem(formid)) return false;
+        if (!Settings::IsItem(formid)) return false;
         return IsStage(formid);
     }
 
 	[[nodiscard]] const bool IsStage(const FormID formid) {
-        if (!IsItem(formid)) {
+        if (!Settings::IsItem(formid)) {
             logger::trace("Not an item.");
             return false;
         }
-		for (const auto& src : sources) {   
+		for (const auto& src : sources) {
+            if (src.formid == formid) return false;
             for (const auto& stage : src.stages) {
                 if (stage.second.formid == formid) return true;
 			}
@@ -454,6 +470,7 @@ public:
         return false;
     }
 
+    // use it only for world objects! checks if there is a stage instance for the given refid
     [[nodiscard]] const bool RefIsRegistered(const RefID refid) {
         if (!refid) {
             logger::warn("Refid is null.");
@@ -468,182 +485,136 @@ public:
         return false;
     }
 
-    void Register(const FormID formid, Count count, RefID location_refid) {
-        // create stages for this instance
-        logger::trace("Registering new instance.");
-        if (!IsItem(formid)) return RaiseMngrErr("Not an item.");
-        if (!location_refid) return RaiseMngrErr("Location refid is null.");
-        const float curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
-        // make new registry
-        auto src = GetSource(formid);
-        if (!src) {
-            Source new_source(formid, "", empty_mgeff);
-            new_source.data.emplace_back(curr_time, 0, count, location_refid);
-            sources.push_back(new_source);
-            logger::trace("New source created.");
-            src = &sources.back();
-        } else src->data.emplace_back(curr_time, 0, count, location_refid);
-
+    void RegisterAndUpdate(const FormID source_formid, const Count count, const RefID location_refid) {
+        Register(source_formid, count, location_refid);
+        // if the source is in an inventory
+        auto src = GetSource(source_formid);
         auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(location_refid);
         if (!ref) return RaiseMngrErr("Ref is null.");
-        if (ref->HasContainer() || location_refid == 20) {
+        if (ref->HasContainer() || location_refid == player_refid) {
             logger::trace("Registering in inventory.");
-            auto new_formid = src->stages[0].formid;
-            UpdateSpoilageInInventory(ref, count, formid, new_formid);
+            const auto stage_formid = src->stages[0].formid;
+            // to change from the source form to the stage form
+            UpdateSpoilageInInventory(ref, count, source_formid, stage_formid);
         }
     }
 
     // For stuff outside
-    void RegisterWorldObject(RE::TESObjectREFR* ref) {
-        if (!worldobjectsspoil) return;
-        if (!ref) return RaiseMngrErr("Ref is null.");
+    void RegisterAndUpdate(RE::TESObjectREFR* wo_ref) {
+        if (!wo_ref) return RaiseMngrErr("Ref is null.");
         // create stages for this instance
-        const auto base = ref->GetBaseObject();
+        const auto base = wo_ref->GetBaseObject();
         if (!base) return RaiseMngrErr("Base is null.");
         const FormID formid = base->GetFormID();
-        const Count count = ref->extraList.GetCount();
+        const auto refid = wo_ref->GetFormID();
+        const Count count = wo_ref->extraList.GetCount();
         if (!count) {
             logger::warn("Count is 0.");
             return;
         }
-        const auto refid = ref->GetFormID();
         logger::trace("Registering world object. Formid {} , Count {} , Refid {}", formid, count, refid);
-        Register(formid, count, ref->GetFormID());
 
-        auto src = GetSource(formid);
-        bool is_fake_stage = Utilities::Functions::VectorHasElement<StageNo>(src->fake_stages,0);
-        UpdateSpoilageInWorld(ref, src->stages[0].formid,is_fake_stage);
-        /*auto textDisplayData = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
-        textDisplayData->SetName((std::string(ref->GetDisplayFullName()) + " (Fresh)").c_str());
-        ref->extraList.Add(textDisplayData);*/
+        Register(formid, count, wo_ref->GetFormID());
+        UpdateSpoilageInWorld(wo_ref);
     }
 
-    void HandleDrop(const FormID fakeformid, Count count, RE::TESObjectREFR* ref){
+    void HandleDrop(const FormID dropped_formid, Count count, RE::TESObjectREFR* dropped_stage_ref){
         ENABLE_IF_NOT_UNINSTALLED
-        logger::trace("HandleDrop: fakeformid {} , Count {}", fakeformid, count);
-        if (!ref) return RaiseMngrErr("Ref is null.");
-        if (!IsStage(fakeformid)) {
-            logger::warn("HandleDrop: Not a fake item.");
+        logger::trace("HandleDrop: dropped_formid {} , Count {}", dropped_formid, count);
+        if (!dropped_stage_ref) return RaiseMngrErr("Ref is null.");
+        if (!IsStage(dropped_formid)) {
+            logger::error("HandleDrop: Not a stage item.");
             return;
         }
-        auto source = GetStageSource(fakeformid);
+        auto source = GetStageSource(dropped_formid);
         if (!source) {
             logger::critical("HandleDrop: Source not found! Fakeform not registered!");
             return;
         }
-        int stage_no = -1;
-        // find stage no
-        for (const auto& [st_no, stage] : source->stages) {
-            if (stage.formid == fakeformid) {
-                stage_no = st_no;
-				break;
-			}
-		}
-        if (stage_no == -1) return RaiseMngrErr("HandleDrop: Stage not found.");
+        const auto stage_no = GetStageNoFromSource(source, dropped_formid);
         // at the same stage but different start times
         std::vector<StageInstance*> instances_candidates;
         for (auto& st_inst : source->data) {
-            if (static_cast<int>(st_inst.no) != stage_no) continue;
-            if (st_inst.location == player_refid) instances_candidates.push_back(&st_inst);
+            if (st_inst.location == player_refid && st_inst.no == stage_no)
+                instances_candidates.push_back(&st_inst);
 		}
         // need to now order the instances_candidates by their start_time
         std::sort(instances_candidates.begin(), instances_candidates.end(), [](StageInstance* a, StageInstance* b) {
-			return a->start_time < b->start_time;
+			return a->start_time > b->start_time; // keep the good stuff
 		});
-
 
         auto real_bound = source->GetBoundObject();
 
-        // do this only if the ref is fake form
-        const auto stage_is_fake = Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages, stage_no);
-        const auto stage_formid = source->stages[stage_no].formid;
-        if (worldobjectsspoil) {
-            logger::trace("HandleDrop: setting count");
-            bool handled_first_stack = false;
-            for (const auto& instance : instances_candidates) {
-                if (count <= instance->count) {
-                    logger::trace("SADSJFHÖADF 1");
-                    instance->count -= count;
-                    if (!handled_first_stack) {
-                        ref->extraList.SetCount(static_cast<uint16_t>(count));
-                        ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
-                        source->data.emplace_back(instance->start_time, instance->no, count, ref->GetFormID());
-                        UpdateSpoilageInWorld(ref, stage_formid, stage_is_fake);
-                        handled_first_stack = true;
-                    } else {
-                        logger::trace("SADSJFHÖADF 2");
-                        auto new_ref = Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(real_bound, count, nullptr);
-						source->data.emplace_back(instance->start_time, instance->no, count, new_ref->GetFormID());
-                        UpdateSpoilageInWorld(new_ref, stage_formid, stage_is_fake);
-                    }
-                    break;
+        logger::trace("HandleDrop: setting count");
+        bool handled_first_stack = false;
+        for (const auto& instance : instances_candidates) {
+            if (count <= instance->count) {
+                logger::trace("SADSJFHÖADF 1");
+                instance->count -= count;
+                if (!handled_first_stack) {
+                    dropped_stage_ref->extraList.SetCount(static_cast<uint16_t>(count));
+                    dropped_stage_ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+                    source->data.emplace_back(instance->start_time, instance->no, count, dropped_stage_ref->GetFormID());
+                    UpdateSpoilageInWorld(dropped_stage_ref);
+                    handled_first_stack = true;
                 } else {
-                    count -= instance->count;
-                    if (!handled_first_stack) {
-                        logger::trace("SADSJFHÖADF 3");
-                        ref->extraList.SetCount(static_cast<uint16_t>(instance->count));
-                        ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
-                        instance->location = ref->GetFormID();
-                        UpdateSpoilageInWorld(ref, stage_formid, stage_is_fake);
-                        handled_first_stack = true;
-                    } else {
-                        logger::trace("SADSJFHÖADF 4");
-                        auto new_ref = Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(real_bound, instance->count, nullptr);
-                        instance->location = new_ref->GetFormID();
-                        UpdateSpoilageInWorld(new_ref, stage_formid, stage_is_fake);
-                    }
+                    logger::trace("SADSJFHÖADF 2");
+                    auto new_ref = Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(real_bound, count, nullptr);
+					source->data.emplace_back(instance->start_time, instance->no, count, new_ref->GetFormID());
+                    UpdateSpoilageInWorld(new_ref);
                 }
-            }
-        } 
-        else {
-            for (const auto& instance : instances_candidates) {
-                if (count <= instance->count) {
-                    instance->count -= count;
-                    source->data.emplace_back(instance->start_time, instance->no, count, ref->GetFormID());
-                    break;
+                break;
+            } else {
+                count -= instance->count;
+                if (!handled_first_stack) {
+                    logger::trace("SADSJFHÖADF 3");
+                    dropped_stage_ref->extraList.SetCount(static_cast<uint16_t>(instance->count));
+                    dropped_stage_ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+                    instance->location = dropped_stage_ref->GetFormID();
+                    UpdateSpoilageInWorld(dropped_stage_ref);
+                    handled_first_stack = true;
                 } else {
-                    count -= instance->count;
-                    instance->location = ref->GetFormID();
+                    logger::trace("SADSJFHÖADF 4");
+                    auto new_ref = Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(real_bound, instance->count, nullptr);
+                    instance->location = new_ref->GetFormID();
+                    UpdateSpoilageInWorld(new_ref);
                 }
             }
         }
+
         source->CleanUpData();
     }
 
-    void HandlePickUp(const FormID formid, const Count count, const RefID wo_refid, const bool eat,
+    void HandlePickUp(const FormID pickedup_formid, const Count count, const RefID wo_refid, const bool eat,
                       RE::TESObjectREFR* npc_ref = nullptr) {
         ENABLE_IF_NOT_UNINSTALLED
-        logger::info("HandlePickUp: Formid {} , Count {} , Refid {}", formid, count, wo_refid);
-        if (!IsItem(formid)) {
-            logger::warn("HandlePickUp: Not Item.");
-            return;
-        }
+        logger::info("HandlePickUp: Formid {} , Count {} , Refid {}", pickedup_formid, count, wo_refid);
         const RefID npc_refid = npc_ref ? npc_ref->GetFormID() : player_refid;
-        npc_ref = npc_ref ? npc_ref : player_ref; // for the sake of functionality
+        npc_ref = npc_ref ? npc_ref : player_ref; // naming...for the sake of functionality
         if (!RefIsRegistered(wo_refid)) {
             if (worldobjectsspoil){
                 // bcs it shoulda been registered already before picking up
-                logger::warn("HandlePickUp: Not registered world object refid: {}, formid: {}", wo_refid, formid);
+                logger::warn("HandlePickUp: Not registered world object refid: {}, pickedup_formid: {}", wo_refid,
+                             pickedup_formid);
             } /*else if (npc_ref != nullptr) {
                 logger::warn("If npc_ref is given, the world object refid should be registered!");
                 return;
             }*/
-            return Register(formid, count, npc_refid);
+            return RegisterAndUpdate(pickedup_formid, count, npc_refid);
         }
         // so it was registered before
-        auto source = GetSource(formid);
-        if (!source) source = GetStageSource(formid);
+        auto source = GetStageSource(pickedup_formid); // registeredsa stage olmak zorunda
         if (!source) return RaiseMngrErr("HandlePickUp: Source not found.");
         for (auto& st_inst: source->data) {
             if (st_inst.location == wo_refid) {
                 st_inst.location = npc_refid;
                 // if it needs to be replaced by a created form
-                if (Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages, st_inst.no)) {
+                if (source->IsFakeStage(st_inst.no)) {
                     // try to replace it with fake form
                     auto new_f = source->stages[st_inst.no].formid;
-                    UpdateSpoilageInInventory(npc_ref, count, formid, new_f);
+                    UpdateSpoilageInInventory(npc_ref, count, pickedup_formid, new_f);
                     if (eat && npc_refid == player_refid) RE::ActorEquipManager::GetSingleton()->EquipObject(RE::PlayerCharacter::GetSingleton(), 
-                        RE::TESForm::LookupByID<RE::TESBoundObject>(new_f), nullptr,count);
+                        source->stages[st_inst.no].GetBound(), nullptr, count);
         //            const int count_diff = st_inst.count - count;
         //            if (count_diff > 0 && npc_ref && npc_ref->HasContainer()) {
         //                logger::trace("HandlePickUp: Adding the rest {} to the npc container.", count_diff);
@@ -907,10 +878,11 @@ public:
                 if (ref->HasContainer() || ref->IsPlayerRef()) {
                     UpdateSpoilageInInventory(ref, updated_inst.count, old_formid, new_formid);
                 } 
-                else if (IsItem(ref) && worldobjectsspoil) {
+                else if (Settings::IsItem(ref) && worldobjectsspoil) {
                     logger::trace("UpdateSpoilage: ref out in the world.");
-                    bool new_is_fake = Utilities::Functions::VectorHasElement<StageNo>(src.fake_stages, updated_inst.new_no);
-                    UpdateSpoilageInWorld(ref, new_formid, new_is_fake);
+                    bool new_is_fake = src.IsFakeStage(updated_inst.new_no);
+                    if (IsStage(ref) && new_is_fake) Utilities::FunctionsSkyrim::SwapObjects(ref, src.GetBoundObject());
+                    _UpdateSpoilageInWorld(ref, src.stages[updated_inst.new_no].GetBound(), new_is_fake);
                 } 
                 else {
 					RaiseMngrErr("UpdateSpoilage: Unknown ref type.");
@@ -927,32 +899,39 @@ public:
         return true;
     }
 
-    void SwapWithStage(RE::TESObjectREFR* wo_ref, RE::TESObjectREFR* activator=nullptr) {
+    // only necessary for the world objects who has fake counterparts
+    void SwapWithStage(RE::TESObjectREFR* wo_ref) {
         if (!wo_ref) return RaiseMngrErr("Ref is null.");
-        if (!IsItem(wo_ref)) return;
+        if (!Settings::IsItem(wo_ref)) return;
+        // 1. registered olmadii icin stage olmayabilir
+        // 2. counterparti fake olduu icin disarda base basele represente olabilir
         if (IsStage(wo_ref)) return;
+        
+        logger::trace("SwapWithStage");
+        
         const auto wo_refid = wo_ref->GetFormID();
         const auto formid = wo_ref->GetBaseObject()->GetFormID();
-        const auto activator_refid = activator ? activator->GetFormID() : player_refid;
-        activator = activator ? activator : player_ref;
         if (!RefIsRegistered(wo_ref->GetFormID())) {
             if (worldobjectsspoil) {
                 // bcs it shoulda been registered already before picking up
                 logger::warn("SwapWithStage: Not registered world object refid: {}, formid: {}", wo_refid, formid);
             }
-            Register(formid, wo_ref->extraList.GetCount(), activator_refid);
+            Register(formid, wo_ref->extraList.GetCount(), wo_ref->GetFormID());
             auto source = GetSource(formid);
-            if (Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages,0)) wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
-            wo_ref->SetObjectReference(RE::TESForm::LookupByID<RE::TESBoundObject>(source->stages[0].formid));
+            wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
+            Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source->stages[0].GetBound());
             return;
 		}
         auto source = GetSource(formid);
         if (!source) return RaiseMngrErr("Source not found.");
         for (auto& st_inst : source->data) {
             if (st_inst.location == wo_ref->GetFormID()) {
-                if (Utilities::Functions::VectorHasElement<StageNo>(source->fake_stages, st_inst.no))
-                    wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
-				wo_ref->SetObjectReference(RE::TESForm::LookupByID<RE::TESBoundObject>(source->stages[st_inst.no].formid));
+                if (!source->IsFakeStage(st_inst.no)) {
+                    logger::warn("SwapWithStage: Not a fake stage.");
+                    return;
+                }
+                wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
+                Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source->stages[st_inst.no].GetBound(),false);
 				return;
 			}
 		}

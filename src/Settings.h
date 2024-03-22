@@ -63,6 +63,35 @@ namespace Settings {
         return strings;
     }
 
+    std::vector<std::string> exlude_list = LoadExcludeList();
+
+    [[nodiscard]] const bool IsInExclude(const FormID formid) {
+        auto form = Utilities::FunctionsSkyrim::GetFormByID(formid);
+        if (!form) {
+            logger::warn("Form not found.");
+            return false;
+        }
+        std::string form_string = std::string(form->GetName());
+        if (Utilities::Functions::includesWord(form_string, exlude_list)) {
+            logger::trace("Form is in exclude list.form_string: {}", form_string);
+            return true;
+        }
+        return false;
+    }
+
+    [[nodiscard]] const bool IsItem(const FormID formid) {
+        return Utilities::FunctionsSkyrim::IsFoodItem(formid) && !Settings::IsInExclude(formid);
+    }
+
+    [[nodiscard]] const bool IsItem(const RE::TESObjectREFR* ref) {
+        if (!ref) return false;
+        if (ref->IsDisabled()) return false;
+        if (ref->IsDeleted()) return false;
+        const auto base = ref->GetBaseObject();
+        if (!base) return false;
+        return IsItem(base->GetFormID());
+    }
+    
     DefaultSettings parseDefaults(const char* filename = defaults_path) {
 
         DefaultSettings settings;
@@ -166,6 +195,8 @@ namespace Settings {
 		}
         return settings;
     }
+
+
 }
 
 struct Source {
@@ -191,14 +222,14 @@ struct Source {
             } else logger::error("Could not find formid for editorid {}", editorid);
         }
 
-        RE::TESForm* form = Utilities::FunctionsSkyrim::GetFormByID(formid, editorid);
+        RE::TESForm* form = Utilities::FunctionsSkyrim::GetFormByID(formid);
         auto bound_ = GetBoundObject();
         if (!form || !bound_) {
             InitFailed();
             return;
         }
         
-        if (!Utilities::FunctionsSkyrim::IsFoodItem(form)){
+        if (!Settings::IsItem(formid)) {
             InitFailed();
             return;
         }
@@ -239,149 +270,13 @@ struct Source {
 			}
         }
 
-        if (stages.size() == 0) {
-            logger::error("No spoilage stages found");
+        if (!CheckIntegrity()) {
+            logger::error("CheckIntegrity failed");
             InitFailed();
 			return;
         }
-        for (auto i = 0; i < stages.size(); i++) {
-			if (!stages.count(i)) {
-				InitFailed();
-				return;
-			}
-		}
     };
 
-    template <typename T>
-    void GatherSpoilageStages() {
-        // for now use default stages
-        if (!empty_mgeff) {
-            logger::error("Empty mgeff is null.");
-            return;
-        }
-
-
-        for (auto i = 0; i < defaultsettings.numbers.size(); i++) {
-            // create fake form
-            auto alch_item = GetBoundObject()->As<T>();
-            FormID fake_formid;
-            if (!defaultsettings.items[i]) {
-                fake_formid = CreateFake(alch_item);
-                fake_stages.push_back(defaultsettings.numbers[i]);
-            } else {
-                auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<T>(defaultsettings.items[i], "");
-                fake_formid = fake_form ? fake_form->GetFormID() : 0;
-            }
-            if (!fake_formid) {
-				logger::error("Could not create fake form for stage {}", i);
-				return;
-			}
-            // or if this fake_formid is already in the stages return error
-            for (auto& [key, value] : stages) {
-				if (fake_formid == value.formid) {
-                    logger::error("Fake formid is already in the stages.");
-                    return;
-                }
-            }
-            if (fake_formid == formid) {
-				logger::warn("Fake formid is the same as the real formid.");
-				fake_formid = CreateFake(alch_item);
-                fake_stages.push_back(defaultsettings.numbers[i]);
-			}
-            auto duration = defaultsettings.durations[i];
-            auto name = defaultsettings.stage_names[i];
-
-            Stage stage(fake_formid, duration, i, name, defaultsettings.effects[i]);
-            if (!stages.insert({i, stage}).second) {
-				logger::error("Could not insert stage");
-				return;
-			}
-
-            auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<T>(fake_formid);
-            if (!fake_form) {
-				logger::error("Fake form is null.");
-				return;
-			}
-            if (Utilities::Functions::VectorHasElement<StageNo>(fake_stages, i)) {
-                // Update name of the fake form
-                fake_form->fullName = std::string(fake_form->fullName.c_str()) + " (" + name + ")";
-				logger::info("Updated name of fake form to {}", name);
-                // Update value of the fake form
-                if (i == 1) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(fake_form, 1);
-                else if (i>1) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(fake_form, 0);
-                    
-            }
-
-            if (defaultsettings.effects[i].empty()) continue;
-
-            // change mgeff of fake form
-
-            std::vector<RE::EffectSetting*> MGEFFs;
-            std::vector<uint32_t*> pMGEFFdurations;
-            std::vector<float*> pMGEFFmagnitudes;
-
-
-            // i need this many empty effects
-            int n_empties = static_cast<int>(fake_form->effects.size()) - static_cast<int>(defaultsettings.effects[i].size());
-            if (n_empties < 0) n_empties = 0;
-
-            for (int j = 0; j < defaultsettings.effects[i].size(); j++) {
-                auto fake_mgeff_id = defaultsettings.effects[i][j].beffect;
-                if (!fake_mgeff_id){
-                    MGEFFs.push_back(empty_mgeff);
-                    pMGEFFdurations.push_back(nullptr);
-                    pMGEFFmagnitudes.push_back(nullptr);
-                } else {
-                    RE::EffectSetting* fake_mgeffect =
-                        Utilities::FunctionsSkyrim::GetFormByID<RE::EffectSetting>(fake_mgeff_id);
-                    if (defaultsettings.effects[i][j].duration &&
-                        !Utilities::Functions::includesString(std::string(fake_mgeffect->magicItemDescription.c_str()),
-                                                            {"<dur>"}) &&
-                        !fake_mgeffect->data.flags.any(RE::EffectSetting::EffectSettingData::Flag::kNoDuration)
-                        ) {
-                        auto descr_str = std::string(fake_mgeffect->magicItemDescription.c_str());
-                        descr_str = descr_str.substr(0, descr_str.length() - 1);
-                        RE::EffectSetting* new_form = nullptr;
-                        new_form = fake_mgeffect->CreateDuplicateForm(true, (void*)new_form)->As<RE::EffectSetting>();
-
-                        if (!new_form) {
-                            logger::error("Failed to create new form.");
-                            return;
-                        }
-                        new_form->Copy(fake_mgeffect);
-                        new_form->fullName = fake_mgeffect->GetFullName();
-                        new_form->magicItemDescription = (descr_str + " for <dur> second(s).").c_str();
-                        fake_mgeffect = new_form;
-                    }
-                    MGEFFs.push_back(fake_mgeffect);
-                    pMGEFFdurations.push_back(&defaultsettings.effects[i][j].duration);
-                    pMGEFFmagnitudes.push_back(&defaultsettings.effects[i][j].magnitude);
-                }
-			}
-
-            for (int j = 0; j < n_empties; j++) {
-				MGEFFs.push_back(empty_mgeff);
-                pMGEFFdurations.push_back(nullptr);
-                pMGEFFmagnitudes.push_back(nullptr);
-			}
-            Utilities::FunctionsSkyrim::OverrideMGEFFs(fake_form->effects,MGEFFs, pMGEFFdurations, pMGEFFmagnitudes);
-
-            //int mg_count = 0;
-            //for (auto& mgeffect : fake_form->effects) {
-            //    logger::trace("Updating mgeffect {}", mg_count);
-            //    if (!mg_count) {
-            //        mgeffect->baseEffect = fake_mgeffect;
-            //        mgeffect->effectItem.magnitude = 10;
-            //        mgeffect->effectItem.duration = 20;
-            //    }
-            //    else mgeffect->baseEffect = empty_mgeff;
-            //    mg_count++;
-            //}
-            //fake_form->effects.push_back(fake_form->effects.front()); // works
-		}
-        // update mgeffs
-		
-    }
     
     const std::string_view GetName() {
         auto form = Utilities::FunctionsSkyrim::GetFormByID(formid, editorid);
@@ -398,7 +293,7 @@ struct Source {
         // save the updated instances
         std::vector<StageUpdate> updated_instances;
         if (data.empty()) {
-			logger::trace("No data found for source {}", editorid);
+			logger::warn("No data found for source {}", editorid);
 			return updated_instances;
 		}
         for (auto& instance : data) {
@@ -416,6 +311,25 @@ struct Source {
         CleanUpData();
         return updated_instances;
     }
+
+    [[nodiscard]] const bool IsFakeStage(const StageNo no) {
+        return Utilities::Functions::VectorHasElement<StageNo>(fake_stages, no);
+    }
+
+  //  [[nodiscard]] const bool IsFakeStage(const FormID formid_) {
+  //      for (auto& [key, value] : stages) {
+  //          if (value.formid == formid_) return IsFakeStage(key);
+		//}
+  //      return false;
+  //  }
+
+    [[nodiscard]] const StageNo* GetStageNo(const FormID formid_) {
+        for (auto& [key, value] : stages) {
+            if (value.formid == formid_) return &key;
+        }
+        return nullptr;
+    }
+    
 
     void CleanUpData() {
 		logger::trace("Cleaning up data.");
@@ -481,6 +395,136 @@ private:
     }
 
     template <typename T>
+    void GatherSpoilageStages() {
+        // for now use default stages
+        if (!empty_mgeff) {
+            logger::error("Empty mgeff is null.");
+            return;
+        }
+
+        for (auto i = 0; i < defaultsettings.numbers.size(); i++) {
+            // create fake form
+            auto alch_item = GetBoundObject()->As<T>();
+            FormID fake_formid;
+            if (!defaultsettings.items[i]) {
+                fake_formid = CreateFake(alch_item);
+                fake_stages.push_back(defaultsettings.numbers[i]);
+            } else {
+                auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<T>(defaultsettings.items[i], "");
+                fake_formid = fake_form ? fake_form->GetFormID() : 0;
+            }
+            if (!fake_formid) {
+                logger::error("Could not create fake form for stage {}", i);
+                return;
+            }
+            // or if this fake_formid is already in the stages return error
+            for (auto& [key, value] : stages) {
+                if (fake_formid == value.formid) {
+                    logger::error("Fake formid is already in the stages.");
+                    return;
+                }
+            }
+            if (fake_formid == formid) {
+                logger::warn("Fake formid is the same as the real formid.");
+                fake_formid = CreateFake(alch_item);
+                fake_stages.push_back(defaultsettings.numbers[i]);
+            }
+            auto duration = defaultsettings.durations[i];
+            auto name = defaultsettings.stage_names[i];
+
+            Stage stage(fake_formid, duration, i, name, defaultsettings.effects[i]);
+            if (!stages.insert({i, stage}).second) {
+                logger::error("Could not insert stage");
+                return;
+            }
+
+            auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<T>(fake_formid);
+            if (!fake_form) {
+                logger::error("Fake form is null.");
+                return;
+            }
+            if (Utilities::Functions::VectorHasElement<StageNo>(fake_stages, i)) {
+                // Update name of the fake form
+                fake_form->fullName = std::string(fake_form->fullName.c_str()) + " (" + name + ")";
+                logger::info("Updated name of fake form to {}", name);
+                // Update value of the fake form
+                if (i == 1)
+                    Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(fake_form, 1);
+                else if (i > 1)
+                    Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(fake_form, 0);
+            }
+
+            if (defaultsettings.effects[i].empty()) continue;
+
+            // change mgeff of fake form
+
+            std::vector<RE::EffectSetting*> MGEFFs;
+            std::vector<uint32_t*> pMGEFFdurations;
+            std::vector<float*> pMGEFFmagnitudes;
+
+            // i need this many empty effects
+            int n_empties =
+                static_cast<int>(fake_form->effects.size()) - static_cast<int>(defaultsettings.effects[i].size());
+            if (n_empties < 0) n_empties = 0;
+
+            for (int j = 0; j < defaultsettings.effects[i].size(); j++) {
+                auto fake_mgeff_id = defaultsettings.effects[i][j].beffect;
+                if (!fake_mgeff_id) {
+                    MGEFFs.push_back(empty_mgeff);
+                    pMGEFFdurations.push_back(nullptr);
+                    pMGEFFmagnitudes.push_back(nullptr);
+                } else {
+                    RE::EffectSetting* fake_mgeffect =
+                        Utilities::FunctionsSkyrim::GetFormByID<RE::EffectSetting>(fake_mgeff_id);
+                    if (defaultsettings.effects[i][j].duration &&
+                        !Utilities::Functions::includesString(std::string(fake_mgeffect->magicItemDescription.c_str()),
+                                                              {"<dur>"}) &&
+                        !fake_mgeffect->data.flags.any(RE::EffectSetting::EffectSettingData::Flag::kNoDuration)) {
+                        auto descr_str = std::string(fake_mgeffect->magicItemDescription.c_str());
+                        descr_str = descr_str.substr(0, descr_str.length() - 1);
+                        RE::EffectSetting* new_form = nullptr;
+                        new_form = fake_mgeffect->CreateDuplicateForm(true, (void*)new_form)->As<RE::EffectSetting>();
+
+                        if (!new_form) {
+                            logger::error("Failed to create new form.");
+                            return;
+                        }
+                        new_form->Copy(fake_mgeffect);
+                        new_form->fullName = fake_mgeffect->GetFullName();
+                        new_form->magicItemDescription = (descr_str + " for <dur> second(s).").c_str();
+                        fake_mgeffect = new_form;
+                    }
+                    MGEFFs.push_back(fake_mgeffect);
+                    pMGEFFdurations.push_back(&defaultsettings.effects[i][j].duration);
+                    pMGEFFmagnitudes.push_back(&defaultsettings.effects[i][j].magnitude);
+                }
+            }
+
+            for (int j = 0; j < n_empties; j++) {
+                MGEFFs.push_back(empty_mgeff);
+                pMGEFFdurations.push_back(nullptr);
+                pMGEFFmagnitudes.push_back(nullptr);
+            }
+            Utilities::FunctionsSkyrim::OverrideMGEFFs(fake_form->effects, MGEFFs, pMGEFFdurations, pMGEFFmagnitudes);
+
+            // int mg_count = 0;
+            // for (auto& mgeffect : fake_form->effects) {
+            //     logger::trace("Updating mgeffect {}", mg_count);
+            //     if (!mg_count) {
+            //         mgeffect->baseEffect = fake_mgeffect;
+            //         mgeffect->effectItem.magnitude = 10;
+            //         mgeffect->effectItem.duration = 20;
+            //     }
+            //     else mgeffect->baseEffect = empty_mgeff;
+            //     mg_count++;
+            // }
+            // fake_form->effects.push_back(fake_form->effects.front()); // works
+        }
+        // update mgeffs
+    }
+    
+
+    template <typename T>
     const FormID CreateFake(T* real) {
         logger::trace("CreateFakeContainer");
         if (!real) {
@@ -503,7 +547,42 @@ private:
 
         return new_form->GetFormID();
     }
-    
+   
+    [[nodiscard]] const bool CheckIntegrity() {
+        
+        if (!GetBoundObject()) {
+			logger::error("Formid {} does not exist.", formid);
+			return false;
+		}
+
+        if (formid == 0 || stages.empty()) {
+			logger::error("One of the members is empty.");
+			return false;
+		}
+        // stages must have keys [0,...,n-1]
+        for (auto i = 0; i < stages.size(); i++) {
+            if (!stages.count(i)) {
+                logger::error("Key {} not found in stages.", i);
+                return false;
+            }
+            // ayni formid olmicak
+            if (stages[i].formid == formid) {
+                logger::error("Formid {} is the same as the source formid.", formid);
+				return false;
+            }
+            if (!stages[i].CheckIntegrity()) {
+				logger::error("Stage {} integrity check failed.", i);
+				return false;
+			}
+        }
+
+		if (!defaultsettings.CheckIntegrity()) {
+            logger::error("Default settings integrity check failed.");
+            return false;
+        }
+        return true;
+	}
+
     void InitFailed(){
         logger::error("Initialisation failed.");
         formid = 0;
