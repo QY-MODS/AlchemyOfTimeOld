@@ -211,6 +211,10 @@ public:
             // stage deilse registered da deil
             else if (!M->IsStage(event->baseObj)) {
                 M->RegisterAndUpdate(event->baseObj, event->itemCount, player_refid);
+                if (auto container_menu = RE::UI::GetSingleton()->GetMenu<RE::ContainerMenu>())
+                    container_menu->GetRuntimeData().itemList->Update();
+                    
+
                 //Utilities::FunctionsSkyrim::RefreshMenu(RE::ContainerMenu::MENU_NAME);
             }
             else if (!event->oldContainer) {
@@ -269,25 +273,18 @@ public:
                 logger::trace("Dropped.");
                 M->setListenCrosshair(false);
                 auto reference_ = event->reference;
+                logger::trace("Reference: {}", reference_.native_handle());
                 RE::TESObjectREFR* ref = Utilities::FunctionsSkyrim::TryToGetRefFromHandle(reference_);
                 if (ref) logger::trace("Dropped ref name: {}", ref->GetBaseObject()->GetName());
                 if (!ref || ref->GetBaseObject()->GetFormID() != event->baseObj) {
                     // iterate through all objects in the cell................
                     logger::info("Iterating through all references in the cell.");
-                    auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
-                    auto cell_runtime_data = player_cell->GetRuntimeData();
-                    for (auto& ref_ : cell_runtime_data.references) {
-                        if (ref_ && 
-                            ref_.get()->GetBaseObject()->GetFormID() == event->baseObj &&
-                            ref_->extraList.GetCount() == event->itemCount &&
-                            !M->RefIsRegistered(ref_->GetFormID())) {
-                            ref = ref_.get();
-                            logger::info("Ref found in cell: {}", ref->GetBaseObject()->GetName());
-                            break;
-                        }
-                    }
+                    ref = Utilities::FunctionsSkyrim::TryToGetRefInCell(event->baseObj,event->itemCount);
                 } 
-                if (ref) M->HandleDrop(event->baseObj,event->itemCount,ref);
+                if (ref) {
+                    if (M->RefIsRegistered(ref->GetFormID())) logger::warn("Ref is registered at HandleDrop!");
+                    M->HandleDrop(event->baseObj, event->itemCount, ref);
+                }
                 else if (event->baseObj == fake_equipped_id) {
                     M->HandleConsume(event->baseObj, event->itemCount);
                     fake_equipped_id = 0;

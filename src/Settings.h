@@ -296,13 +296,13 @@ struct Source {
 			logger::warn("No data found for source {}", editorid);
 			return updated_instances;
 		}
+        for (auto& reffid : filter) {
+            logger::trace("Refid in filter: {}", reffid);
+        }
         for (auto& instance : data) {
             // if the refid is not in the filter, skip
             if (!filter.empty() && std::find(filter.begin(), filter.end(), instance.location) == filter.end()) {
                 //logger::trace("Refid {} not in filter. Skipping.", instance.location);
-                for (auto& reffid : filter) {
-                    logger::trace("Refid in filter: {}", reffid);
-                }
                 continue;
             }
             const StageNo old_no = instance.no;

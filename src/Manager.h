@@ -520,12 +520,18 @@ public:
 
     void HandleDrop(const FormID dropped_formid, Count count, RE::TESObjectREFR* dropped_stage_ref){
         ENABLE_IF_NOT_UNINSTALLED
+        
+        mutex.lock();
+
         logger::trace("HandleDrop: dropped_formid {} , Count {}", dropped_formid, count);
         if (!dropped_stage_ref) return RaiseMngrErr("Ref is null.");
         if (!IsStage(dropped_formid)) {
             logger::error("HandleDrop: Not a stage item.");
             return;
         }
+        if (dropped_stage_ref->extraList.GetCount() != count) {
+			logger::warn("HandleDrop: Count mismatch: {} , {}", dropped_stage_ref->extraList.GetCount(), count);
+		}
         auto source = GetStageSource(dropped_formid);
         if (!source) {
             logger::critical("HandleDrop: Source not found! Fakeform not registered!");
@@ -583,6 +589,7 @@ public:
         }
 
         source->CleanUpData();
+        mutex.unlock();
     }
 
     void HandlePickUp(const FormID pickedup_formid, const Count count, const RefID wo_refid, const bool eat,

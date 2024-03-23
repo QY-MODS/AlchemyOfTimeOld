@@ -531,7 +531,22 @@ namespace Utilities{
             });
         }
 
-        RE::TESObjectREFR* TryToGetRefFromHandle(RE::ObjectRefHandle& handle) {
+        RE::TESObjectREFR* TryToGetRefInCell(const FormID baseid, const Count count, unsigned int max_try=3) {
+            auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
+            auto cell_runtime_data = player_cell->GetRuntimeData();
+            for (auto& ref : cell_runtime_data.references) {
+                if (!ref) continue;
+                if (ref->GetBaseObject()->GetFormID() == baseid &&
+                    ref->extraList.GetCount() == count) {
+                    logger::info("Ref found in cell: {}", ref->GetBaseObject()->GetName());
+                    return ref.get();
+                }
+            }
+            if (max_try) return TryToGetRefInCell(baseid, count, --max_try);
+            return nullptr;
+        }
+
+        RE::TESObjectREFR* TryToGetRefFromHandle(RE::ObjectRefHandle& handle, unsigned int max_try = 3) {
             if (auto handle_ref = RE::TESObjectREFR::LookupByHandle(handle.native_handle())) {
                 logger::trace("Handle ref found");
                 return handle_ref.get();
@@ -540,7 +555,13 @@ namespace Utilities{
             else if (handle.get()) {
                 logger::warn("Handle native handle is null");
                 return handle.get().get();
+            } 
+            else if (auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(handle.native_handle()))
+            {
+                logger::trace("Ref found");
+                return ref;
             }
+            if (max_try && handle) return TryToGetRefFromHandle(handle, --max_try);
             return nullptr;
 		}
 
