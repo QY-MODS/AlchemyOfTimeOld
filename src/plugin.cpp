@@ -205,18 +205,15 @@ public:
         // to player inventory <-
         if (event->newContainer == 20) {
             logger::trace("Item entered player inventory.");
-            if (M->IsExternalContainer(event->baseObj,event->oldContainer)) {
-                M->UnLinkExternalContainer(event->baseObj,event->itemCount,event->oldContainer);
-            }
-            // stage deilse registered da deil
-            else if (!M->IsStage(event->baseObj)) {
+            if (!M->IsStage(event->baseObj)) {
                 M->RegisterAndUpdate(event->baseObj, event->itemCount, player_refid);
                 if (auto container_menu = RE::UI::GetSingleton()->GetMenu<RE::ContainerMenu>())
                     container_menu->GetRuntimeData().itemList->Update();
-                    
-
-                //Utilities::FunctionsSkyrim::RefreshMenu(RE::ContainerMenu::MENU_NAME);
             }
+            else if (M->IsExternalContainer(event->baseObj,event->oldContainer)) {
+                M->UnLinkExternalContainer(event->baseObj,event->itemCount,event->oldContainer);
+            }
+            // stage deilse registered da deil
             else if (!event->oldContainer) {
                 if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME) && M->IsStage(event->baseObj)) {
                     if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()) {

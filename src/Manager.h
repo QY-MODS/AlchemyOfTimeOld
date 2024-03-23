@@ -127,16 +127,6 @@ class Manager {
         return GetWOSource(wo_ref->GetFormID());
     }
 
-    [[nodiscard]] const bool ExternalContainerIsRegistered(const FormID fake_formid,
-                                                           const RefID external_container_id) {
-        const auto src = GetStageSource(fake_formid);
-        if (!src) return false;
-        for (const auto& st_inst: src->data) {
-            if (st_inst.location == external_container_id) return true;
-        }
-        return false;
-    }
-
     void UpdateSpoilageInInventory(RE::TESObjectREFR* inventory_owner, Count update_count, FormID old_item, FormID new_item){
         if (new_item == old_item) {
             logger::trace("UpdateSpoilageInInventory: New item is the same as the old item.");
@@ -340,7 +330,6 @@ class Manager {
             new_source.data.emplace_back(curr_time, 0, count, location_refid);
             sources.push_back(new_source);
             logger::trace("New source created.");
-            src = &sources.back();
         } else src->data.emplace_back(curr_time, 0, count, location_refid);
     }
 
@@ -393,7 +382,6 @@ class Manager {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         listen_container_change = value;
     }
-
 
     void setListenMenuOpenClose(const bool value) {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
@@ -493,8 +481,9 @@ public:
         Register(source_formid, count, location_refid);
         // if the source is in an inventory
         auto src = GetSource(source_formid);
+        if (!src) return RaiseMngrErr("RegisterAndUpdate: Source is null.");
         auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(location_refid);
-        if (!ref) return RaiseMngrErr("Ref is null.");
+        if (!ref) return RaiseMngrErr("RegisterAndUpdate: Ref is null.");
         if (ref->HasContainer() || location_refid == player_refid) {
             logger::trace("Registering in inventory.");
             const auto stage_formid = src->stages[0].formid;
@@ -658,8 +647,8 @@ public:
         }
         // so it was registered before
         auto source = GetStageSource(pickedup_formid); // registeredsa stage olmak zorunda
-        source->PrintData();
         if (!source) return RaiseMngrErr("HandlePickUp: Source not found.");
+        source->PrintData();
         for (auto& st_inst: source->data) {
             if (st_inst.location == wo_refid) {
                 st_inst.location = npc_refid;
@@ -751,26 +740,32 @@ public:
 
     }
 
-    [[nodiscard]] const bool IsExternalContainer(FormID fake_id,RefID refid){
+    [[nodiscard]] const bool IsExternalContainer(const FormID stage_id, const RefID refid) {
         if (!refid) return false;
         auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(refid);
         if (!ref) return false;
         if (!ref->HasContainer()) return false;
-        return ExternalContainerIsRegistered(fake_id,refid);
+        const auto src = GetStageSource(stage_id);
+        if (!src) return false;
+        for (const auto& st_inst : src->data) {
+            if (st_inst.location == refid) return true;
+        }
+        return false;
     }
 
-    [[nodiscard]] const bool IsExternalContainer(RE::TESObjectREFR* external_ref) {
+    [[nodiscard]] const bool IsExternalContainer(const RE::TESObjectREFR* external_ref) {
         if (!external_ref) return false;
         if (!external_ref->HasContainer()) return false;
+        const auto external_refid = external_ref->GetFormID();
         for (const auto& src : sources) {
 			for (const auto& st_inst : src.data) {
-				if (st_inst.location == external_ref->GetFormID()) return true;
+                if (st_inst.location == external_refid) return true;
 			}
 		}
         return false;
     }
 
-    void LinkExternalContainer(const FormID formid, Count item_count, const RefID externalcontainer) {
+    void LinkExternalContainer(const FormID stage_formid, Count item_count, const RefID externalcontainer) {
         ENABLE_IF_NOT_UNINSTALLED
         const auto external_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(externalcontainer);
         if (!external_ref) return RaiseMngrErr("External ref is null.");
@@ -780,20 +775,12 @@ public:
         }
 
         logger::trace("Linking external container.");
-        const auto source = GetStageSource(formid);
+        const auto source = GetStageSource(stage_formid);
         if (!source) return RaiseMngrErr("LinkExternalContainer: Source not found.");
-        int stage_no = -1;
-        for (const auto& [st_no, stage] : source->stages) {
-            if (stage.formid == formid) {
-                stage_no = st_no;
-                break;
-            }
-        }
-        if (stage_no == -1) return RaiseMngrErr("LinkExternalContainer: Stage not found.");
+        const auto stage_no = GetStageNoFromSource(source, stage_formid);
         std::vector<StageInstance*> instances_candidates;
         for (auto& st_inst : source->data) {
-            if (static_cast<int>(st_inst.no) != stage_no) continue;
-            if (st_inst.location == 20) instances_candidates.push_back(&st_inst);
+            if (st_inst.no == stage_no && st_inst.location == player_refid) instances_candidates.push_back(&st_inst);
         }
         // need to now order the instances_candidates by their start_time
         std::sort(instances_candidates.begin(), instances_candidates.end(),
@@ -829,31 +816,27 @@ public:
         // }
     }
 
-    void UnLinkExternalContainer(const FormID fake_formid, Count count,const RefID externalcontainer) { 
+    void UnLinkExternalContainer(const FormID stage_formid, Count count,const RefID externalcontainer) { 
         if (!externalcontainer) return RaiseMngrErr("External container is null.");
-        if (!fake_formid) {
+        if (!stage_formid) {
             logger::error("Fake formid is null.");
             return;
         }
-        if (!IsExternalContainer(fake_formid, externalcontainer)) {
+        if (!IsExternalContainer(stage_formid, externalcontainer)) {
             logger::error("External container is not registered.");
             return;
         }
-
-        auto source = GetStageSource(fake_formid);
-        if (!source) return RaiseMngrErr("UnLinkExternalContainer: Source not found.");
-        int stage_no = -1;
-        for (const auto& [st_no, stage] : source->stages) {
-			if (stage.formid == fake_formid) {
-				stage_no = st_no;
-				break;
-			}
+        if (!IsStage(stage_formid)) {
+			logger::error("Not a stage item.");
+			return;
 		}
-        if (stage_no == -1) return RaiseMngrErr("Stage not found.");
+        auto source = GetStageSource(stage_formid);
+        if (!source) return RaiseMngrErr("UnLinkExternalContainer: Source not found.");
+        const auto stage_no = GetStageNoFromSource(source, stage_formid);
+
         std::vector<StageInstance*> instances_candidates;
         for (auto& st_inst : source->data) {
-			if (static_cast<int>(st_inst.no) != stage_no) continue;
-			if (st_inst.location == externalcontainer) instances_candidates.push_back(&st_inst);
+            if (st_inst.no == stage_no && st_inst.location == externalcontainer) instances_candidates.push_back(&st_inst);
         }
         // need to now order the instances_candidates by their start_time
         std::sort(instances_candidates.begin(), instances_candidates.end(),
@@ -864,11 +847,11 @@ public:
         for (auto& instance : instances_candidates) {
             if (count <= instance->count) {
                 instance->count -= count;
-                source->data.emplace_back(instance->start_time, instance->no, count, 20);
+                source->data.emplace_back(instance->start_time, instance->no, count, player_refid);
 				return;
 			} else {
                 count -= instance->count;
-				instance->location = 20;
+                instance->location = player_refid;
 			}
         }
         
