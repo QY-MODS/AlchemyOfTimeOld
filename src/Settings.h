@@ -239,7 +239,7 @@ struct Source {
         if (!form || !bound_) {
             InitFailed();
             return;
-        }
+        } else editorid = form->GetFormEditorID();
         
         if (!Settings::IsItem(formid)) {
             InitFailed();
@@ -342,6 +342,23 @@ struct Source {
         return nullptr;
     }
     
+    [[nodiscard]] const bool InsertData(const float st, const StageNo n, const Count c, const RefID l){
+        if (!stages.count(n)) {
+        	logger::error("Stage {} does not exist.", n);
+        	return false;
+        }
+        if (c < 0) {
+			logger::error("Count is less than 0.");
+			return false;
+		}
+        const auto editorid_ = stages[n].GetEditorID();
+        if (editorid_.empty()) {
+            logger::critical("Editorid is empty.");
+            return false;
+        }
+        data.emplace_back(st, n, c, l, editorid_);
+        return true;
+    }
 
     void CleanUpData() {
 		logger::trace("Cleaning up data.");

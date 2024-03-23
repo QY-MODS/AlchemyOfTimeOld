@@ -6,7 +6,6 @@
 class Manager {
     
     RE::TESObjectREFR* player_ref = RE::PlayerCharacter::GetSingleton()->As<RE::TESObjectREFR>();
-    const RefID player_refid = 20;
     RE::EffectSetting* empty_mgeff;
     
     
@@ -327,10 +326,11 @@ class Manager {
         if (!src) {
             Source new_source(source_formid, "", empty_mgeff);
             if (new_source.init_failed) return RaiseMngrErr("Register: New source init failed.");
-            new_source.data.emplace_back(curr_time, 0, count, location_refid);
+            if (!new_source.InsertData(curr_time, 0, count, location_refid)) return RaiseMngrErr("Register: InsertData failed 1.");
             sources.push_back(new_source);
             logger::trace("New source created.");
-        } else src->data.emplace_back(curr_time, 0, count, location_refid);
+        } else if (!src->InsertData(curr_time, 0, count, location_refid))
+            return RaiseMngrErr("Register: InsertData failed 2.");
     }
 
     void RaiseMngrErr(const std::string err_msg_ = "Error") {
@@ -577,7 +577,11 @@ public:
                         Utilities::FunctionsSkyrim::SetObjectCount(dropped_stage_ref, count);
                     }
                     //dropped_stage_ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
-                    source->data.emplace_back(instance->start_time, instance->no, count, dropped_stage_ref->GetFormID());
+                    if (!source->InsertData(instance->start_time, instance->no, count,
+                                            dropped_stage_ref->GetFormID())) {
+                        return RaiseMngrErr("HandleDrop: InsertData failed.");
+                    }
+                        
                     refs_to_be_updated.push_back(dropped_stage_ref);
                     handled_first_stack = true;
                 } else {
@@ -587,7 +591,9 @@ public:
                     if (new_ref->extraList.GetCount() != count) {
 						logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), count);
 					}
-					source->data.emplace_back(instance->start_time, instance->no, count, new_ref->GetFormID());
+                    if (!source->InsertData(instance->start_time, instance->no, count, new_ref->GetFormID())) {
+                        return RaiseMngrErr("HandleDrop: InsertData failed.");
+                    }
                     refs_to_be_updated.push_back(new_ref);
                 }
                 break;
@@ -791,7 +797,9 @@ public:
         for (auto& instance : instances_candidates) {
             if (item_count <= instance->count) {
                 instance->count -= item_count;
-                source->data.emplace_back(instance->start_time, instance->no, item_count, externalcontainer);
+                if (!source->InsertData(instance->start_time, instance->no, item_count, externalcontainer)){
+                    return RaiseMngrErr("LinkExternalContainer: InsertData failed.");
+                }
                 logger::trace("Linked external container.");
                 break;
             } else {
@@ -847,7 +855,9 @@ public:
         for (auto& instance : instances_candidates) {
             if (count <= instance->count) {
                 instance->count -= count;
-                source->data.emplace_back(instance->start_time, instance->no, count, player_refid);
+                if (!source->InsertData(instance->start_time, instance->no, count, player_refid)){
+                    return RaiseMngrErr("UnLinkExternalContainer: InsertData failed.");
+                }
 				return;
 			} else {
                 count -= instance->count;

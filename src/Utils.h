@@ -847,6 +847,11 @@ namespace Utilities{
 
             RE::TESBoundObject* GetBound() { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid); };
 
+            std::string GetEditorID() {
+				if (auto bound = GetBound()) return bound->GetFormEditorID();
+				return "";
+			}
+
             [[nodiscard]] const bool CheckIntegrity() {
                 if (!formid || !GetBound()) {
 					logger::error("FormID or bound is null");
@@ -876,9 +881,11 @@ namespace Utilities{
             Count count;
             RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is
                              // out in the world
+            std::string editorid;
 
             StageInstance() : start_time(0), no(0), count(0), location(0) {}
-            StageInstance(float st, StageNo n, Count c, RefID l) : start_time(st), no(n), count(c), location(l) {}
+            StageInstance(float st, StageNo n, Count c, RefID l, std::string ei)
+                : start_time(st), no(n), count(c), location(l), editorid(ei) {}
         };
 
         struct StageUpdate {
