@@ -138,7 +138,10 @@ class Manager {
     }
 
     void UpdateSpoilageInInventory(RE::TESObjectREFR* inventory_owner, Count update_count, FormID old_item, FormID new_item){
-        if (new_item == old_item) return;
+        if (new_item == old_item) {
+            logger::trace("UpdateSpoilageInInventory: New item is the same as the old item.");
+            return;
+        }
         if (!inventory_owner) return RaiseMngrErr("Inventory owner is null.");
         logger::trace("Updating spoilage in inventory of {} Count {} , Old item {} , New item {}",
                       inventory_owner->GetName(),
@@ -159,12 +162,14 @@ class Manager {
         logger::trace("Spoilage updated in inventory.");
     }
 
-    void _UpdateSpoilageInWorld_Fake(RE::TESObjectREFR* wo_ref,RE::TESBoundObject* stage_bound) {
+    void _UpdateSpoilageInWorld_Fake(RE::TESObjectREFR* wo_ref, RE::ExtraTextDisplayData* xText) {
+        if (!xText) {
+            logger::error("ExtraTextDisplayData is null.");
+            return;
+        }
         logger::trace("Setting text display data.");
         wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
-        auto textDisplayData = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
-        textDisplayData->SetName(stage_bound->GetName());
-        wo_ref->extraList.Add(textDisplayData);
+        wo_ref->extraList.Add(xText);
     }
 
     void _UpdateSpoilageInWorld_Custom(RE::TESObjectREFR* wo_ref, RE::TESBoundObject* stage_bound) {
@@ -173,9 +178,9 @@ class Manager {
         Utilities::FunctionsSkyrim::SwapObjects(wo_ref, stage_bound);
     }
 
-    void _UpdateSpoilageInWorld(RE::TESObjectREFR* wo_ref, RE::TESBoundObject* stage_bound, bool is_fake){
-        if (is_fake) _UpdateSpoilageInWorld_Fake(wo_ref, stage_bound);
-		else _UpdateSpoilageInWorld_Custom(wo_ref, stage_bound);
+    void _UpdateSpoilageInWorld(RE::TESObjectREFR* wo_ref, Stage& stage, bool is_fake){
+        if (is_fake) _UpdateSpoilageInWorld_Fake(wo_ref, stage.GetExtraText());
+		else _UpdateSpoilageInWorld_Custom(wo_ref, stage.GetBound());
     };
 
     // updates and makes them take effect in the world
@@ -197,14 +202,13 @@ class Manager {
 
         auto updates = source->UpdateAllStages({wo_refid});
         if (updates.empty()) new_st_no = st_inst.no;
-        else if (updates.size() > 1) RaiseMngrErr("More than one update.");
+        else if (updates.size() > 1) return RaiseMngrErr("More than one update.");
         else new_st_no = updates.front().new_no;
 
-        const auto bound = source->stages[new_st_no].GetBound();
         const bool new_is_fake_stage = source->IsFakeStage(new_st_no);
 
         if (IsStage(wo_ref) && new_is_fake_stage) Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source->GetBoundObject());
-        _UpdateSpoilageInWorld(wo_ref, bound, new_is_fake_stage);
+        _UpdateSpoilageInWorld(wo_ref, source->stages[new_st_no], new_is_fake_stage);
 	}
 
     const RE::ObjectRefHandle RemoveItemReverse(RE::TESObjectREFR* moveFrom, RE::TESObjectREFR* moveTo, FormID item_id, Count count,
@@ -265,55 +269,55 @@ class Manager {
         setListenContainerChange(true);
     }
 
-    [[nodiscard]] const bool PickUpItem(RE::TESObjectREFR* item, Count count,const unsigned int max_try = 3) {
-        //std::lock_guard<std::mutex> lock(mutex);
-        
-        logger::trace("PickUpItem");
+    //[[nodiscard]] const bool PickUpItem(RE::TESObjectREFR* item, Count count,const unsigned int max_try = 3) {
+    //    //std::lock_guard<std::mutex> lock(mutex);
+    //    
+    //    logger::trace("PickUpItem");
 
-        if (!item) {
-            logger::warn("Item is null");
-            return false;
-        }
-        if (!player_ref) {
-            logger::warn("Actor is null");
-            return false;
-        }
+    //    if (!item) {
+    //        logger::warn("Item is null");
+    //        return false;
+    //    }
+    //    if (!player_ref) {
+    //        logger::warn("Actor is null");
+    //        return false;
+    //    }
 
-        logger::trace("PickUpItem: Setting listen container change to false.");
-        setListenContainerChange(false);
-        //listen_container_change = false;
+    //    logger::trace("PickUpItem: Setting listen container change to false.");
+    //    setListenContainerChange(false);
+    //    //listen_container_change = false;
 
-        logger::trace("PickUpItem: Getting item bound.");
-        auto item_bound = item->GetBaseObject();
-        const auto item_count = Utilities::FunctionsSkyrim::GetItemCount(item_bound, player_ref);
-        logger::trace("Item count: {}", item_count);
-        unsigned int i = 0;
-        if (!item_bound) {
-            logger::warn("Item bound is null");
-            return false;
-        }
+    //    logger::trace("PickUpItem: Getting item bound.");
+    //    auto item_bound = item->GetBaseObject();
+    //    const auto item_count = Utilities::FunctionsSkyrim::GetItemCount(item_bound, player_ref);
+    //    logger::trace("Item count: {}", item_count);
+    //    unsigned int i = 0;
+    //    if (!item_bound) {
+    //        logger::warn("Item bound is null");
+    //        return false;
+    //    }
 
-        item->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
-        logger::trace("PickUpItem: Picking up item.");
-        while (i < max_try) {
-            logger::trace("Critical: PickUpItem");
-            RE::PlayerCharacter::GetSingleton()->PickUpObject(item, count, true, false);
-            logger::trace("Item picked up. Checking if it is in inventory...");
-            auto new_item_count = Utilities::FunctionsSkyrim::GetItemCount(item_bound, player_ref);
-            if (new_item_count > item_count) {
-                if (i) logger::warn("Item picked up with new item count: {}. Took {} extra tries.", new_item_count, i);
-                setListenContainerChange(true);
-                return true;
-            } else
-                logger::trace("item count: {}", Utilities::FunctionsSkyrim::GetItemCount(item_bound, player_ref));
-            i++;
-        }
+    //    item->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+    //    logger::trace("PickUpItem: Picking up item.");
+    //    while (i < max_try) {
+    //        logger::trace("Critical: PickUpItem");
+    //        RE::PlayerCharacter::GetSingleton()->PickUpObject(item, count, true, false);
+    //        logger::trace("Item picked up. Checking if it is in inventory...");
+    //        auto new_item_count = Utilities::FunctionsSkyrim::GetItemCount(item_bound, player_ref);
+    //        if (new_item_count > item_count) {
+    //            if (i) logger::warn("Item picked up with new item count: {}. Took {} extra tries.", new_item_count, i);
+    //            setListenContainerChange(true);
+    //            return true;
+    //        } else
+    //            logger::trace("item count: {}", Utilities::FunctionsSkyrim::GetItemCount(item_bound, player_ref));
+    //        i++;
+    //    }
 
-        logger::warn("Item not picked up.");
-        setListenContainerChange(true);
-        //listen_container_change = true;
-        return false;
-    }
+    //    logger::warn("Item not picked up.");
+    //    setListenContainerChange(true);
+    //    //listen_container_change = true;
+    //    return false;
+    //}
 
     /*void AddExtraText(RE::TESObjectREFR* ref, const std::string& text) {
 		if (!ref) return RaiseMngrErr("Ref is null.");
@@ -521,7 +525,14 @@ public:
     void HandleDrop(const FormID dropped_formid, Count count, RE::TESObjectREFR* dropped_stage_ref){
         ENABLE_IF_NOT_UNINSTALLED
         
-        mutex.lock();
+        if (!dropped_formid) return RaiseMngrErr("Formid is null.");
+        if (!dropped_stage_ref) return RaiseMngrErr("Ref is null.");
+        if (!count) {
+			logger::warn("Count is 0.");
+			return;
+		}
+
+        //mutex.lock();
 
         logger::trace("HandleDrop: dropped_formid {} , Count {}", dropped_formid, count);
         if (!dropped_stage_ref) return RaiseMngrErr("Ref is null.");
@@ -529,14 +540,24 @@ public:
             logger::error("HandleDrop: Not a stage item.");
             return;
         }
-        if (dropped_stage_ref->extraList.GetCount() != count) {
-			logger::warn("HandleDrop: Count mismatch: {} , {}", dropped_stage_ref->extraList.GetCount(), count);
-		}
         auto source = GetStageSource(dropped_formid);
         if (!source) {
             logger::critical("HandleDrop: Source not found! Fakeform not registered!");
             return;
         }
+        if (RefIsRegistered(dropped_stage_ref->GetFormID())){
+            logger::warn("Ref is registered at HandleDrop!");
+            const auto curr_count = dropped_stage_ref->extraList.GetCount();
+            Utilities::FunctionsSkyrim::SetObjectCount(dropped_stage_ref, count + curr_count);
+            return;
+        }
+        else if (dropped_stage_ref->extraList.GetCount() != count) {
+			logger::warn("HandleDrop: Count mismatch: {} , {}", dropped_stage_ref->extraList.GetCount(), count);
+            //dropped_stage_ref->extraList.SetCount(static_cast<uint16_t>(count));
+		}
+        
+        //source->UpdateAllStages({player_refid});
+        source->PrintData();
         const auto stage_no = GetStageNoFromSource(source, dropped_formid);
         // at the same stage but different start times
         std::vector<StageInstance*> instances_candidates;
@@ -546,50 +567,76 @@ public:
 		}
         // need to now order the instances_candidates by their start_time
         std::sort(instances_candidates.begin(), instances_candidates.end(), [](StageInstance* a, StageInstance* b) {
-			return a->start_time > b->start_time; // keep the good stuff
+			return a->start_time < b->start_time; // use up the old stuff first
 		});
 
         auto real_bound = source->GetBoundObject();
 
         logger::trace("HandleDrop: setting count");
         bool handled_first_stack = false;
-        for (const auto& instance : instances_candidates) {
+        std::vector<RE::TESObjectREFR*> refs_to_be_updated;
+        for (auto& instance : instances_candidates) {
             if (count <= instance->count) {
-                logger::trace("SADSJFHÖADF 1");
+                logger::trace("instance count: {}", instance->count);
+                logger::trace("count: {}", count);
                 instance->count -= count;
+                logger::trace("instance count: {}", instance->count);
+                logger::trace("count: {}", count);
                 if (!handled_first_stack) {
-                    dropped_stage_ref->extraList.SetCount(static_cast<uint16_t>(count));
-                    dropped_stage_ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+                    logger::trace("SADSJFHÖADF 1");
+                    if (Utilities::FunctionsSkyrim::GetObjectCount(dropped_stage_ref) != static_cast<int16_t>(count)) {
+                        Utilities::FunctionsSkyrim::SetObjectCount(dropped_stage_ref, count);
+                    }
+                    //dropped_stage_ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
                     source->data.emplace_back(instance->start_time, instance->no, count, dropped_stage_ref->GetFormID());
-                    UpdateSpoilageInWorld(dropped_stage_ref);
+                    refs_to_be_updated.push_back(dropped_stage_ref);
                     handled_first_stack = true;
                 } else {
                     logger::trace("SADSJFHÖADF 2");
                     auto new_ref = Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(real_bound, count, nullptr);
+                    if (!new_ref) return RaiseMngrErr("HandleDrop: New ref is null.");
+                    if (new_ref->extraList.GetCount() != count) {
+						logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), count);
+					}
 					source->data.emplace_back(instance->start_time, instance->no, count, new_ref->GetFormID());
-                    UpdateSpoilageInWorld(new_ref);
+                    refs_to_be_updated.push_back(new_ref);
                 }
                 break;
             } else {
+                logger::trace("instance count: {}", instance->count);
+                logger::trace("count: {}", count);
                 count -= instance->count;
+                logger::trace("instance count: {}", instance->count);
+                logger::trace("count: {}", count);
                 if (!handled_first_stack) {
                     logger::trace("SADSJFHÖADF 3");
-                    dropped_stage_ref->extraList.SetCount(static_cast<uint16_t>(instance->count));
-                    dropped_stage_ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+                    if (Utilities::FunctionsSkyrim::GetObjectCount(dropped_stage_ref) != static_cast<int16_t>(count)) {
+                        Utilities::FunctionsSkyrim::SetObjectCount(dropped_stage_ref, instance->count);
+                    }
+                    //dropped_stage_ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
                     instance->location = dropped_stage_ref->GetFormID();
-                    UpdateSpoilageInWorld(dropped_stage_ref);
+                    refs_to_be_updated.push_back(dropped_stage_ref);
                     handled_first_stack = true;
                 } else {
                     logger::trace("SADSJFHÖADF 4");
-                    auto new_ref = Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(real_bound, instance->count, nullptr);
+                    auto new_ref =
+                        Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(real_bound, instance->count, nullptr);
+                    if (!new_ref) return RaiseMngrErr("HandleDrop: New ref is null.");
+                    if (new_ref->extraList.GetCount() != instance->count) {
+                        logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), instance->count);
+                    }
                     instance->location = new_ref->GetFormID();
-                    UpdateSpoilageInWorld(new_ref);
+                    refs_to_be_updated.push_back(new_ref);
                 }
             }
         }
 
+        // TODO: optimize it
+        for (auto& ref : refs_to_be_updated) UpdateSpoilageInWorld(ref);
+
         source->CleanUpData();
-        mutex.unlock();
+        source->PrintData();
+        //mutex.unlock();
     }
 
     void HandlePickUp(const FormID pickedup_formid, const Count count, const RefID wo_refid, const bool eat,
@@ -611,6 +658,7 @@ public:
         }
         // so it was registered before
         auto source = GetStageSource(pickedup_formid); // registeredsa stage olmak zorunda
+        source->PrintData();
         if (!source) return RaiseMngrErr("HandlePickUp: Source not found.");
         for (auto& st_inst: source->data) {
             if (st_inst.location == wo_refid) {
@@ -635,6 +683,7 @@ public:
 			}
 		}
 		source->CleanUpData();
+        source->PrintData();
     }
 
     void HandleConsume(const FormID fake_formid, Count count) {
@@ -694,9 +743,11 @@ public:
             if (st_inst.location == 20) instances_candidates.push_back(&st_inst);
         }
         std::sort(instances_candidates.begin(), instances_candidates.end(),
-                  [](StageInstance* a, StageInstance* b) { return a->start_time < b->start_time; });
+                  [](StageInstance* a, StageInstance* b) { 
+                return a->start_time < b->start_time; // eat the older stuff but at same stage
+            });
 
-        for (const auto& instance : instances_candidates) {
+        for (auto& instance : instances_candidates) {
 			if (count <= instance->count) {
 				instance->count -= count;
 				return;
@@ -754,9 +805,11 @@ public:
         }
         // need to now order the instances_candidates by their start_time
         std::sort(instances_candidates.begin(), instances_candidates.end(),
-                [](StageInstance* a, StageInstance* b) { return a->start_time > b->start_time; });
+                [](StageInstance* a, StageInstance* b) { 
+                return a->start_time < b->start_time; // store the older stuff
+            });
 
-        for (const auto& instance : instances_candidates) {
+        for (auto& instance : instances_candidates) {
             if (item_count <= instance->count) {
                 instance->count -= item_count;
                 source->data.emplace_back(instance->start_time, instance->no, item_count, externalcontainer);
@@ -812,9 +865,11 @@ public:
         }
         // need to now order the instances_candidates by their start_time
         std::sort(instances_candidates.begin(), instances_candidates.end(),
-				  [](StageInstance* a, StageInstance* b) { return a->start_time < b->start_time; });
+				  [](StageInstance* a, StageInstance* b) { 
+                return a->start_time > b->start_time; // get the good stuff
+            });
 
-        for (const auto& instance : instances_candidates) {
+        for (auto& instance : instances_candidates) {
             if (count <= instance->count) {
                 instance->count -= count;
                 source->data.emplace_back(instance->start_time, instance->no, count, 20);
@@ -889,7 +944,7 @@ public:
                     logger::trace("UpdateSpoilage: ref out in the world.");
                     bool new_is_fake = src.IsFakeStage(updated_inst.new_no);
                     if (IsStage(ref) && new_is_fake) Utilities::FunctionsSkyrim::SwapObjects(ref, src.GetBoundObject());
-                    _UpdateSpoilageInWorld(ref, src.stages[updated_inst.new_no].GetBound(), new_is_fake);
+                    _UpdateSpoilageInWorld(ref, src.stages[updated_inst.new_no], new_is_fake);
                 } 
                 else {
 					RaiseMngrErr("UpdateSpoilage: Unknown ref type.");
@@ -910,12 +965,12 @@ public:
     void SwapWithStage(RE::TESObjectREFR* wo_ref) {
         if (!wo_ref) return RaiseMngrErr("Ref is null.");
         if (!Settings::IsItem(wo_ref)) return;
-        // 1. registered olmadii icin stage olmayabilir
-        // 2. counterparti fake olduu icin disarda base basele represente olabilir
         if (IsStage(wo_ref)) return;
         
         logger::trace("SwapWithStage");
         
+        // 1. registered olmadii icin stage olmayabilir
+        // 2. counterparti fake olduu icin disarda base basele represente olabilir
         const auto wo_refid = wo_ref->GetFormID();
         const auto formid = wo_ref->GetBaseObject()->GetFormID();
         if (!RefIsRegistered(wo_ref->GetFormID())) {
@@ -925,8 +980,11 @@ public:
             }
             Register(formid, wo_ref->extraList.GetCount(), wo_ref->GetFormID());
             auto source = GetSource(formid);
-            wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
             Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source->stages[0].GetBound());
+            // remove the extra data that cause issues when dropping
+            for (const auto& i: Settings::xRemove) 
+                wo_ref->extraList.RemoveByType(static_cast<RE::ExtraDataType>(i));
+            Utilities::FunctionsSkyrim::PrintObjectExtraData(wo_ref);
             return;
 		}
         auto source = GetSource(formid);
@@ -937,13 +995,63 @@ public:
                     logger::warn("SwapWithStage: Not a fake stage.");
                     return;
                 }
-                wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
                 Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source->stages[st_inst.no].GetBound(),false);
+                // remove the extra data that cause issues when dropping
+                for (const auto& i : Settings::xRemove)
+                    wo_ref->extraList.RemoveByType(static_cast<RE::ExtraDataType>(i));
+                Utilities::FunctionsSkyrim::PrintObjectExtraData(wo_ref);
+                logger::trace("SwapWithStage: Swapped.");
 				return;
 			}
 		}
+        logger::warn("SwapWithStage: Not found in source.");
     }
 
+    void JustRemove(const FormID stage_formid) {
+        if (!stage_formid) {
+			logger::warn("Formid is null.");
+			return;
+		}
+        if (!IsStage(stage_formid)) {
+			logger::warn("Not a stage item.");
+			return;
+		}
+        auto source = GetStageSource(stage_formid);
+        if (!source) {
+            logger::warn("Source not found.");
+            return;
+        }
+        const auto stage_no = GetStageNoFromSource(source, stage_formid);
+        int total_registered_count = 0;
+        for (auto& st_inst : source->data) {
+			if (st_inst.no == stage_no) total_registered_count += st_inst.count;
+		}
+        const auto entry = player_ref->GetInventory().find(source->stages[stage_no].GetBound());
+        const auto player_count = entry != player_ref->GetInventory().end() ? entry->second.first : 0;
+        int diff = total_registered_count - player_count;
+        if (diff < 0) {
+            logger::warn("JustRemove: Something could have gone wrong with registration.");
+            return;
+        }
+        if (diff == 0) {
+			logger::warn("JustRemove: Nothing to remove.");
+			return;
+		}
+        for (auto& st_inst : source->data) {
+            if (st_inst.no == stage_no && st_inst.location == player_refid) {
+                if (diff <= st_inst.count) {
+                    st_inst.count -= diff;
+					return;
+                } else {
+                    diff -= st_inst.count;
+                    st_inst.count = 0;
+                }
+			}
+		}
+		source->CleanUpData();
+        
+
+    }
     //void ReceiveData() {
     //    logger::info("--------Receiving data---------");
 

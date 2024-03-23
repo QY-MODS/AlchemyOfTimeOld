@@ -74,7 +74,7 @@ public:
             
         picked_up_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         picked_up_refid = event->objectActivated->GetFormID();
-        logger::trace("Picked up: {} at time {}", picked_up_refid, picked_up_time);
+        logger::trace("Picked up: {} at time {}, count: {}", picked_up_refid, picked_up_time, event->objectActivated->extraList.GetCount());
 
         M->SwapWithStage(event->objectActivated.get());
         return RE::BSEventNotifyControl::kContinue;
@@ -276,13 +276,12 @@ public:
                 logger::trace("Reference: {}", reference_.native_handle());
                 RE::TESObjectREFR* ref = Utilities::FunctionsSkyrim::TryToGetRefFromHandle(reference_);
                 if (ref) logger::trace("Dropped ref name: {}", ref->GetBaseObject()->GetName());
-                if (!ref || ref->GetBaseObject()->GetFormID() != event->baseObj) {
+                if (!ref) {
                     // iterate through all objects in the cell................
                     logger::info("Iterating through all references in the cell.");
                     ref = Utilities::FunctionsSkyrim::TryToGetRefInCell(event->baseObj,event->itemCount);
                 } 
                 if (ref) {
-                    if (M->RefIsRegistered(ref->GetFormID())) logger::warn("Ref is registered at HandleDrop!");
                     M->HandleDrop(event->baseObj, event->itemCount, ref);
                 }
                 else if (event->baseObj == fake_equipped_id) {
@@ -312,8 +311,9 @@ public:
                 M->LinkExternalContainer(event->baseObj,event->itemCount,event->newContainer);
             }
             else {
-                Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Unsupported behaviour. Please put back the item(s) you removed from your inventory.");
-                logger::error("Unsupported. Please put back the item(s) you removed from your inventory.");
+                Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Food got removed from player inventory due to unknown reason.");
+                // remove from one of the instances
+                M->JustRemove(event->baseObj);
             }
 
         }

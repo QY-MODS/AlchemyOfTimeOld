@@ -196,6 +196,14 @@ namespace Utilities{
             return length;
         }
 
+        void PrintObjectExtraData(RE::TESObjectREFR* ref) {
+            for (int i = 0; i < 191; i++) {
+                if (ref->extraList.HasType(static_cast<RE::ExtraDataType>(i))) {
+					logger::info("ExtraDataList type: {}", i);
+				}
+			}
+        }
+
 
         bool FormIsOfType(RE::TESForm* form, RE::FormType type) {
             if (!form) return false;
@@ -458,8 +466,36 @@ namespace Utilities{
             
         }
 
+        void SetObjectCount(RE::TESObjectREFR* ref, Count count) {
+            if (!ref) {
+                logger::error("Ref is null.");
+                return;
+            }
+            int max_try = 10;
+            while (ref->extraList.HasType(RE::ExtraDataType::kCount) && max_try) {
+                ref->extraList.RemoveByType(RE::ExtraDataType::kCount);
+                max_try--;
+            }
+            // ref->extraList.SetCount(static_cast<uint16_t>(count));
+            auto xCount = new RE::ExtraCount(static_cast<int16_t>(count));
+            ref->extraList.Add(xCount);
+        }
 
-        RE::TESObjectREFR* DropObjectIntoTheWorld(RE::TESBoundObject* obj, Count count, RE::ExtraDataList*) {
+        const int16_t GetObjectCount(RE::TESObjectREFR* ref) {
+            if (!ref) {
+                logger::error("Ref is null.");
+                return 0;
+            }
+            if (ref->extraList.HasType(RE::ExtraDataType::kCount)) {
+                RE::ExtraCount* xCount = ref->extraList.GetByType<RE::ExtraCount>();
+                return xCount->count;
+            }
+            return 0;
+        }
+
+
+        RE::TESObjectREFR* DropObjectIntoTheWorld(RE::TESBoundObject* obj, Count count, RE::ExtraDataList*,
+                                                  bool owned = true) {
             auto player_ch = RE::PlayerCharacter::GetSingleton();
             auto player_pos = player_ch->GetPosition();
             // distance in the xy-plane
@@ -474,19 +510,20 @@ namespace Utilities{
             auto newPropRef =
                 RE::TESDataHandler::GetSingleton()
                                   ->CreateReferenceAtLocation(obj, player_pos, {0.0f, 0.0f, 0.0f}, player_cell,
-                                                player_ws, nullptr, nullptr, {}, true, false)
+                                                              player_ws, nullptr, nullptr, {}, false, false)
                     .get()
                     .get();
             if (!newPropRef) {
                 logger::critical("New prop ref is null.");
                 return nullptr;
             }
-            newPropRef->extraList.SetCount(static_cast<uint16_t>(count));
-            newPropRef->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+            SetObjectCount(newPropRef, count);
+            if (owned) newPropRef->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
             return newPropRef;
         }
 
         void SwapObjects(RE::TESObjectREFR* a_from, RE::TESBoundObject* a_to, const bool apply_havok=true) {
+            logger::trace("SwapObjects");
             if (!a_from) {
                 logger::error("Ref is null.");
                 return;
@@ -501,6 +538,8 @@ namespace Utilities{
 				return;
 			}
             a_from->SetObjectReference(a_to);
+            a_from->Disable();
+            a_from->Enable(false);
             if (!apply_havok) return;
 
             /*float afX = 100;
@@ -513,23 +552,19 @@ namespace Utilities{
             SKSE::GetTaskInterface()->AddTask([a_from]() {
                 // auto player_ch = RE::PlayerCharacter::GetSingleton();
                 // player_ch->StartGrabObject();
-                a_from->Disable();
-                a_from->Enable(false);
                 auto vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
                 auto policy = vm->GetObjectHandlePolicy();
                 auto handle = policy->GetHandleForObject(a_from->GetFormType(), a_from);
                 RE::BSTSmartPointer<RE::BSScript::Object> object = nullptr;
                 vm->CreateObject2("ObjectReference", object);
                 vm->BindObject(object, handle, false);
-                if (!object)
-                    logger::warn("Object is null");
-                else
-                    logger::trace("FUSRODAH");
+                if (!object) logger::warn("Object is null");
                 auto args = RE::MakeFunctionArguments(std::move(0.f), std::move(0.f), std::move(0.f), std::move(0.f));
                 RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
-                vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);
+                if (vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback)) logger::trace("FUSRODAH");
             });
         }
+
 
         RE::TESObjectREFR* TryToGetRefInCell(const FormID baseid, const Count count, unsigned int max_try=3) {
             auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
@@ -819,6 +854,17 @@ namespace Utilities{
 				}
 				return true;
             }
+            
+            RE::ExtraTextDisplayData* GetExtraText() {
+                _textData = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
+                _textData->SetName(GetBound()->GetName());
+                return _textData;
+            }
+
+        private:
+            //[[maybe_unused]] RE::ExtraTextDisplayData* _textData = nullptr;
+            RE::ExtraTextDisplayData* _textData = nullptr;
+
         };
 
         using Stages = std::vector<Stage>;

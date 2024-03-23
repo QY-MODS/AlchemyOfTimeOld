@@ -196,7 +196,19 @@ namespace Settings {
         return settings;
     }
 
-
+    // 0x99 - ExtraTextDisplayData 
+    // 0x3C - ExtraSavedHavokData
+    // 0x0B - ExtraPersistentCell
+    // 0x48 - ExtraStartingWorldOrCell
+    // 0x70 - ExtraEncounterZone 112 seems to be ok
+    // 0x7E - ExtraReservedMarkers 126 seems to be ok
+    // 0x88 - ExtraAliasInstanceArray 136 seems to be ok
+    // 0x8C - ExtraPromotedRef 140 NOT OK
+    std::vector<int> xRemove = {0x99, 0x3C, 0x0B, 0x48, 
+                                //0x70, 
+                                 //0x7E, 0x88, 
+        0x8C
+    };
 }
 
 struct Source {
@@ -362,7 +374,21 @@ struct Source {
         logger::trace("Size after cleanup: {}", data.size());
 	}
 
+    RE::ExtraTextDisplayData* GetTextData(const StageNo _no) {
+        return stages[_no].GetExtraText();
+	}
+
+    void PrintData() {
+        logger::trace("Printing data for source {}", editorid);
+		for (auto& instance : data) {
+            logger::trace("No: {}, Location: {}, Count: {}, Start time: {}", instance.no, instance.location,
+                          instance.count, instance.start_time);
+		}
+	
+    }
+
 private:
+
     // counta karismiyor
     [[nodiscard]] const bool _UpdateStage(StageInstance& st_inst) {
         if (!stages.count(st_inst.no)) return false; //decayed
