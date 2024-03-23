@@ -231,7 +231,7 @@ struct Source {
             if (form) {
                 logger::trace("Found formid for editorid {}", editorid);
                 formid = form->GetFormID();
-            } else logger::error("Could not find formid for editorid {}", editorid);
+            } else logger::critical("Could not find formid for editorid {}", editorid);
         }
 
         RE::TESForm* form = Utilities::FunctionsSkyrim::GetFormByID(formid);
@@ -283,13 +283,12 @@ struct Source {
         }
 
         if (!CheckIntegrity()) {
-            logger::error("CheckIntegrity failed");
+            logger::critical("CheckIntegrity failed");
             InitFailed();
 			return;
         }
     };
 
-    
     const std::string_view GetName() {
         auto form = Utilities::FunctionsSkyrim::GetFormByID(formid, editorid);
         if (form) return form->GetName();
@@ -302,6 +301,10 @@ struct Source {
 
     const std::vector<StageUpdate> UpdateAllStages(const std::vector<RefID>& filter = {}) {
         logger::trace("Updating all stages.");
+        if (init_failed) {
+            logger::critical("UpdateAllStages: Initialisation failed.");
+            return {};
+        }
         // save the updated instances
         std::vector<StageUpdate> updated_instances;
         if (data.empty()) {
@@ -336,6 +339,10 @@ struct Source {
   //  }
 
     [[nodiscard]] const StageNo* GetStageNo(const FormID formid_) {
+        if (init_failed) {
+            logger::critical("GetStageNo: Initialisation failed.");
+            return nullptr;
+        }
         for (auto& [key, value] : stages) {
             if (value.formid == formid_) return &key;
         }
@@ -343,6 +350,11 @@ struct Source {
     }
     
     [[nodiscard]] const bool InsertData(const float st, const StageNo n, const Count c, const RefID l){
+        if (init_failed) {
+			logger::critical("InsertData: Initialisation failed.");
+			return false;
+		}
+        
         if (!stages.count(n)) {
         	logger::error("Stage {} does not exist.", n);
         	return false;
@@ -361,6 +373,10 @@ struct Source {
     }
 
     void CleanUpData() {
+        if (init_failed) {
+            logger::critical("CleanUpData: Initialisation failed.");
+            return;
+        }
 		logger::trace("Cleaning up data.");
         // size before cleanup
         logger::trace("Size before cleanup: {}", data.size());
@@ -388,6 +404,12 @@ struct Source {
 				++it;
 			}
 		}
+        
+        if (!CheckIntegrity()) {
+			logger::critical("CheckIntegrity failed");
+			InitFailed();
+        }
+
         logger::trace("Size after cleanup: {}", data.size());
 	}
 
@@ -408,6 +430,10 @@ private:
 
     // counta karismiyor
     [[nodiscard]] const bool _UpdateStage(StageInstance& st_inst) {
+        if (init_failed) {
+        	logger::critical("_UpdateStage: Initialisation failed.");
+            return false;
+        }
         if (!stages.count(st_inst.no)) return false; //decayed
         const auto current_stage = stages[st_inst.no];
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
@@ -593,6 +619,11 @@ private:
    
     [[nodiscard]] const bool CheckIntegrity() {
         
+        if (init_failed) {
+			logger::error("CheckIntegrity: Initialisation failed.");
+			return false;
+		}
+
         if (!GetBoundObject()) {
 			logger::error("Formid {} does not exist.", formid);
 			return false;
@@ -625,6 +656,7 @@ private:
         }
         return true;
 	}
+
 
     void InitFailed(){
         logger::error("Initialisation failed.");
