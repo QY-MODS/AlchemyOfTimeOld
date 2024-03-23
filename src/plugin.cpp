@@ -285,7 +285,7 @@ public:
                     M->HandleDrop(event->baseObj, event->itemCount, ref);
                 }
                 else if (event->baseObj == fake_equipped_id) {
-                    M->HandleConsume(event->baseObj, event->itemCount);
+                    M->HandleConsume(event->baseObj);
                     fake_equipped_id = 0;
                 } 
                 else if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)){
@@ -313,7 +313,7 @@ public:
             else {
                 Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Food got removed from player inventory due to unknown reason.");
                 // remove from one of the instances
-                M->JustRemove(event->baseObj);
+                M->HandleConsume(event->baseObj);
             }
 
         }

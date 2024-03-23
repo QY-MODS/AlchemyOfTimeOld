@@ -686,77 +686,69 @@ public:
         source->PrintData();
     }
 
-    void HandleConsume(const FormID fake_formid, Count count) {
+    void HandleConsume(const FormID stage_formid) {
         ENABLE_IF_NOT_UNINSTALLED
-        logger::trace("HandleConsume");
-        if (!IsStage(fake_formid)) {
-            logger::warn("HandleConsume: Not a fake item.");
+        if (!stage_formid) {
+            logger::warn("HandleConsume:Formid is null.");
+            return;
+        }
+        if (!IsStage(stage_formid)) {
+            logger::warn("HandleConsume:Not a stage item.");
+            return;
+        }
+        auto source = GetStageSource(stage_formid);
+        if (!source) {
+            logger::warn("HandleConsume:Source not found.");
             return;
         }
 
-        auto source = GetStageSource(fake_formid);
+        logger::trace("HandleConsume");
+
+        const auto stage_no = GetStageNoFromSource(source, stage_formid);
+        int total_registered_count = 0;
+        std::vector<StageInstance*> instances_candidates;
+        for (auto& st_inst : source->data) {
+            if (st_inst.no == stage_no && st_inst.location == player_refid) {
+                total_registered_count += st_inst.count;
+                instances_candidates.push_back(&st_inst);
+            }
+        }
+
         // check if player has the fake item
         // sometimes player does not have the fake item but it can still be there with count = 0.
-        const auto fake_obj = RE::TESForm::LookupByID<RE::TESBoundObject>(fake_formid);
-        if (!fake_obj) return RaiseMngrErr("Fake object not found.");
-
-        int registered_count = 0;
-        for (const auto& st_inst : source->data) {
-            if (st_inst.location == 20) registered_count += st_inst.count;
-		}
-        int diff = registered_count - static_cast<int>(count);
+        
+        const auto entry = player_ref->GetInventory().find(source->stages[stage_no].GetBound());
+        const auto player_count = entry != player_ref->GetInventory().end() ? entry->second.first : 0;
+        int diff = total_registered_count - player_count;
         if (diff < 0) {
-			logger::warn("HandleConsume: something could have gone wrong with registration");
-			return;
-		}
-        bool adjust_registered_count = false;
-        auto inventory = player_ref->GetInventory();
-        auto entry = inventory.find(fake_obj);
-        if (entry != inventory.end()) {
-            if (entry->second.first == registered_count){
-                logger::warn("HandleConsume: Seems like false alarm");
-            } 
-            else if (entry->second.first == diff) {
-                logger::trace("HandleConsume: Inventory has expected count");
-                adjust_registered_count = true;
-            }
-        } else {
-			logger::trace("HandleConsume: Item entry not found in inventory");
-			adjust_registered_count = true;
-		}
-        if (!adjust_registered_count) return;
+            logger::warn("HandleConsume: Something could have gone wrong with registration.");
+            return;
+        }
+        if (diff == 0) {
+            logger::warn("HandleConsume: Nothing to remove.");
+            return;
+        }
         
         logger::trace("HandleConsume: Adjusting registered count");
 
-        int stage_no = -1;
-        for (const auto& [st_no, stage] : source->stages) {
-            if (stage.formid == fake_formid) {
-                stage_no = st_no;
-                break;
-            }
-        }
-        if (stage_no == -1) return RaiseMngrErr("HandleConsume: Stage not found.");
-
-        std::vector<StageInstance*> instances_candidates;
-        for (auto& st_inst : source->data) {
-            if (static_cast<int>(st_inst.no) != stage_no) continue;
-            if (st_inst.location == 20) instances_candidates.push_back(&st_inst);
-        }
         std::sort(instances_candidates.begin(), instances_candidates.end(),
                   [](StageInstance* a, StageInstance* b) { 
                 return a->start_time < b->start_time; // eat the older stuff but at same stage
             });
 
         for (auto& instance : instances_candidates) {
-			if (count <= instance->count) {
-				instance->count -= count;
+            if (diff <= instance->count) {
+                instance->count -= diff;
 				return;
 			} else {
-				count -= instance->count;
-				instance->location = 20;
+                diff -= instance->count;
+                instance->count = 0;
 			}
 		}
+
+        source->CleanUpData();
         logger::trace("HandleConsume: updated.");
+
     }
 
     [[nodiscard]] const bool IsExternalContainer(FormID fake_id,RefID refid){
@@ -1007,51 +999,6 @@ public:
         logger::warn("SwapWithStage: Not found in source.");
     }
 
-    void JustRemove(const FormID stage_formid) {
-        if (!stage_formid) {
-			logger::warn("Formid is null.");
-			return;
-		}
-        if (!IsStage(stage_formid)) {
-			logger::warn("Not a stage item.");
-			return;
-		}
-        auto source = GetStageSource(stage_formid);
-        if (!source) {
-            logger::warn("Source not found.");
-            return;
-        }
-        const auto stage_no = GetStageNoFromSource(source, stage_formid);
-        int total_registered_count = 0;
-        for (auto& st_inst : source->data) {
-			if (st_inst.no == stage_no) total_registered_count += st_inst.count;
-		}
-        const auto entry = player_ref->GetInventory().find(source->stages[stage_no].GetBound());
-        const auto player_count = entry != player_ref->GetInventory().end() ? entry->second.first : 0;
-        int diff = total_registered_count - player_count;
-        if (diff < 0) {
-            logger::warn("JustRemove: Something could have gone wrong with registration.");
-            return;
-        }
-        if (diff == 0) {
-			logger::warn("JustRemove: Nothing to remove.");
-			return;
-		}
-        for (auto& st_inst : source->data) {
-            if (st_inst.no == stage_no && st_inst.location == player_refid) {
-                if (diff <= st_inst.count) {
-                    st_inst.count -= diff;
-					return;
-                } else {
-                    diff -= st_inst.count;
-                    st_inst.count = 0;
-                }
-			}
-		}
-		source->CleanUpData();
-        
-
-    }
     //void ReceiveData() {
     //    logger::info("--------Receiving data---------");
 
