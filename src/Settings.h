@@ -239,8 +239,14 @@ struct Source {
         if (!form || !bound_) {
             InitFailed();
             return;
-        } else editorid = form->GetFormEditorID();
+        } else editorid = clib_util::editorID::get_editorID(form);
         
+        if (editorid.empty()) {
+			logger::error("Editorid is empty.");
+			InitFailed();
+			return;
+		}
+
         if (!Settings::IsItem(formid)) {
             InitFailed();
             return;
@@ -363,13 +369,35 @@ struct Source {
 			logger::error("Count is less than 0.");
 			return false;
 		}
-        const auto editorid_ = stages[n].GetEditorID();
-        if (editorid_.empty()) {
-            logger::critical("Editorid is empty.");
+
+        //std::string editorid_;
+        //if (Utilities::Functions::VectorHasElement<StageNo>(fake_stages,n)){
+        //    editorid_ = "";
+        //} else editorid_ = clib_util::editorID::get_editorID(stages[n].GetBound());
+        
+        data.emplace_back(st, n, c, l
+            //, editorid_
+        );
+        return true;
+    }
+
+    [[nodiscard]] const bool DeleteData(const StageInstance& st_inst) {
+        if (init_failed) {
+            logger::critical("DeleteData: Initialisation failed.");
             return false;
         }
-        data.emplace_back(st, n, c, l, editorid_);
-        return true;
+        if (!st_inst.decayed) {
+            logger::error("st_inst {} is not decayed.", st_inst.no);
+			return false;
+        }
+        // find the instance
+        auto it = std::find(data.begin(), data.end(), st_inst);
+        if (it == data.end()) {
+			logger::error("Instance not found.");
+			return false;
+		}
+        data.erase(it);
+		return true;
     }
 
     void CleanUpData() {
@@ -426,6 +454,14 @@ struct Source {
 	
     }
 
+    void Reset() {
+        formid = 0;
+		editorid = "";
+		stages.clear();
+		data.clear();
+		init_failed = false;
+    }
+
 private:
 
     // counta karismiyor
@@ -434,7 +470,7 @@ private:
         	logger::critical("_UpdateStage: Initialisation failed.");
             return false;
         }
-        if (!stages.count(st_inst.no)) return false; //decayed
+        if (st_inst.decayed) return false;  // decayed
         const auto current_stage = stages[st_inst.no];
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         float diff = curr_time - st_inst.start_time;
@@ -451,10 +487,11 @@ private:
             updated = true;
             if (!stages.count(st_inst.no)) {
 			    logger::trace("Decayed");
-                st_inst.no++;
-                // make decayed stage
                 Stage decayed_stage;
                 decayed_stage.formid = defaultsettings.decayed_id;
+                st_inst.decayed = true;
+                //st_inst.no++;
+                // make decayed stage
                 stages[st_inst.no] = decayed_stage;
                 break;
 		    }
@@ -635,10 +672,10 @@ private:
 		}
         // stages must have keys [0,...,n-1]
         for (auto i = 0; i < stages.size(); i++) {
-            if (!stages.count(i)) {
-                logger::error("Key {} not found in stages.", i);
-                return false;
-            }
+            //if (!stages.count(i)) {
+            //    logger::error("Key {} not found in stages.", i);
+            //    return false;
+            //}
             // ayni formid olmicak
             if (stages[i].formid == formid) {
                 logger::error("Formid {} is the same as the source formid.", formid);
@@ -660,10 +697,7 @@ private:
 
     void InitFailed(){
         logger::error("Initialisation failed.");
-        formid = 0;
-        editorid = "";
-        stages.clear();
-        data.clear();
+        Reset();
         init_failed = true;
     }
 };

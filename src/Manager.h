@@ -3,11 +3,13 @@
 #include "Settings.h"
 #include "Utils.h"
 
-class Manager {
+class Manager : public Utilities::SaveLoadData {
     
     RE::TESObjectREFR* player_ref = RE::PlayerCharacter::GetSingleton()->As<RE::TESObjectREFR>();
     RE::EffectSetting* empty_mgeff;
     
+    std::map<RefID,std::vector<FormID>> external_favs;          // runtime specific, FormIDs of fake containers if faved
+    std::vector<RefID> handled_external_conts;  // runtime specific to prevent unnecessary checks in HandleFakePlacement
     
     bool worldobjectsspoil;
 
@@ -28,6 +30,8 @@ class Manager {
     std::vector<Source> sources;
 
     std::unordered_map<std::string, bool> _other_settings;
+
+
 
 
 #define ENABLE_IF_NOT_UNINSTALLED if (isUninstalled) return;
@@ -86,24 +90,24 @@ class Manager {
         return stage_no;
 	}
 
-    [[nodiscard]] const StageInstance GetWOStageInstance(RefID wo_refid) {
+    [[nodiscard]] const StageInstance* GetWOStageInstance(RefID wo_refid) {
         if (!wo_refid) {
             RaiseMngrErr("Ref is null.");
-			return StageInstance();
+			return nullptr;
         }
         for (const auto& src : sources) {
             for (const auto& st_inst : src.data) {
-                if (st_inst.location == wo_refid) return st_inst;
+                if (st_inst.location == wo_refid) return &st_inst;
             }
         }
         RaiseMngrErr("Stage instance not found.");
-        return StageInstance();
+        return nullptr;
     }
 
-    [[nodiscard]] const StageInstance GetWOStageInstance(RE::TESObjectREFR* wo_ref) {
+    [[nodiscard]] const StageInstance* GetWOStageInstance(RE::TESObjectREFR* wo_ref) {
         if (!wo_ref) {
             RaiseMngrErr("Ref is null.");
-            return StageInstance();
+            return nullptr;
         }
         return GetWOStageInstance(wo_ref->GetFormID());
 	}
@@ -149,6 +153,7 @@ class Manager {
         }
         AddItem(inventory_owner, nullptr, new_item, update_count);
         logger::trace("Spoilage updated in inventory.");
+
     }
 
     void _UpdateSpoilageInWorld_Fake(RE::TESObjectREFR* wo_ref, RE::ExtraTextDisplayData* xText) {
@@ -190,7 +195,7 @@ class Manager {
         StageNo new_st_no;
 
         auto updates = source->UpdateAllStages({wo_refid});
-        if (updates.empty()) new_st_no = st_inst.no;
+        if (updates.empty()) new_st_no = st_inst->no;
         else if (updates.size() > 1) return RaiseMngrErr("More than one update.");
         else new_st_no = updates.front().new_no;
 
@@ -401,7 +406,7 @@ public:
         return &singleton;
     }
 
-    // const char* GetType() override { return "Manager"; }
+    const char* GetType() override { return "Manager"; }
 
     void setListenCrosshair(const bool value) {
 		std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
@@ -943,6 +948,17 @@ public:
             return false;
         }
 
+        // mark for delete if the updated instance is decayed
+        for (auto& src : sources) {
+            for (auto& st_inst : src.data) {
+                if (st_inst.decayed && st_inst.location == loc_refid) {
+					logger::trace("Decayed stage. Marking for delete.");
+                    st_inst.no++;
+				}
+			}
+            src.CleanUpData();
+		}
+
         return true;
     }
 
@@ -991,6 +1007,76 @@ public:
 		}
         logger::warn("SwapWithStage: Not found in source.");
     }
+
+    void Reset() {
+		ENABLE_IF_NOT_UNINSTALLED
+        logger::info("Resetting manager...");
+        for (auto& src : sources) src.Reset();
+        sources.clear();
+        external_favs.clear();         // we will update this in ReceiveData
+        handled_external_conts.clear();
+        Clear();
+        setListenMenuOpenClose(true);
+        setListenActivate(true);
+        setListenContainerChange(true);
+        setListenCrosshair(true);
+        setUninstalled(false);
+        logger::info("Manager reset.");
+	}
+
+    void SendData() {
+        ENABLE_IF_NOT_UNINSTALLED
+        // std::lock_guard<std::mutex> lock(mutex);
+        logger::info("--------Sending data---------");
+        Print();
+        Clear();
+        for (auto& src : sources) {
+            Utilities::Types::SaveDataLHS lhs{src.formid, src.editorid};
+            Utilities::Types::SaveDataRHS rhs;
+            for (auto& st_inst : src.data) {
+                const auto inst_formid = src.stages[st_inst.no].formid;
+                std::string editorid_ = "";
+                bool is_favorited_x = false;
+                if (!st_inst.decayed) {
+                    if (Utilities::Functions::VectorHasElement<StageNo>(src.fake_stages, st_inst.no)) {
+                        editorid_ = "";
+                    }
+                    else editorid_ = clib_util::editorID::get_editorID(src.stages[st_inst.no].GetBound());
+                    if (st_inst.location == player_refid &&
+                        Utilities::FunctionsSkyrim::IsPlayerFavorited(src.stages[st_inst.no].GetBound())) {
+                        is_favorited_x = true;
+                    }
+                    else if (external_favs.contains(st_inst.location) &&
+                             Utilities::Functions::VectorHasElement<FormID>(external_favs[st_inst.location], inst_formid)) {
+						is_favorited_x = true;
+                    }
+                }
+                rhs.push_back({{inst_formid, editorid_, is_favorited_x}, st_inst});
+			}
+            SetData(lhs, rhs);
+            //for (const auto& [chest_ref, cont_ref] : src.data) {
+            //    bool is_equipped_x = false;
+            //    bool is_favorited_x = false;
+            //    if (!chest_ref) return RaiseMngrErr("Chest refid is null");
+            //    auto fake_formid = ChestToFakeContainer[chest_ref].innerKey;
+            //    if (chest_ref == cont_ref) {
+            //        auto fake_bound = RE::TESForm::LookupByID<RE::TESBoundObject>(fake_formid);
+            //        is_equipped_x = IsEquipped(fake_bound);
+            //        is_favorited_x = IsFaved(fake_bound);
+            //    }
+            //    // check if the fake container is faved in an external container
+            //    else {
+            //        auto it = std::find(external_favs.begin(), external_favs.end(), fake_formid);
+            //        if (it != external_favs.end()) is_favorited_x = true;
+            //    }
+            //    auto rename_ = renames.count(fake_formid) ? renames[fake_formid] : "";
+            //    FormIDX fake_container_x(ChestToFakeContainer[chest_ref].innerKey, is_equipped_x, is_favorited_x,
+            //                             rename_);
+            //    SetData({src.formid, chest_ref}, {fake_container_x, cont_ref});
+            //}
+        }
+        logger::info("Data sent.");
+    };
 
     //void ReceiveData() {
     //    logger::info("--------Receiving data---------");
@@ -1116,6 +1202,12 @@ public:
     //    current_container = nullptr;
     //    setListenContainerChange(true);
     //};
+
+    void Print() {
+        for (auto& src : sources) {
+		    src.PrintData();
+        }
+    }
 
 #undef ENABLE_IF_NOT_UNINSTALLED
 };

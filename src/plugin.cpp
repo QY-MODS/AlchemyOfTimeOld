@@ -136,13 +136,13 @@ public:
         // return if menu is not favorite menu, container menu, barter menu or inventory menu
         if (menuname == RE::FavoritesMenu::MENU_NAME) {
             logger::trace("Favorites menu is open.");
-            if (M->UpdateSpoilage(20)) Utilities::FunctionsSkyrim::RefreshMenu(menuname);
+            if (M->UpdateSpoilage(player_refid)) Utilities::FunctionsSkyrim::RefreshMenu(menuname);
             logger::trace("Spoilage updated.");
             return RE::BSEventNotifyControl::kContinue;
         }
         else if (menuname == RE::InventoryMenu::MENU_NAME) {
             logger::trace("Inventory menu is open.");
-            if (M->UpdateSpoilage(20)) Utilities::FunctionsSkyrim::RefreshMenu(menuname);
+            if (M->UpdateSpoilage(player_refid)) Utilities::FunctionsSkyrim::RefreshMenu(menuname);
             logger::trace("Spoilage updated.");
             return RE::BSEventNotifyControl::kContinue;
         }
@@ -197,13 +197,14 @@ public:
    //         } else logger::trace("ExternalRef not found.");
    //     }
         
-        if (event->oldContainer != 20 && event->newContainer != 20) return RE::BSEventNotifyControl::kContinue;
+        if (event->oldContainer != player_refid && event->newContainer != player_refid)
+            return RE::BSEventNotifyControl::kContinue;
         
         logger::trace("Container change event.");
         logger::trace("IsStage: {}", M->IsStage(event->baseObj));
 
         // to player inventory <-
-        if (event->newContainer == 20) {
+        if (event->newContainer == player_refid) {
             logger::trace("Item entered player inventory.");
             if (!M->IsStage(event->baseObj)) {
                 M->RegisterAndUpdate(event->baseObj, event->itemCount, player_refid);
@@ -262,7 +263,7 @@ public:
         }
 
         // from player inventory ->
-        if (event->oldContainer == 20 && M->IsStage(event->baseObj)) {
+        if (event->oldContainer == player_refid && M->IsStage(event->baseObj)) {
             // a fake container left player inventory
             logger::trace("Fake container left player inventory.");
             // drop event

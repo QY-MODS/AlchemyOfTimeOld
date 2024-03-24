@@ -440,6 +440,10 @@ namespace Utilities{
             return false;
         }
 
+        [[nodiscard]] const bool IsPlayerFavorited(RE::TESBoundObject* item) {
+            return IsFavorited(item, RE::PlayerCharacter::GetSingleton()->AsReference());
+        }
+
         void OverrideMGEFFs(RE::BSTArray<RE::Effect*>& effect_array, std::vector<RE::EffectSetting*> new_effects,
                             std::vector<uint32_t*> durations, std::vector<float*> magnitudes) {
             
@@ -847,11 +851,6 @@ namespace Utilities{
 
             RE::TESBoundObject* GetBound() { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid); };
 
-            std::string GetEditorID() {
-				if (auto bound = GetBound()) return bound->GetFormEditorID();
-				return "";
-			}
-
             [[nodiscard]] const bool CheckIntegrity() {
                 if (!formid || !GetBound()) {
 					logger::error("FormID or bound is null");
@@ -881,11 +880,23 @@ namespace Utilities{
             Count count;
             RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is
                              // out in the world
-            std::string editorid;
+            //std::string editorid;
+            bool decayed = false;
 
             StageInstance() : start_time(0), no(0), count(0), location(0) {}
-            StageInstance(float st, StageNo n, Count c, RefID l, std::string ei)
-                : start_time(st), no(n), count(c), location(l), editorid(ei) {}
+            StageInstance(float st, StageNo n, Count c, RefID l
+                //,std::string ei
+            )
+                : start_time(st), no(n), count(c), location(l)
+                //,editorid(ei) 
+            {}
+        
+            //define ==
+            bool operator==(const StageInstance& other) const {
+                return no == other.no && count == other.count && location == other.location &&
+                       //editorid == other.editorid && 
+                    start_time == other.start_time;
+			}
         };
 
         struct StageUpdate {
@@ -894,131 +905,143 @@ namespace Utilities{
             Count count;
         };
 
-        using SourceData = std::vector<StageInstance>;  //
-        using SaveDataLHS = FormID;
-        using SaveDataRHS = StageInstance;
+        struct FormEditorID {
+            FormID form_id;
+            std::string editor_id;
 
+            bool operator<(const FormEditorID& other) const {
+                // Compare form_id first
+                if (form_id < other.form_id) {
+                    return true;
+                }
+                // If form_id is equal, compare editor_id
+                if (form_id == other.form_id && editor_id < other.editor_id) {
+                    return true;
+                }
+                // If both form_id and editor_id are equal or if form_id is greater, return false
+                return false;
+            }
+        };
+
+        struct FormEditorIDX : FormEditorID {
+			bool is_favorited = false;
+		};
+
+        using SourceData = std::vector<StageInstance>;  //
+        using SaveDataLHS = FormEditorID;
+        using SaveDataRHS = std::vector<std::pair<FormEditorIDX,StageInstance>>;
     }
 
 
-    // https :  // github.com/ozooma10/OSLAroused/blob/29ac62f220fadc63c829f6933e04be429d4f96b0/src/PersistedData.cpp
-    // template <typename T,typename U>
-    // // BaseData is based off how powerof3's did it in Afterlife
-    // class BaseData {
-    // public:
-    //     float GetData(T formId, T missing) {
-    //         Locker locker(m_Lock);
-    //         // if the plugin version is less than 0.7 need to handle differently
-    //         // if (SKSE::PluginInfo::version)
-    //         if (auto idx = m_Data.find(formId) != m_Data.end()) {
-    //             return m_Data[formId];
-    //         }
-    //         return missing;
-    //     }
+     // github.com/ozooma10/OSLAroused/blob/29ac62f220fadc63c829f6933e04be429d4f96b0/src/PersistedData.cpp
+     template <typename T,typename U>
+     // BaseData is based off how powerof3's did it in Afterlife
+     class BaseData {
+     public:
+         float GetData(T formId, T missing) {
+             Locker locker(m_Lock);
+             if (auto idx = m_Data.find(formId) != m_Data.end()) {
+                 return m_Data[formId];
+             }
+             return missing;
+         }
 
-    //     void SetData(T formId, U value) {
-    //         Locker locker(m_Lock);
-    //         m_Data[formId] = value;
-    //     }
+         void SetData(T formId, U value) {
+             Locker locker(m_Lock);
+             m_Data[formId] = value;
+         }
 
-    //     virtual const char* GetType() = 0;
+         virtual const char* GetType() = 0;
 
-    //     virtual bool Save(SKSE::SerializationInterface*, std::uint32_t,
-    //                       std::uint32_t) {return false;};
-    //     virtual bool Save(SKSE::SerializationInterface*) {return false;};
-    //     virtual bool Load(SKSE::SerializationInterface*) {return false;};
+         virtual bool Save(SKSE::SerializationInterface*, std::uint32_t,
+                           std::uint32_t) {return false;};
+         virtual bool Save(SKSE::SerializationInterface*) {return false;};
+         virtual bool Load(SKSE::SerializationInterface*) {return false;};
 
-    //     void Clear() {
-    //         Locker locker(m_Lock);
-    //         m_Data.clear();
-    //     };
+         void Clear() {
+             Locker locker(m_Lock);
+             m_Data.clear();
+         };
 
-    //     virtual void DumpToLog() = 0;
+         virtual void DumpToLog() = 0;
 
-    // protected:
-    //     std::map<T,U> m_Data;
+     protected:
+         std::map<T,U> m_Data;
 
-    //     using Lock = std::recursive_mutex;
-    //     using Locker = std::lock_guard<Lock>;
-    //     mutable Lock m_Lock;
-    // };
+         using Lock = std::recursive_mutex;
+         using Locker = std::lock_guard<Lock>;
+         mutable Lock m_Lock;
+     };
 
-    // class SaveLoadData : public BaseData<Types::SaveDataLHS,Types::SaveDataRHS> {
-    // public:
-    //     void DumpToLog() override {
-    //         Locker locker(m_Lock);
-    //         for (const auto& [formId, value] : m_Data) {
-    //             logger::info(
-    //                 "Dump Row From {}",
-    //                 GetType());
-    //         }
-    //         // sakat olabilir
-    //         logger::info("{} Rows Dumped For Type {}", m_Data.size(), GetType());
-    //     }
+     class SaveLoadData : public BaseData<Types::SaveDataLHS,Types::SaveDataRHS> {
+     public:
+         void DumpToLog() override {
+             // nothing for now
+         }
 
-    //     [[nodiscard]] bool Save(SKSE::SerializationInterface* serializationInterface) override {
-    //         assert(serializationInterface);
-    //         Locker locker(m_Lock);
+         [[nodiscard]] bool Save(SKSE::SerializationInterface* serializationInterface) override {
+             assert(serializationInterface);
+             Locker locker(m_Lock);
 
-    //         const auto numRecords = m_Data.size();
-    //         if (!serializationInterface->WriteRecordData(numRecords)) {
-    //             logger::error("Failed to save {} data records", numRecords);
-    //             return false;
-    //         }
+             const auto numRecords = m_Data.size();
+             if (!serializationInterface->WriteRecordData(numRecords)) {
+                 logger::error("Failed to save {} data records", numRecords);
+                 return false;
+             }
 
-    //         for (const auto& [formId, value] : m_Data) {
-    //             if (!serializationInterface->WriteRecordData(formId)) {
-    //                 logger::error("Failed to save data");
-    //                 return false;
-    //             }
+             for (const auto& [lhs, rhs] : m_Data) {
+                 if (!serializationInterface->WriteRecordData(lhs)) {
+                     logger::error("Failed to save data");
+                     return false;
+                 }
 
-    //             if (!serializationInterface->WriteRecordData(value)) {
-    //                 logger::error("Failed to save value data");
-    //                 return false;
-    //             }
-    //         }
-    //         return true;
-    //     }
+                 if (!serializationInterface->WriteRecordData(rhs)) {
+                     logger::error("Failed to save value data");
+                     return false;
+                 }
+             }
+             return true;
+         }
 
-    //     [[nodiscard]] bool Save(SKSE::SerializationInterface* serializationInterface, std::uint32_t type,
-    //                        std::uint32_t version) override {
-    //         if (!serializationInterface->OpenRecord(type, version)) {
-    //             logger::error("Failed to open record for Data Serialization!");
-    //             return false;
-    //         }
+         [[nodiscard]] bool Save(SKSE::SerializationInterface* serializationInterface, std::uint32_t type,
+                            std::uint32_t version) override {
+             if (!serializationInterface->OpenRecord(type, version)) {
+                 logger::error("Failed to open record for Data Serialization!");
+                 return false;
+             }
 
-    //         return Save(serializationInterface);
-    //     }
+             return Save(serializationInterface);
+         }
 
-    //     [[nodiscard]] bool Load(SKSE::SerializationInterface* serializationInterface) override {
-    //         assert(serializationInterface);
+         [[nodiscard]] bool Load(SKSE::SerializationInterface* serializationInterface) override {
+             assert(serializationInterface);
 
-    //         std::size_t recordDataSize;
-    //         serializationInterface->ReadRecordData(recordDataSize);
-    //         logger::trace("Loading data from serialization interface with size: {}", recordDataSize);
+             std::size_t recordDataSize;
+             serializationInterface->ReadRecordData(recordDataSize);
+             logger::trace("Loading data from serialization interface with size: {}", recordDataSize);
 
-    //         Locker locker(m_Lock);
-    //         m_Data.clear();
+             Locker locker(m_Lock);
+             m_Data.clear();
 
-    //         Types::SaveDataLHS formId;
-    //         Types::SaveDataRHS value;
+             Types::SaveDataLHS lhs;
+             Types::SaveDataRHS rhs;
 
-    //         for (auto i = 0; i < recordDataSize; i++) {
-    //             logger::trace("Loading data from serialization interface.");
-    //             logger::trace("ReadRecordData:{}", serializationInterface->ReadRecordData(formId));
-    //             auto formid_formid = formId.GetCurrentStage().formid;
-    //             if (!serializationInterface->ResolveFormID(formid_formid,formid_formid)) {
-    //                 logger::error("Failed to resolve form ID, 0x{:X}.", formid_formid);
-    //                 continue;
-    //             }
-    //             logger::trace("Reading value...");
-    //             logger::trace("ReadRecordData: {}", serializationInterface->ReadRecordData(value));
-    //             m_Data[formId] = value;
-    //             logger::trace("Loaded data for FormRefID: {}", formid_formid);
-    //         }
-    //         return true;
-    //     }
-    // };
+             for (auto i = 0; i < recordDataSize; i++) {
+                 logger::trace("Loading data from serialization interface.");
+                 logger::trace("ReadRecordData:{}", serializationInterface->ReadRecordData(lhs));
+                 auto formid = lhs.form_id;
+                 if (!serializationInterface->ResolveFormID(formid, lhs.form_id)) {
+                     logger::error("Failed to resolve form ID, 0x{:X}.", formid);
+                     continue;
+                 }
+                 logger::trace("Reading value...");
+                 logger::trace("ReadRecordData: {}", serializationInterface->ReadRecordData(rhs));
+                 m_Data[lhs] = rhs;
+                 logger::trace("Loaded data for FormEditorID: {} {}", lhs.form_id, lhs.editor_id);
+             }
+             return true;
+         }
+     };
 
 
 }
