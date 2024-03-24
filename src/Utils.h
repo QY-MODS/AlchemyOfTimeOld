@@ -10,7 +10,7 @@
 #include <iostream>
 #include <string>
 #include <codecvt>
-#include <mutex>  // for std::mutex
+#include <mutex>
 #include <algorithm>
 #include <ClibUtil/editorID.hpp>
 #include "rapidjson/document.h"
@@ -391,24 +391,38 @@ namespace Utilities{
             auto inventory_changes = inventory_owner->GetInventoryChanges();
             auto entries = inventory_changes->entryList;
             for (auto it = entries->begin(); it != entries->end(); ++it) {
-                auto formid = (*it)->object->GetFormID();
+                const auto object = (*it)->object;
+                if (!object) {
+					logger::error("Object is null");
+					continue;
+				}
+                auto formid = object->GetFormID();
                 if (!formid) logger::critical("Formid is null");
                 if (formid == item->GetFormID()) {
                     logger::trace("Favoriting item: {}", item->GetName());
-                    bool no_extra_ = (*it)->extraLists->empty();
+                    const auto xLists = (*it)->extraLists;
+                    bool no_extra_ = false;
+                    if (!xLists || xLists->empty()) {
+						logger::trace("No extraLists");
+                        no_extra_ = true;
+					}
                     logger::trace("asdasd");
                     if (no_extra_) {
                         logger::trace("No extraLists");
                         inventory_changes->SetFavorite((*it), nullptr);
                     } else {
                         logger::trace("ExtraLists found");
-                        inventory_changes->SetFavorite((*it), (*it)->extraLists->front());
+                        inventory_changes->SetFavorite((*it), xLists->front());
                     }
                     return;
                 }
             }
             logger::error("Item not found in inventory");
         }
+
+        void FavoriteItem(const FormID formid, const FormID refid) {
+			FavoriteItem(GetFormByID<RE::TESBoundObject>(formid), GetFormByID<RE::TESObjectREFR>(refid));
+		}
 
         [[nodiscard]] const bool HasItemPlusCleanUp(RE::TESBoundObject* item, RE::TESObjectREFR* item_owner,RE::ExtraDataList* xList=nullptr) {
             logger::trace("HasItemPlusCleanUp");
@@ -420,7 +434,6 @@ namespace Utilities{
             }
             return false;
         }
-
         
         [[nodiscard]] const bool IsFavorited(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner) {
             if (!item) {
@@ -438,6 +451,10 @@ namespace Utilities{
                 return it->second.second->IsFavorited();
             }
             return false;
+        }
+
+        [[nodiscard]] const bool IsFavorited(RE::FormID formid, RE::FormID refid) {
+            return IsFavorited(GetFormByID<RE::TESBoundObject>(formid),GetFormByID<RE::TESObjectREFR>(refid));
         }
 
         [[nodiscard]] const bool IsPlayerFavorited(RE::TESBoundObject* item) {
@@ -803,6 +820,49 @@ namespace Utilities{
 
     namespace Types {
 
+        struct FormFormID {
+			FormID form_id1;
+			FormID form_id2;
+
+            bool operator<(const FormFormID& other) const {
+				// Compare form_id1 first
+				if (form_id1 < other.form_id1) {
+					return true;
+				}
+				// If form_id1 is equal, compare form_id2
+				if (form_id1 == other.form_id1 && form_id2 < other.form_id2) {
+					return true;
+				}
+				// If both form_id1 and form_id2 are equal or if form_id1 is greater, return false
+				return false;
+			}
+		};
+
+        struct FormEditorID {
+            FormID form_id=0;
+            std::string editor_id = "";
+
+            bool operator<(const FormEditorID& other) const {
+                // Compare form_id first
+                if (form_id < other.form_id) {
+                    return true;
+                }
+                // If form_id is equal, compare editor_id
+                if (form_id == other.form_id && editor_id < other.editor_id) {
+                    return true;
+                }
+                // If both form_id and editor_id are equal or if form_id is greater, return false
+                return false;
+            }
+        };
+
+        struct FormEditorIDX : FormEditorID {
+            bool is_fake = false;
+            bool is_decayed = false;
+            bool crafting_allowed = false;
+            bool is_favorited = false; // used only when loading and saving
+		};
+
         // using EditorID = std::string;
         using NameID = std::string;
         using Duration = std::uint32_t;
@@ -829,9 +889,11 @@ namespace Utilities{
             StageName name;     // name of the stage
             std::vector<StageEffect> mgeffect;
 
+            bool crafting_allowed;
+
             Stage(){};
-            Stage(FormID f, Duration d, StageNo s, StageName n, std::vector<StageEffect> e)
-                : formid(f), duration(d), no(s), name(n), mgeffect(e) {
+            Stage(FormID f, Duration d, StageNo s, StageName n, bool ca,std::vector<StageEffect> e)
+                : formid(f), duration(d), no(s), name(n), crafting_allowed(ca) ,mgeffect(e) {
                 if (!formid)
                     logger::critical("FormID is null");
                 else
@@ -849,7 +911,7 @@ namespace Utilities{
                 return no == other.no && formid == other.formid && duration == other.duration;
             }
 
-            RE::TESBoundObject* GetBound() { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid); };
+            RE::TESBoundObject* GetBound() const { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid); };
 
             [[nodiscard]] const bool CheckIntegrity() {
                 if (!formid || !GetBound()) {
@@ -880,8 +942,7 @@ namespace Utilities{
             Count count;
             RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is
                              // out in the world
-            //std::string editorid;
-            bool decayed = false;
+            FormEditorIDX xtra;
 
             StageInstance() : start_time(0), no(0), count(0), location(0) {}
             StageInstance(float st, StageNo n, Count c, RefID l
@@ -897,6 +958,8 @@ namespace Utilities{
                        //editorid == other.editorid && 
                     start_time == other.start_time;
 			}
+
+            RE::TESBoundObject* GetBound() const { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(xtra.form_id); };
         };
 
         struct StageUpdate {
@@ -905,31 +968,13 @@ namespace Utilities{
             Count count;
         };
 
-        struct FormEditorID {
-            FormID form_id;
-            std::string editor_id;
 
-            bool operator<(const FormEditorID& other) const {
-                // Compare form_id first
-                if (form_id < other.form_id) {
-                    return true;
-                }
-                // If form_id is equal, compare editor_id
-                if (form_id == other.form_id && editor_id < other.editor_id) {
-                    return true;
-                }
-                // If both form_id and editor_id are equal or if form_id is greater, return false
-                return false;
-            }
-        };
 
-        struct FormEditorIDX : FormEditorID {
-			bool is_favorited = false;
-		};
-
-        using SourceData = std::vector<StageInstance>;  //
+        using SourceData = std::vector<StageInstance>;
+        // editorid ler backup olarak var
         using SaveDataLHS = FormEditorID;
-        using SaveDataRHS = std::vector<std::pair<FormEditorIDX,StageInstance>>;
+        // FormEditorIDX neyle represente edildigi ve favori olup olmadigi
+        using SaveDataRHS = SourceData;
     }
 
 
@@ -972,6 +1017,7 @@ namespace Utilities{
          using Locker = std::lock_guard<Lock>;
          mutable Lock m_Lock;
      };
+
 
      class SaveLoadData : public BaseData<Types::SaveDataLHS,Types::SaveDataRHS> {
      public:

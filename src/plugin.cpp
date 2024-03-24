@@ -6,6 +6,7 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
                      public RE::BSTEventSink<RE::TESActivateEvent>,
                      public RE::BSTEventSink<SKSE::CrosshairRefEvent>,
                      public RE::BSTEventSink<RE::MenuOpenCloseEvent>,
+                     public RE::BSTEventSink<RE::TESFurnitureEvent>,
                      public RE::BSTEventSink<RE::TESContainerChangedEvent> {
 
     OurEventSink() = default;
@@ -22,6 +23,9 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
     RefID picked_up_refid;
     float picked_up_time;
     bool activate_eat = false;
+    bool furniture_entered = false;
+
+    RE::NiPointer<RE::TESObjectREFR> furniture = nullptr;
 
 public:
     static OurEventSink* GetSingleton() {
@@ -167,6 +171,50 @@ public:
         
     }
     
+    RE::BSEventNotifyControl ProcessEvent(const RE::TESFurnitureEvent* event,
+                                          RE::BSTEventSource<RE::TESFurnitureEvent>*) {
+        
+        
+        if (!event) return RE::BSEventNotifyControl::kContinue;
+        if (!event->actor->IsPlayerRef()) return RE::BSEventNotifyControl::kContinue;
+        if (furniture_entered && event->type == RE::TESFurnitureEvent::FurnitureEventType::kEnter)
+            return RE::BSEventNotifyControl::kContinue;
+        if (!furniture_entered && event->type == RE::TESFurnitureEvent::FurnitureEventType::kExit)
+            return RE::BSEventNotifyControl::kContinue;
+        if (event->targetFurniture->GetBaseObject()->formType.underlying() != 40)
+            return RE::BSEventNotifyControl::kContinue;
+
+
+        auto bench = event->targetFurniture->GetBaseObject()->As<RE::TESFurniture>();
+        if (!bench) return RE::BSEventNotifyControl::kContinue;
+        auto bench_type = static_cast<std::uint8_t>(bench->workBenchData.benchType.get());
+        logger::trace("Furniture event: {}", bench_type);
+
+        //if (bench_type != 2 && bench_type != 3 && bench_type != 7) return RE::BSEventNotifyControl::kContinue;
+
+        std::string qformtype;
+        // POPULATE THIS
+        if (bench_type == 1) {
+            qformtype = "FOOD";
+        } else return RE::BSEventNotifyControl::kContinue;
+
+        if (event->type == RE::TESFurnitureEvent::FurnitureEventType::kEnter) {
+            logger::trace("Furniture event: Enter {}", event->targetFurniture->GetName());
+            furniture_entered = true;
+            furniture = event->targetFurniture;
+            M->HandleCraftingEnter(qformtype);
+        } else if (event->type == RE::TESFurnitureEvent::FurnitureEventType::kExit) {
+            logger::trace("Furniture event: Exit {}", event->targetFurniture->GetName());
+            if (event->targetFurniture == furniture) {
+                M->HandleCraftingExit();
+                furniture_entered = false;
+                furniture = nullptr;
+            }
+        } else logger::info("Furniture event: Unknown");
+
+        return RE::BSEventNotifyControl::kContinue;
+    }
+
     
     RE::BSEventNotifyControl ProcessEvent(const RE::TESContainerChangedEvent* event,
                                                                    RE::BSTEventSource<RE::TESContainerChangedEvent>*) {
@@ -174,6 +222,7 @@ public:
         logger::trace("ListenContainerChange: {}",
                       M->getListenContainerChange());
         if (!M->getListenContainerChange()) return RE::BSEventNotifyControl::kContinue;
+        if (furniture_entered) return RE::BSEventNotifyControl::kContinue;
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->itemCount) return RE::BSEventNotifyControl::kContinue;
         if (!event->baseObj) return RE::BSEventNotifyControl::kContinue;
@@ -341,7 +390,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         eventSourceHolder->AddEventSink<RE::TESEquipEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESActivateEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESContainerChangedEvent>(eventSink);
-         //eventSourceHolder->AddEventSink<RE::TESFurnitureEvent>(eventSink);
+        eventSourceHolder->AddEventSink<RE::TESFurnitureEvent>(eventSink);
         RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(OurEventSink::GetSingleton());
         // RE::BSInputDeviceManager::GetSingleton()->AddEventSink(eventSink);
         SKSE::GetCrosshairRefEventSource()->AddEventSink(eventSink);

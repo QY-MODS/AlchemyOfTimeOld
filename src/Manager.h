@@ -6,10 +6,11 @@
 class Manager : public Utilities::SaveLoadData {
     
     RE::TESObjectREFR* player_ref = RE::PlayerCharacter::GetSingleton()->As<RE::TESObjectREFR>();
-    RE::EffectSetting* empty_mgeff;
-    
-    std::map<RefID,std::vector<FormID>> external_favs;          // runtime specific, FormIDs of fake containers if faved
-    std::vector<RefID> handled_external_conts;  // runtime specific to prevent unnecessary checks in HandleFakePlacement
+    RE::EffectSetting* empty_mgeff = nullptr;
+
+    std::map<RefID,std::set<FormID>> external_favs;
+    std::map<FormFormID,std::pair<int,Count>> handle_crafting_instances; // real-stage:added-total before adding (both real)
+    std::map<FormID, bool> is_faved;
     
     bool worldobjectsspoil;
 
@@ -204,6 +205,18 @@ class Manager : public Utilities::SaveLoadData {
         if (IsStage(wo_ref) && new_is_fake_stage) Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source->GetBoundObject());
         _UpdateSpoilageInWorld(wo_ref, source->stages[new_st_no], new_is_fake_stage);
 	}
+
+    void AlignRegistries(std::vector<RefID> locs) {
+        ENABLE_IF_NOT_UNINSTALLED
+        logger::trace("Aligning registries.");
+		for (auto& src : sources) {
+			for (auto& st_inst : src.data) {
+                if (!Utilities::Functions::VectorHasElement(locs,st_inst.location)) continue;
+                // POPULATE THIS
+                if (st_inst.location == player_refid) HandleConsume(st_inst.xtra.form_id);
+			}
+		}
+    }
 
     const RE::ObjectRefHandle RemoveItemReverse(RE::TESObjectREFR* moveFrom, RE::TESObjectREFR* moveTo, FormID item_id, Count count,
                                                 RE::ITEM_REMOVE_REASON reason) {
@@ -423,7 +436,6 @@ public:
         return listen_menuopenclose;
     }
 
-
     [[nodiscard]] bool getListenActivate() {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         return listen_activate;
@@ -564,8 +576,6 @@ public:
 			return a->start_time < b->start_time; // use up the old stuff first
 		});
 
-        auto real_bound = source->GetBoundObject();
-
         logger::trace("HandleDrop: setting count");
         bool handled_first_stack = false;
         std::vector<RE::TESObjectREFR*> refs_to_be_updated;
@@ -591,7 +601,8 @@ public:
                     handled_first_stack = true;
                 } else {
                     logger::trace("SADSJFHÖADF 2");
-                    auto new_ref = Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(real_bound, count, nullptr);
+                    const auto bound_to_drop = instance->xtra.is_fake ? source->GetBoundObject() : instance->GetBound();
+                    auto new_ref = Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(bound_to_drop, count, nullptr);
                     if (!new_ref) return RaiseMngrErr("HandleDrop: New ref is null.");
                     if (new_ref->extraList.GetCount() != count) {
 						logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), count);
@@ -619,8 +630,9 @@ public:
                     handled_first_stack = true;
                 } else {
                     logger::trace("SADSJFHÖADF 4");
+                    const auto bound_to_drop = instance->xtra.is_fake ? source->GetBoundObject() : instance->GetBound();
                     auto new_ref =
-                        Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(real_bound, instance->count, nullptr);
+                        Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(bound_to_drop, instance->count, nullptr);
                     if (!new_ref) return RaiseMngrErr("HandleDrop: New ref is null.");
                     if (new_ref->extraList.GetCount() != instance->count) {
                         logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), instance->count);
@@ -669,7 +681,7 @@ public:
                     auto new_f = source->stages[st_inst.no].formid;
                     UpdateSpoilageInInventory(npc_ref, count, pickedup_formid, new_f);
                     if (eat && npc_refid == player_refid) RE::ActorEquipManager::GetSingleton()->EquipObject(RE::PlayerCharacter::GetSingleton(), 
-                        source->stages[st_inst.no].GetBound(), nullptr, count);
+                        st_inst.GetBound(),nullptr, count);
         //            const int count_diff = st_inst.count - count;
         //            if (count_diff > 0 && npc_ref && npc_ref->HasContainer()) {
         //                logger::trace("HandlePickUp: Adding the rest {} to the npc container.", count_diff);
@@ -704,11 +716,10 @@ public:
 
         logger::trace("HandleConsume");
 
-        const auto stage_no = GetStageNoFromSource(source, stage_formid);
         int total_registered_count = 0;
         std::vector<StageInstance*> instances_candidates;
         for (auto& st_inst : source->data) {
-            if (st_inst.no == stage_no && st_inst.location == player_refid) {
+            if (st_inst.xtra.form_id == stage_formid && st_inst.location == player_refid) {
                 total_registered_count += st_inst.count;
                 instances_candidates.push_back(&st_inst);
             }
@@ -716,9 +727,9 @@ public:
 
         // check if player has the fake item
         // sometimes player does not have the fake item but it can still be there with count = 0.
-        
-        const auto entry = player_ref->GetInventory().find(source->stages[stage_no].GetBound());
-        const auto player_count = entry != player_ref->GetInventory().end() ? entry->second.first : 0;
+        const auto player_inventory = player_ref->GetInventory();
+        const auto entry = player_inventory.find(Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(stage_formid));
+        const auto player_count = entry != player_inventory.end() ? entry->second.first : 0;
         int diff = total_registered_count - player_count;
         if (diff < 0) {
             logger::warn("HandleConsume: Something could have gone wrong with registration.");
@@ -748,6 +759,92 @@ public:
 
         source->CleanUpData();
         logger::trace("HandleConsume: updated.");
+
+    }
+
+     // need to put the real items in player's inventory and the fake items in unownedChestOG
+    void HandleCraftingEnter(std::string qform_type) {
+        ENABLE_IF_NOT_UNINSTALLED
+        logger::trace("HandleCraftingEnter");
+        
+        logger::trace("Crafting menu opened");
+        // trusting that the player will leave the crafting menu at some point and everything will be reverted
+        std::map<FormID,int> to_remove;
+        const auto player_inventory = player_ref->GetInventory();
+        for (auto& src : sources) {
+            if (src.qFormType != qform_type) continue;
+            src.PrintData();
+            // just to align reality and registries:
+            logger::info("HandleCraftingEnter: Just to align reality and registries");
+            //AlignRegistries({player_refid});
+            for (auto& st_inst : src.data) {
+                if (!st_inst.xtra.crafting_allowed) continue;
+                const auto stage_formid = st_inst.xtra.form_id;
+                const FormFormID temp = {src.formid, stage_formid};
+                if (!handle_crafting_instances.contains(temp)) {
+                    const auto stage_bound = Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(stage_formid);
+                    if (!stage_bound) {
+						logger::warn("HandleCraftingEnter: Stage bound is null.");
+						continue;
+					}
+                    const auto src_bound = src.GetBoundObject();
+                    const auto it = player_inventory.find(src_bound);
+                    const auto count_src = it != player_inventory.end() ? it->second.first : 0;
+                    handle_crafting_instances[temp] = {st_inst.count, count_src};
+                } 
+                else handle_crafting_instances[temp].first += st_inst.count;
+                if (!is_faved.contains(stage_formid)) is_faved[stage_formid] = Utilities::FunctionsSkyrim::IsFavorited(stage_formid,player_refid);
+                else if (!is_faved[stage_formid]) is_faved[stage_formid] = Utilities::FunctionsSkyrim::IsFavorited(stage_formid,player_refid);
+            }
+        }
+        
+
+        for (auto& [formids, counts] : handle_crafting_instances) {
+            RemoveItemReverse(player_ref, nullptr, formids.form_id2, counts.first, RE::ITEM_REMOVE_REASON::kRemove);
+            AddItem(player_ref, nullptr, formids.form_id1, counts.first);
+            logger::trace("Crafting item updated in inventory.");
+        }
+        // print handle_crafting_instances
+        for (auto& [formids, counts] : handle_crafting_instances) {
+			logger::info("HandleCraftingEnter: Formid1: {} , Formid2: {} , Count1: {} , Count2: {}", formids.form_id1, formids.form_id2, counts.first, counts.second);
+		}
+
+    }
+
+     void HandleCraftingExit() {
+        ENABLE_IF_NOT_UNINSTALLED
+        logger::trace("HandleCraftingExit");
+
+        logger::trace("Crafting menu closed");
+        for (auto& [formids, counts] : handle_crafting_instances) {
+            logger::info("HandleCraftingExit: Formid1: {} , Formid2: {} , Count1: {} , Count2: {}", formids.form_id1,
+                         formids.form_id2, counts.first, counts.second);
+        }
+
+        // need to figure out how many items were used up in crafting and how many were left
+
+        const auto player_inventory = player_ref->GetInventory();
+        for (auto& [formids, counts] : handle_crafting_instances) {
+            const auto src_bound = Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formids.form_id1);
+            const auto it = player_inventory.find(src_bound);
+            const auto inventory_count = it != player_inventory.end() ? it->second.first : 0;
+            const auto expected_count = counts.first + counts.second;
+            auto diff = expected_count - inventory_count; // crafta kullanilan item sayisi
+            const auto to_be_removed_added = inventory_count - counts.second;
+            if (to_be_removed_added > 0) {
+                RemoveItemReverse(player_ref, nullptr, formids.form_id1, to_be_removed_added,
+                                  RE::ITEM_REMOVE_REASON::kRemove);
+                AddItem(player_ref, nullptr, formids.form_id2, to_be_removed_added);
+                bool __faved = is_faved[formids.form_id2];
+                if (__faved) Utilities::FunctionsSkyrim::FavoriteItem(formids.form_id2, player_refid);
+			}
+            if (diff<=0) continue;
+            HandleConsume(formids.form_id2);
+        }
+
+
+        handle_crafting_instances.clear();
+        is_faved.clear();
 
     }
 
@@ -812,6 +909,12 @@ public:
                 instance->location = externalcontainer;
             }
         }
+
+   //     if (Utilities::FunctionsSkyrim::IsFavorited(stage_formid, externalcontainer)) {
+   //         logger::trace("Faved item successfully transferred to external container.");
+			////external_favs.push_back(stage_formid);
+   //     }
+
 
         source->CleanUpData();
         // Stage new_stage(formid, item_count, externalcontainer);
@@ -951,7 +1054,7 @@ public:
         // mark for delete if the updated instance is decayed
         for (auto& src : sources) {
             for (auto& st_inst : src.data) {
-                if (st_inst.decayed && st_inst.location == loc_refid) {
+                if (st_inst.xtra.is_decayed && st_inst.location == loc_refid) {
 					logger::trace("Decayed stage. Marking for delete.");
                     st_inst.no++;
 				}
@@ -1014,7 +1117,6 @@ public:
         for (auto& src : sources) src.Reset();
         sources.clear();
         external_favs.clear();         // we will update this in ReceiveData
-        handled_external_conts.clear();
         Clear();
         setListenMenuOpenClose(true);
         setListenActivate(true);
@@ -1032,51 +1134,64 @@ public:
         Clear();
         for (auto& src : sources) {
             Utilities::Types::SaveDataLHS lhs{src.formid, src.editorid};
-            Utilities::Types::SaveDataRHS rhs;
-            for (auto& st_inst : src.data) {
-                const auto inst_formid = src.stages[st_inst.no].formid;
-                std::string editorid_ = "";
-                bool is_favorited_x = false;
-                if (!st_inst.decayed) {
-                    if (Utilities::Functions::VectorHasElement<StageNo>(src.fake_stages, st_inst.no)) {
-                        editorid_ = "";
-                    }
-                    else editorid_ = clib_util::editorID::get_editorID(src.stages[st_inst.no].GetBound());
-                    if (st_inst.location == player_refid &&
-                        Utilities::FunctionsSkyrim::IsPlayerFavorited(src.stages[st_inst.no].GetBound())) {
-                        is_favorited_x = true;
-                    }
-                    else if (external_favs.contains(st_inst.location) &&
-                             Utilities::Functions::VectorHasElement<FormID>(external_favs[st_inst.location], inst_formid)) {
-						is_favorited_x = true;
-                    }
-                }
-                rhs.push_back({{inst_formid, editorid_, is_favorited_x}, st_inst});
+            Utilities::Types::SaveDataRHS rhs = src.data;
+            for (auto& st_inst : rhs) {
+                st_inst.xtra.is_favorited = st_inst.location == player_refid && 
+                    Utilities::FunctionsSkyrim::IsPlayerFavorited(st_inst.GetBound());
+                st_inst.xtra.is_favorited = external_favs.contains(st_inst.location) && 
+                    external_favs[st_inst.location].contains(st_inst.xtra.form_id);
 			}
             SetData(lhs, rhs);
-            //for (const auto& [chest_ref, cont_ref] : src.data) {
-            //    bool is_equipped_x = false;
-            //    bool is_favorited_x = false;
-            //    if (!chest_ref) return RaiseMngrErr("Chest refid is null");
-            //    auto fake_formid = ChestToFakeContainer[chest_ref].innerKey;
-            //    if (chest_ref == cont_ref) {
-            //        auto fake_bound = RE::TESForm::LookupByID<RE::TESBoundObject>(fake_formid);
-            //        is_equipped_x = IsEquipped(fake_bound);
-            //        is_favorited_x = IsFaved(fake_bound);
-            //    }
-            //    // check if the fake container is faved in an external container
-            //    else {
-            //        auto it = std::find(external_favs.begin(), external_favs.end(), fake_formid);
-            //        if (it != external_favs.end()) is_favorited_x = true;
-            //    }
-            //    auto rename_ = renames.count(fake_formid) ? renames[fake_formid] : "";
-            //    FormIDX fake_container_x(ChestToFakeContainer[chest_ref].innerKey, is_equipped_x, is_favorited_x,
-            //                             rename_);
-            //    SetData({src.formid, chest_ref}, {fake_container_x, cont_ref});
-            //}
         }
         logger::info("Data sent.");
     };
+
+    void ReceiveData() {
+        logger::info("--------Receiving data---------");
+
+        // std::lock_guard<std::mutex> lock(mutex);
+
+        if (!empty_mgeff) return RaiseMngrErr("ReceiveData: Empty mgeff not there!");
+
+        setListenContainerChange(false);
+
+        for (const auto& [lhs, rhs] : m_Data) {
+            const auto source_form = Utilities::FunctionsSkyrim::GetFormByID(lhs.form_id, lhs.editor_id);
+            if (!source_form) {
+                logger::critical("ReceiveData: Source form not found. Saved formid: {}, editorid: {}", lhs.form_id, lhs.editor_id);
+				return RaiseMngrErr("ReceiveData: Source form not found.");
+			}
+            if (GetSource(source_form->GetFormID())){
+            	logger::critical("ReceiveData: Source already exists. Formid {}", source_form->GetFormID());
+				return RaiseMngrErr("ReceiveData: Source already exists.");
+            }
+            Source src(source_form->GetFormID(), "", empty_mgeff);
+            if (src.init_failed) {
+				logger::critical("ReceiveData: Source init failed. Formid {}", source_form->GetFormID());
+                return RaiseMngrErr("ReceiveData: Source init failed.");
+            }
+			for (const auto& st_inst : rhs) {
+                const auto formid = st_inst.xtra.form_id;
+                const auto editorid = st_inst.xtra.editor_id;
+                const auto form = Utilities::FunctionsSkyrim::GetFormByID(formid, editorid);
+                if (!form) {
+                    if (st_inst.xtra.is_fake) {
+                        logger::info("ReceiveData: Fake form not found. Formid {} Editorid {}", formid, editorid);
+                        logger::info("Replacing with new fake form.");
+                    }
+                    logger::critical("ReceiveData: Form not found. Formid {} Editorid {}", formid, editorid);
+					return RaiseMngrErr("ReceiveData: Form not found.");
+				}
+                if (!src.InsertData(st_inst)) {
+					logger::critical("ReceiveData: InsertData failed. Formid {} Editorid {}", lhs.form_id, lhs.editor_id);
+					Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Failed to receive one of the spoilage instances from your save. \
+                        This is expected if you changed/deleted things in your config. Marking this instance as decayed.");
+				}
+			}
+        
+        }
+        setListenContainerChange(true);
+    }
 
     //void ReceiveData() {
     //    logger::info("--------Receiving data---------");
