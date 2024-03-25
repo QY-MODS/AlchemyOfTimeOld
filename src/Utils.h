@@ -1016,9 +1016,14 @@ namespace Utilities{
         };
 
         struct StageUpdate {
-            StageNo old_no;
-            StageNo new_no;
-            Count count;
+            Stage* oldstage=nullptr;
+            Stage* newstage=nullptr;
+            Count count=0;
+            RefID location=0;
+            bool new_is_fake=false;
+
+            StageUpdate(Stage* old, Stage* new_, Count c, RefID l, bool fake)
+				: oldstage(old), newstage(new_), count(c), location(l), new_is_fake(fake) {}
         };
 
 

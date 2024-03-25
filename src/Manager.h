@@ -162,34 +162,13 @@ class Manager : public Utilities::SaveLoadData {
     void UpdateSpoilageInWorld(RE::TESObjectREFR* wo_ref) {
         logger::trace("Updating spoilage in world.");
         if (!wo_ref) return RaiseMngrErr("Ref is null.");
-        const auto wo_refid = wo_ref->GetFormID();
-        auto wo_ref_base = wo_ref->GetBaseObject();
-        if (!wo_ref_base) return RaiseMngrErr("Ref base is null.");
         
         // registered olmak zorunda
         if (!RefIsRegistered(wo_ref->GetFormID())) return RaiseMngrErr("UpdateSpoilageInWorld:Ref is not registered.");
         // get the registered stage instance
         Source* source = GetWOSource(wo_ref);
         if (!source) return RaiseMngrErr("UpdateSpoilageInWorld 2: Source not found.");
-        const auto st_inst = GetWOStageInstance(wo_ref);
-        
-        StageNo new_st_no;
-
-        auto updates = source->UpdateAllStages({wo_refid});
-        if (updates.empty()) new_st_no = st_inst->no;
-        else if (updates.size() > 1) return RaiseMngrErr("More than one update.");
-        else new_st_no = updates.front().new_no;
-
-        // decayed
-        if (!source->stages.contains(new_st_no)) {
-            auto decayed_stage = source->GetDecayedStage();
-            return _UpdateSpoilageInWorld(wo_ref, decayed_stage, false);
-        }
-
-        const bool new_is_fake_stage = source->IsFakeStage(new_st_no);
-
-        if (IsStage(wo_ref) && new_is_fake_stage) Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source->GetBoundObject());
-        _UpdateSpoilageInWorld(wo_ref, source->stages[new_st_no], new_is_fake_stage);
+        _UpdateSpoilage({wo_ref}, source);
 	}
 
     void AlignRegistries(std::vector<RefID> locs) {
@@ -393,7 +372,6 @@ public:
         const auto base = ref->GetBaseObject();
         if (!base) return false;
         const auto formid = base->GetFormID();
-        if (!Settings::IsItem(formid)) return false;
         return IsStage(formid);
     }
 
@@ -494,7 +472,6 @@ public:
             //dropped_stage_ref->extraList.SetCount(static_cast<uint16_t>(count));
 		}
         
-        //source->UpdateAllStages({player_refid});
         source->PrintData();
         const auto stage_no = GetStageNoFromSource(source, dropped_formid);
         // at the same stage but different start times
@@ -751,7 +728,7 @@ public:
 
     }
 
-     void HandleCraftingExit() {
+    void HandleCraftingExit() {
         ENABLE_IF_NOT_UNINSTALLED
         logger::trace("HandleCraftingExit");
 
@@ -957,6 +934,55 @@ public:
         logger::trace("Unlinked external container.");
     }
 
+    bool _UpdateSpoilage(std::vector<RE::TESObjectREFR*> refs, Source* src) {
+
+        if (!src) {
+            RaiseMngrErr("UpdateSpoilage: Source is null.");
+            return false;
+        }
+
+        std::map<RefID, RE::TESObjectREFR*> ids_refs;
+        std::vector<RefID> refids;
+        for (auto& ref : refs) {
+            if (!ref) {
+                RaiseMngrErr("UpdateSpoilage: ref is null.");
+                return false;
+            }
+            ids_refs[ref->GetFormID()] = ref;
+            refids.push_back(ref->GetFormID());
+        }
+        auto updated_stages = src->UpdateAllStages(refids);
+        if (updated_stages.empty()) {
+			logger::trace("No update");
+			return false;
+		}
+
+        for (auto& update : updated_stages) {
+            if (!update.oldstage || !update.newstage || !update.count || !update.location) {
+                logger::error("UpdateSpoilage: Update is null.");
+                continue;
+            }
+            auto ref = ids_refs[update.location];
+            if (ref->HasContainer() || ref->IsPlayerRef()) {
+                ApplySpoilageInInventory(ref, update.count, update.oldstage->formid, update.newstage->formid);
+            }
+            // WO
+            else if (Settings::IsItem(ref) && worldobjectsspoil) {
+                logger::trace("UpdateSpoilage: ref out in the world.");
+                if (IsStage(ref) && update.new_is_fake){
+                    Utilities::FunctionsSkyrim::SwapObjects(ref, src->GetBoundObject());
+                }
+                _UpdateSpoilageInWorld(ref, *update.newstage, update.new_is_fake);
+            } 
+            else {
+                logger::critical("UpdateSpoilage: Unknown ref type.");
+                return false;
+            }
+        }
+        src->CleanUpData();
+        return true;
+    }
+
     bool UpdateSpoilage(RefID loc_refid) {
         logger::trace("Manager: Updating spoilage for loc_refid {}.",loc_refid);
         return UpdateSpoilage(RE::TESForm::LookupByID<RE::TESObjectREFR>(loc_refid));
@@ -970,62 +996,15 @@ public:
         }
 
         bool update_took_place = false;
-        const auto loc_refid = ref->GetFormID();
         for (auto& src : sources) {
-            auto updated_stages = src.UpdateAllStages({loc_refid});  // list of somethingwithstages
-            if (updated_stages.empty()) continue;
-            update_took_place = true;
-            for (auto& updated_inst : updated_stages) {
-                FormID old_formid = 0;
-                FormID new_formid = 0;
-                if (src.stages.contains(updated_inst.old_no)) {
-                    old_formid = src.stages[updated_inst.old_no].formid;
-                } 
-                else {
-					logger::error("UpdateSpoilage: Old formid not found.");
-					return false;
-				}
-                if (src.stages.contains(updated_inst.new_no)) new_formid = src.stages[updated_inst.new_no].formid;
-				else new_formid = src.GetDecayedStage().formid;
-                
-                if (ref->HasContainer() || ref->IsPlayerRef()) {
-                    ApplySpoilageInInventory(ref, updated_inst.count, old_formid, new_formid);
-                } 
-                else if (Settings::IsItem(ref) && worldobjectsspoil) {
-                    logger::trace("UpdateSpoilage: ref out in the world.");
-                    bool new_is_fake = src.IsFakeStage(updated_inst.new_no);
-                    if (IsStage(ref) && new_is_fake) Utilities::FunctionsSkyrim::SwapObjects(ref, src.GetBoundObject());
-                    if (src.stages.contains(updated_inst.new_no)) {
-                        _UpdateSpoilageInWorld(ref, src.stages[updated_inst.new_no], new_is_fake);
-                    }
-                    else {
-                        auto decayed_stage = src.GetDecayedStage();
-                        _UpdateSpoilageInWorld(ref, decayed_stage, false);
-					}
-                } 
-                else {
-					RaiseMngrErr("UpdateSpoilage: Unknown ref type.");
-					return false;
-				}
-            }
+            auto* src_ptr = &src;
+            if (!update_took_place) update_took_place = _UpdateSpoilage({ref}, src_ptr);
         }
 
         if (!update_took_place) {
             logger::trace("No update");
             return false;
         }
-
-        // mark for delete if the updated instance is decayed
-        for (auto& src : sources) {
-            for (auto& st_inst : src.data) {
-                if (st_inst.xtra.is_decayed && st_inst.location == loc_refid) {
-					logger::trace("Decayed stage. Marking for delete.");
-                    st_inst.no++;
-				}
-			}
-            src.CleanUpData();
-		}
-
         return true;
     }
 
@@ -1048,6 +1027,7 @@ public:
             }
             Register(formid, wo_ref->extraList.GetCount(), wo_ref->GetFormID());
             auto source = GetSource(formid);
+            if (!source) return RaiseMngrErr("Source not found.");
             Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source->stages[0].GetBound());
             // remove the extra data that cause issues when dropping
             for (const auto& i: Settings::xRemove) 

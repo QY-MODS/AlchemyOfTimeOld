@@ -252,6 +252,7 @@ struct Source {
     RE::FormType formtype;
     std::string qFormType;
     std::vector<StageNo> fake_stages = {};
+    Stage decayed_stage;
 
     Source(const FormID id, const std::string id_str, RE::EffectSetting* e_m,StageDict sd = {})
         : formid(id), editorid(id_str), stages(sd), empty_mgeff(e_m){
@@ -335,6 +336,14 @@ struct Source {
 			}
         }
 
+        // decayed stage
+        decayed_stage = GetDecayedStage();
+        if (!decayed_stage.CheckIntegrity()) {
+			logger::critical("Decayed stage integrity check failed.");
+			InitFailed();
+			return;
+		}
+
         if (!CheckIntegrity()) {
             logger::critical("CheckIntegrity failed");
             InitFailed();
@@ -359,7 +368,7 @@ struct Source {
             return {};
         }
         // save the updated instances
-        std::vector<StageUpdate> updated_instances;
+        std::vector<StageUpdate> updated_instances = {};
         if (data.empty()) {
 			logger::warn("No data found for source {}", editorid);
 			return updated_instances;
@@ -369,12 +378,20 @@ struct Source {
         }
         for (auto& instance : data) {
             // if the refid is not in the filter, skip
-            if (!filter.empty() && std::find(filter.begin(), filter.end(), instance.location) == filter.end()) {
-                //logger::trace("Refid {} not in filter. Skipping.", instance.location);
-                continue;
+            if (!Utilities::Functions::VectorHasElement<RefID>(filter, instance.location)) {
+				//logger::trace("Refid {} not in filter. Skipping.", instance.location);
+				continue;
+			}
+            Stage* old_stage = &stages[instance.no];
+            Stage* new_stage = nullptr;
+            if (_UpdateStage(instance)) {
+                if (instance.xtra.is_decayed || !stages.contains(instance.no)) {
+                    new_stage = &decayed_stage;
+				}
+                else new_stage = &stages[instance.no];
+                auto is_fake__ = IsFakeStage(instance.no);
+                updated_instances.emplace_back(old_stage, new_stage, instance.count, instance.location, is_fake__);
             }
-            const StageNo old_no = instance.no;
-            if (_UpdateStage(instance)) updated_instances.emplace_back(old_no,instance.no,instance.count);
         }
         CleanUpData();
         return updated_instances;
@@ -395,12 +412,6 @@ struct Source {
         return nullptr;
     }
     
-    [[nodiscard]] const Stage GetDecayedStage() {
-        Stage decayed_stage;
-        decayed_stage.formid = defaultsettings.decayed_id;
-        return decayed_stage;
-    }
-
     [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance) { 
         data.push_back(stage_instance);
         return true;
@@ -639,6 +650,11 @@ private:
         // update mgeffs
     }
     
+    [[nodiscard]] const Stage GetDecayedStage() {
+        Stage dcyd_st;
+        dcyd_st.formid = defaultsettings.decayed_id;
+        return dcyd_st;
+    }
 
     template <typename T>
     const FormID CreateFake(T* real) {
