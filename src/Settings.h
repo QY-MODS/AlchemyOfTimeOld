@@ -406,24 +406,24 @@ struct Source {
         return true;
     }
 
-    [[nodiscard]] const bool DeleteData(const StageInstance& st_inst) {
-        if (init_failed) {
-            logger::critical("DeleteData: Initialisation failed.");
-            return false;
-        }
-        if (!st_inst.xtra.is_decayed) {
-            logger::error("st_inst {} is not decayed.", st_inst.no);
-			return false;
-        }
-        // find the instance
-        auto it = std::find(data.begin(), data.end(), st_inst);
-        if (it == data.end()) {
-			logger::error("Instance not found.");
-			return false;
-		}
-        data.erase(it);
-		return true;
-    }
+  //  [[nodiscard]] const bool DeleteData(const StageInstance& st_inst) {
+  //      if (init_failed) {
+  //          logger::critical("DeleteData: Initialisation failed.");
+  //          return false;
+  //      }
+  //      if (!st_inst.xtra.is_decayed) {
+  //          logger::error("st_inst {} is not decayed.", st_inst.no);
+		//	return false;
+  //      }
+  //      // find the instance
+  //      auto it = std::find(data.begin(), data.end(), st_inst);
+  //      if (it == data.end()) {
+		//	logger::error("Instance not found.");
+		//	return false;
+		//}
+  //      data.erase(it);
+		//return true;
+  //  }
 
     void CleanUpData() {
         if (init_failed) {
@@ -449,7 +449,7 @@ struct Source {
 			if (it->count <= 0) {
 				logger::trace("Erasing stage instance with count {}", it->count);
 				it = data.erase(it);
-            } else if (!stages.count(it->no)) {
+            } else if (!stages.count(it->no) || it->xtra.is_decayed) {
 				logger::trace("Erasing decayed stage instance with no {}", it->no);
 				it = data.erase(it);
             }
