@@ -860,6 +860,7 @@ namespace Utilities{
             bool is_fake = false;
             bool is_decayed = false;
             bool crafting_allowed = false;
+
             bool is_favorited = false; // used only when loading and saving
 		};
 
@@ -937,29 +938,81 @@ namespace Utilities{
         using StageDict = std::map<StageNo, Stage>;
 
         struct StageInstance {
-            float start_time;
+            float start_time; // start time of the stage
             StageNo no;
             Count count;
             RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is
                              // out in the world
             FormEditorIDX xtra;
 
-            StageInstance() : start_time(0), no(0), count(0), location(0) {}
+            //StageInstance() : start_time(0), no(0), count(0), location(0) {}
             StageInstance(float st, StageNo n, Count c, RefID l
                 //,std::string ei
             )
                 : start_time(st), no(n), count(c), location(l)
                 //,editorid(ei) 
-            {}
+            {
+                _elapsed = 0;
+                _delay_start = start_time;
+                _delay_mag = 0;
+            }
         
             //define ==
             bool operator==(const StageInstance& other) const {
                 return no == other.no && count == other.count && location == other.location &&
-                       //editorid == other.editorid && 
-                    start_time == other.start_time;
+                       start_time == other.start_time && 
+                    _elapsed == other._elapsed;
+			}
+            
+            bool SameExceptCount(const StageInstance& other) const {
+                return no == other.no && location == other.location &&
+                       start_time == other.start_time && _elapsed == other._elapsed;
 			}
 
+            StageInstance& operator=(const StageInstance& other) {
+                if (this != &other) {
+                    start_time = other.start_time;
+                    no = other.no;
+                    count = other.count;
+                    location = other.location;
+                    xtra = other.xtra;
+                    _elapsed = other._elapsed;
+                    _delay_start = other._delay_start;
+                    _delay_mag = other._delay_mag;
+                }
+                return *this;
+            }
+
             RE::TESBoundObject* GetBound() const { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(xtra.form_id); };
+        
+			const float GetElapsed(const float curr_time) {
+                return (curr_time - _delay_start) * GetDelaySlope() + _elapsed;
+            }
+
+            const float GetDelaySlope() {
+                const auto delay_magnitude = std::min(std::max(0.f, _delay_mag), 1.f);
+                return 1 - delay_magnitude;
+            }
+
+            /*void SetDelay(const float delay) { 
+                _delay_start = delay;
+                _delay_mag = delay;
+			}*/
+
+            void SetNewStart(const float curr_time, const float overshot) {
+                // overshot: by how much is the schwelle already ueberschritten
+                start_time = curr_time - overshot / GetDelaySlope();
+                _delay_start = start_time;
+                _elapsed = 0;
+			}
+
+
+        private:
+            float _elapsed; // y coord of the ausgangspunkt/elapsed time since the stage started
+            float _delay_start;  // x coord of the ausgangspunkt
+            float _delay_mag; // 1 - slope
+
+            //friend class StageInstance;
         };
 
         struct StageUpdate {
@@ -971,9 +1024,7 @@ namespace Utilities{
 
 
         using SourceData = std::vector<StageInstance>;
-        // editorid ler backup olarak var
         using SaveDataLHS = FormEditorID;
-        // FormEditorIDX neyle represente edildigi ve favori olup olmadigi
         using SaveDataRHS = SourceData;
     }
 

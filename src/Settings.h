@@ -395,42 +395,15 @@ struct Source {
         return nullptr;
     }
     
-    [[nodiscard]] const bool InsertData(const float st, const StageNo n, const Count c, const RefID l){
-        if (init_failed) {
-			logger::critical("InsertData: Initialisation failed.");
-			return false;
-		}
-        
-        if (!stages.count(n)) {
-        	logger::error("Stage {} does not exist.", n);
-        	return false;
-        }
-        if (c < 0) {
-			logger::error("Count is less than 0.");
-			return false;
-		}
-
-        //std::string editorid_;
-        //if (Utilities::Functions::VectorHasElement<StageNo>(fake_stages,n)){
-        //    editorid_ = "";
-        //} else editorid_ = clib_util::editorID::get_editorID(stages[n].GetBound());
-        
-        data.emplace_back(st, n, c, l
-            //, editorid_
-        );
-
-        //fillout the xtra of the emplaced instance
-        //get the emplaced instance
-        auto& emplaced_instance = data.back();
-        emplaced_instance.xtra.form_id = stages[n].formid;
-        emplaced_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages[n].GetBound());
-        emplaced_instance.xtra.crafting_allowed = stages[n].crafting_allowed;
-        if (IsFakeStage(n)) emplaced_instance.xtra.is_fake = true;
-        return true;
+    [[nodiscard]] const Stage GetDecayedStage() {
+        Stage decayed_stage;
+        decayed_stage.formid = defaultsettings.decayed_id;
+        return decayed_stage;
     }
 
-    [[nodiscard]] const bool InsertData(StageInstance stage_instance) {
-        return InsertData(stage_instance.start_time, stage_instance.no, stage_instance.count, stage_instance.location);
+    [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance) { 
+        data.push_back(stage_instance);
+        return true;
     }
 
     [[nodiscard]] const bool DeleteData(const StageInstance& st_inst) {
@@ -465,7 +438,7 @@ struct Source {
 			for (auto it2 = it; it2 != data.end(); ++it2) {
 				if (it == it2) continue;
                 if (it2->count <= 0) continue;
-				if (it->no == it2->no && it->location == it2->location && it->start_time == it2->start_time) {
+                if (it->SameExceptCount(*it)) {
 					it->count += it2->count;
 					it2->count = 0;
 				}
@@ -523,15 +496,14 @@ private:
             return false;
         }
         if (st_inst.xtra.is_decayed) return false;  // decayed
-        const auto current_stage = stages[st_inst.no];
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
-        float diff = curr_time - st_inst.start_time;
+        float diff = st_inst.GetElapsed(curr_time);
         if (diff < 0) {
             logger::critical("Time difference is negative. This should not happen!!!!");
             return false;
         }
         bool updated = false;
-        logger::trace("C«urrent time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff, stages[st_inst.no].duration);
+        logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,stages[st_inst.no].duration);
         while (diff > stages[st_inst.no].duration) {
             logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no + 1);
 			diff -= stages[st_inst.no].duration;
@@ -539,16 +511,21 @@ private:
             updated = true;
             if (!stages.count(st_inst.no)) {
 			    logger::trace("Decayed");
-                Stage decayed_stage;
-                decayed_stage.formid = defaultsettings.decayed_id;
+                /*Stage decayed_stage;
+                decayed_stage.formid = defaultsettings.decayed_id;*/
                 st_inst.xtra.is_decayed= true;
                 //st_inst.no++;
                 // make decayed stage
-                stages[st_inst.no] = decayed_stage;
+                //stages[st_inst.no] = decayed_stage;
                 break;
 		    }
 		}
-        if (updated) st_inst.start_time = curr_time - diff;
+        if (updated) {
+            // as long as the delay start was before the ueberschreitung time this will work,
+            // the delay start cant be strictly after the ueberschreitung time bcs we call update when a new delay
+            // starts so the delay start will always be before the ueberschreitung time
+            st_inst.SetNewStart(curr_time,diff);
+        }
         return updated;
     }
 
