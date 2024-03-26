@@ -134,13 +134,15 @@ namespace Settings {
         rapidjson::Document doc;
         doc.Parse(jsonStr.c_str());
         if (doc.HasParseError()) {
-            std::cerr << "JSON parse error: " << doc.GetParseError() << std::endl;
+            logger::critical("JSON parse error: {}", doc.GetParseError());
+            Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("JSON parse error: " + std::to_string(doc.GetParseError()));
             return settings;
         }
 
         // Access the "stages" array
         if (doc.HasMember("stages") && doc["stages"].IsArray()) {
             const rapidjson::Value& stages = doc["stages"];
+            logger::trace("Stages size: {}", stages.Size());
             for (rapidjson::SizeType i = 0; i < stages.Size(); i++) {
                 const rapidjson::Value& stage = stages[i];
 
@@ -384,7 +386,7 @@ struct Source {
 			}
             Stage* old_stage = &stages[instance.no];
             Stage* new_stage = nullptr;
-            if (_UpdateStage(instance)) {
+            if (_UpdateStageInstance(instance)) {
                 if (instance.xtra.is_decayed || !stages.contains(instance.no)) {
                     new_stage = &decayed_stage;
 				}
@@ -413,7 +415,32 @@ struct Source {
     }
     
     [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance) { 
+
+        if (init_failed) {
+            logger::critical("InsertData: Initialisation failed.");
+            return false;
+        }
+
+        const auto n = stage_instance.no;
+        if (!stages.count(n)) {
+            logger::error("Stage {} does not exist.", n);
+            return false;
+        }
+        if (stage_instance.count <= 0) {
+            logger::error("Count is less than or equal 0.");
+            return false;
+        }
+
         data.push_back(stage_instance);
+
+        // fillout the xtra of the emplaced instance
+        // get the emplaced instance
+        auto& emplaced_instance = data.back();
+        emplaced_instance.xtra.form_id = stages[n].formid;
+        emplaced_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages[n].GetBound());
+        emplaced_instance.xtra.crafting_allowed = stages[n].crafting_allowed;
+        if (IsFakeStage(n)) emplaced_instance.xtra.is_fake = true;
+
         return true;
     }
 
@@ -423,6 +450,7 @@ struct Source {
             return;
         }
 		logger::trace("Cleaning up data.");
+        PrintData();
         // size before cleanup
         logger::trace("Size before cleanup: {}", data.size());
         // if there are instances with same stage no and location, and start_time, merge them
@@ -431,7 +459,8 @@ struct Source {
 			for (auto it2 = it; it2 != data.end(); ++it2) {
 				if (it == it2) continue;
                 if (it2->count <= 0) continue;
-                if (it->AlmostSameExceptCount(*it, curr_time)) {
+                if (it->AlmostSameExceptCount(*it2, curr_time)) {
+                    logger::trace("Merging stage instances with count {} and {}", it->count, it2->count);
 					it->count += it2->count;
 					it2->count = 0;
 				}
@@ -483,7 +512,7 @@ struct Source {
 private:
 
     // counta karismiyor
-    [[nodiscard]] const bool _UpdateStage(StageInstance& st_inst) {
+    [[nodiscard]] const bool _UpdateStageInstance(StageInstance& st_inst) {
         if (init_failed) {
         	logger::critical("_UpdateStage: Initialisation failed.");
             return false;
@@ -504,16 +533,27 @@ private:
             updated = true;
             if (!stages.count(st_inst.no)) {
 			    logger::trace("Decayed");
-                /*Stage decayed_stage;
-                decayed_stage.formid = defaultsettings.decayed_id;*/
                 st_inst.xtra.is_decayed= true;
-                //st_inst.no++;
-                // make decayed stage
-                //stages[st_inst.no] = decayed_stage;
+                st_inst.xtra.form_id = decayed_stage.formid;
+                st_inst.xtra.editor_id = clib_util::editorID::get_editorID(decayed_stage.GetBound());
+                st_inst.xtra.is_fake = false;
+                st_inst.xtra.crafting_allowed = false;
                 break;
 		    }
 		}
         if (updated) {
+            if (st_inst.xtra.is_decayed) {
+                st_inst.xtra.form_id = decayed_stage.formid;
+                st_inst.xtra.editor_id = clib_util::editorID::get_editorID(decayed_stage.GetBound());
+                st_inst.xtra.is_fake = false;
+                st_inst.xtra.crafting_allowed = false;
+            } 
+            else {
+                st_inst.xtra.form_id = stages[st_inst.no].formid;
+                st_inst.xtra.editor_id = clib_util::editorID::get_editorID(stages[st_inst.no].GetBound());
+                st_inst.xtra.is_fake = IsFakeStage(st_inst.no);
+                st_inst.xtra.crafting_allowed = stages[st_inst.no].crafting_allowed;
+            }
             // as long as the delay start was before the ueberschreitung time this will work,
             // the delay start cant be strictly after the ueberschreitung time bcs we call update when a new delay
             // starts so the delay start will always be before the ueberschreitung time

@@ -679,7 +679,7 @@ namespace Utilities{
      //   RE::SkyrimVM*& g_skyrimVM = *(RE::SkyrimVM**)0x012E568C;
     };
 
-        // Utility functions
+    // Utility functions
     namespace Functions {
 
         template <typename Key, typename Value>
@@ -1018,6 +1018,15 @@ namespace Utilities{
                 _delay_start = start_time;
                 _elapsed = 0;
 			}
+
+    //        void RankUp(const FormID new_formid,const std::string new_editorid, const bool fake,const bool decayed, const bool craftingallowed){
+    //            xtra.form_id = new_formid;
+    //            xtra.editor_id = new_editorid;
+				//xtra.is_fake = fake;
+				//xtra.is_decayed = decayed;
+				//xtra.crafting_allowed = craftingallowed;
+    //            no++;
+    //        }
 
 
         private:

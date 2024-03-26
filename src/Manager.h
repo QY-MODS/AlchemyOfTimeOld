@@ -153,7 +153,7 @@ class Manager : public Utilities::SaveLoadData {
         Utilities::FunctionsSkyrim::SwapObjects(wo_ref, stage_bound);
     }
 
-    void _UpdateSpoilageInWorld(RE::TESObjectREFR* wo_ref, Stage& stage, bool is_fake){
+    void ApplySpoilageInWorld(RE::TESObjectREFR* wo_ref, Stage& stage, bool is_fake){
         if (is_fake) _UpdateSpoilageInWorld_Fake(wo_ref, stage.GetExtraText());
 		else _UpdateSpoilageInWorld_Custom(wo_ref, stage.GetBound());
     };
@@ -242,7 +242,29 @@ class Manager : public Utilities::SaveLoadData {
     }
 
     // registers a new instance to an existing source or creates a new source and registers the instance
+    // also tries to handle the case where the item is already a stage item
     void Register(const FormID source_formid, const Count count, const RefID location_refid) {
+        if (!source_formid) {
+            logger::warn("Formid is null.");
+			return;
+        }
+        if (!count) {
+			logger::warn("Count is 0.");
+			return;
+		}
+        if (IsStage(source_formid)) {
+            logger::warn("Stage item is being registered!");
+            const auto stage_source = GetStageSource(source_formid);
+            if (!stage_source) return RaiseMngrErr("Register: Stage source not found.");
+            const auto stage_no = GetStageNoFromSource(stage_source, source_formid);
+            if (stage_source->IsFakeStage(stage_no)) logger::warn("Register: Fake stage item!");
+            // create new instance and register it
+            StageInstance new_instance(RE::Calendar::GetSingleton()->GetHoursPassed(), stage_no, count, location_refid);
+            if (!stage_source->InsertNewInstance(new_instance)) {
+                return RaiseMngrErr("HandlePickUp: InsertNewInstance failed.");
+            }
+            return;
+        }
         // create stages for this instance
         logger::trace("Registering new instance.");
         if (!location_refid) return RaiseMngrErr("Location refid is null.");
@@ -256,7 +278,8 @@ class Manager : public Utilities::SaveLoadData {
             if (!new_source.InsertNewInstance(new_instance)) return RaiseMngrErr("Register: InsertNewInstance failed 1.");
             sources.push_back(new_source);
             logger::trace("New source created.");
-        } else {
+        } 
+        else {
             StageInstance new_instance(curr_time, 0, count, location_refid);
             if (!src->InsertNewInstance(new_instance)) return RaiseMngrErr("Register: InsertNewInstance failed 2.");
         }
@@ -404,23 +427,27 @@ public:
         return false;
     }
 
-    void RegisterAndUpdate(const FormID source_formid, const Count count, const RefID location_refid) {
+    // For stuff generally entering an inventory
+    void RegisterAndStartSpoilage(const FormID source_formid, const Count count, const RefID location_refid) {
         Register(source_formid, count, location_refid);
-        // if the source is in an inventory
         auto src = GetSource(source_formid);
-        if (!src) return RaiseMngrErr("RegisterAndUpdate: Source is null.");
+        if (!src) return RaiseMngrErr("RegisterAndStartSpoilage: Source is null.");
         auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(location_refid);
-        if (!ref) return RaiseMngrErr("RegisterAndUpdate: Ref is null.");
+        if (!ref) return RaiseMngrErr("RegisterAndStartSpoilage1: Ref is null.");
         if (ref->HasContainer() || location_refid == player_refid) {
             logger::trace("Registering in inventory.");
             const auto stage_formid = src->stages[0].formid;
             // to change from the source form to the stage form
             ApplySpoilageInInventory(ref, count, source_formid, stage_formid);
-        }
+        } else logger::warn("The location is not an inventory. The other overriden function should be used.");
     }
 
     // For stuff outside
-    void RegisterAndUpdate(RE::TESObjectREFR* wo_ref) {
+    void RegisterAndStartSpoilage(RE::TESObjectREFR* wo_ref) {
+        if (RefIsRegistered(wo_ref->GetFormID())) {
+			logger::warn("Ref is already registered.");
+			return;
+		}
         if (!wo_ref) return RaiseMngrErr("Ref is null.");
         // create stages for this instance
         const auto base = wo_ref->GetBaseObject();
@@ -435,7 +462,11 @@ public:
         logger::trace("Registering world object. Formid {} , Count {} , Refid {}", formid, count, refid);
 
         Register(formid, count, wo_ref->GetFormID());
-        UpdateSpoilageInWorld(wo_ref);
+        auto src = GetWOSource(wo_ref);
+        if (!src) return RaiseMngrErr("RegisterAndStartSpoilage2: Source is null.");
+        //get stage
+        Stage& stage = src->stages[0];
+        ApplySpoilageInWorld(wo_ref,stage,src->IsFakeStage(0));
     }
 
     void HandleDrop(const FormID dropped_formid, Count count, RE::TESObjectREFR* dropped_stage_ref){
@@ -461,7 +492,11 @@ public:
             logger::critical("HandleDrop: Source not found! Fakeform not registered!");
             return;
         }
+        
+        // count muhabbetleri... ay ay ay
         if (RefIsRegistered(dropped_stage_ref->GetFormID())){
+            // eventsink bazen bugliyodu ayni refe gosteriyodu countlar split olunca
+            // ama extrayi attiimdan beri olmuyodu
             logger::warn("Ref is registered at HandleDrop!");
             const auto curr_count = dropped_stage_ref->extraList.GetCount();
             Utilities::FunctionsSkyrim::SetObjectCount(dropped_stage_ref, count + curr_count);
@@ -480,7 +515,7 @@ public:
             if (st_inst.location == player_refid && st_inst.no == stage_no)
                 instances_candidates.push_back(&st_inst);
 		}
-        // need to now order the instances_candidates by their start_time
+        // need to now order the instances_candidates by their elapsed times
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         std::sort(instances_candidates.begin(), instances_candidates.end(),
                   [curr_time](StageInstance* a, StageInstance* b) {
@@ -491,6 +526,7 @@ public:
         bool handled_first_stack = false;
         std::vector<RE::TESObjectREFR*> refs_to_be_updated;
         for (auto* instance : instances_candidates) {
+            if (!count) break;
             if (count <= instance->count) {
                 logger::trace("instance count: {}", instance->count);
                 logger::trace("count: {}", count);
@@ -512,7 +548,8 @@ public:
                         
                     refs_to_be_updated.push_back(dropped_stage_ref);
                     handled_first_stack = true;
-                } else {
+                } 
+                else {
                     logger::trace("SADSJFHÖADF 2");
                     const auto bound_to_drop = instance->xtra.is_fake ? source->GetBoundObject() : instance->GetBound();
                     auto new_ref = Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(bound_to_drop, count, nullptr);
@@ -526,10 +563,12 @@ public:
                     if (!source->InsertNewInstance(new_instance)) {
                         return RaiseMngrErr("HandleDrop: InsertNewInstance failed.");
                     }
+                    ApplySpoilageInWorld(new_ref, source->stages[new_instance.no], source->IsFakeStage(new_instance.no));
                     refs_to_be_updated.push_back(new_ref);
                 }
                 break;
-            } else {
+            } 
+            else {
                 logger::trace("instance count: {}", instance->count);
                 logger::trace("count: {}", count);
                 count -= instance->count;
@@ -544,7 +583,8 @@ public:
                     instance->location = dropped_stage_ref->GetFormID();
                     refs_to_be_updated.push_back(dropped_stage_ref);
                     handled_first_stack = true;
-                } else {
+                } 
+                else {
                     logger::trace("SADSJFHÖADF 4");
                     const auto bound_to_drop = instance->xtra.is_fake ? source->GetBoundObject() : instance->GetBound();
                     auto new_ref =
@@ -554,13 +594,15 @@ public:
                         logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), instance->count);
                     }
                     instance->location = new_ref->GetFormID();
+                    if (instance->xtra.is_fake) _UpdateSpoilageInWorld_Fake(new_ref, source->stages[instance->no].GetExtraText());
+					else _UpdateSpoilageInWorld_Custom(new_ref, instance->GetBound());
                     refs_to_be_updated.push_back(new_ref);
                 }
             }
         }
 
-        // TODO: optimize it
-        for (auto& ref : refs_to_be_updated) UpdateSpoilageInWorld(ref);
+        // TODO: add delayer stuff
+        _UpdateSpoilage(refs_to_be_updated, source);
 
         source->CleanUpData();
         source->PrintData();
@@ -575,14 +617,15 @@ public:
         npc_ref = npc_ref ? npc_ref : player_ref; // naming...for the sake of functionality
         if (!RefIsRegistered(wo_refid)) {
             if (worldobjectsspoil){
-                // bcs it shoulda been registered already before picking up
+                // bcs it shoulda been registered already before picking up (with some exceptions)
                 logger::warn("HandlePickUp: Not registered world object refid: {}, pickedup_formid: {}", wo_refid,
                              pickedup_formid);
-            } /*else if (npc_ref != nullptr) {
-                logger::warn("If npc_ref is given, the world object refid should be registered!");
-                return;
-            }*/
-            return RegisterAndUpdate(pickedup_formid, count, npc_refid);
+            }
+            if (IsStage(pickedup_formid)) {
+                logger::warn("HandlePickUp: Unregistered Stage item is being picked up!");
+                return Register(pickedup_formid, count, npc_refid);
+            }
+            return RegisterAndStartSpoilage(pickedup_formid, count, npc_refid);
         }
         // so it was registered before
         auto source = GetStageSource(pickedup_formid); // registeredsa stage olmak zorunda
@@ -594,24 +637,17 @@ public:
                 // if it needs to be replaced by a created form
                 if (source->IsFakeStage(st_inst.no)) {
                     // try to replace it with fake form
-                    auto new_f = source->stages[st_inst.no].formid;
-                    ApplySpoilageInInventory(npc_ref, count, pickedup_formid, new_f);
+                    ApplySpoilageInInventory(npc_ref, count, pickedup_formid, st_inst.xtra.form_id);
                     if (eat && npc_refid == player_refid) RE::ActorEquipManager::GetSingleton()->EquipObject(RE::PlayerCharacter::GetSingleton(), 
                         st_inst.GetBound(),nullptr, count);
-        //            const int count_diff = st_inst.count - count;
-        //            if (count_diff > 0 && npc_ref && npc_ref->HasContainer()) {
-        //                logger::trace("HandlePickUp: Adding the rest {} to the npc container.", count_diff);
-        //                st_inst.count = count; // bcs of NPCs..
-        //                RemoveItemReverse(npc_ref, nullptr, formid, count_diff, RE::ITEM_REMOVE_REASON::kRemove);
-        //                AddItem(npc_ref, nullptr, source->stages[st_inst.no].formid, count_diff);
-        //                source->data.emplace_back(st_inst.start_time, st_inst.no, count_diff, npc_ref->GetFormID());
-				    //}
                 }
                 break;
 			}
 		}
 		source->CleanUpData();
         source->PrintData();
+        
+        // TODO: add delayer stuff here and prolly also updating
     }
 
     void HandleConsume(const FormID stage_formid) {
@@ -641,8 +677,8 @@ public:
             }
         }
 
-        // check if player has the fake item
-        // sometimes player does not have the fake item but it can still be there with count = 0.
+        // check if player has the item
+        // sometimes player does not have the item but it can still be there with count = 0.
         const auto player_inventory = player_ref->GetInventory();
         const auto entry = player_inventory.find(Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(stage_formid));
         const auto player_count = entry != player_inventory.end() ? entry->second.first : 0;
@@ -667,7 +703,7 @@ public:
         for (auto& instance : instances_candidates) {
             if (diff <= instance->count) {
                 instance->count -= diff;
-				return;
+                break;
 			} else {
                 diff -= instance->count;
                 instance->count = 0;
@@ -695,15 +731,12 @@ public:
             logger::info("HandleCraftingEnter: Just to align reality and registries");
             //AlignRegistries({player_refid});
             for (auto& st_inst : src.data) {
-                if (!st_inst.xtra.crafting_allowed) continue;
+                if (!st_inst.xtra.crafting_allowed || st_inst.location != player_refid) continue;
                 const auto stage_formid = st_inst.xtra.form_id;
                 const FormFormID temp = {src.formid, stage_formid};
                 if (!handle_crafting_instances.contains(temp)) {
-                    const auto stage_bound = Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(stage_formid);
-                    if (!stage_bound) {
-						logger::warn("HandleCraftingEnter: Stage bound is null.");
-						continue;
-					}
+                    const auto stage_bound = st_inst.GetBound();
+                    if (!stage_bound) return RaiseMngrErr("HandleCraftingEnter: Stage bound is null.");
                     const auto src_bound = src.GetBoundObject();
                     const auto it = player_inventory.find(src_bound);
                     const auto count_src = it != player_inventory.end() ? it->second.first : 0;
@@ -765,6 +798,7 @@ public:
 
     }
 
+    // to check if external container is registered in the corresponding source
     [[nodiscard]] const bool IsExternalContainer(const FormID stage_id, const RefID refid) {
         if (!refid) return false;
         auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(refid);
@@ -792,8 +826,20 @@ public:
 
     void LinkExternalContainer(const FormID stage_formid, Count item_count, const RefID externalcontainer) {
         ENABLE_IF_NOT_UNINSTALLED
+		if (!stage_formid) {
+			logger::error("Fake formid is null.");
+			return;
+		}
+        if (!item_count) {
+            logger::error("Item count is 0.");
+            return;
+        }
+
         const auto external_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(externalcontainer);
-        if (!external_ref) return RaiseMngrErr("External ref is null.");
+        if (!external_ref) {
+            logger::critical("External ref is null.");
+            return;
+        }
         if (!external_ref->HasContainer()) {
             logger::error("External container does not have a container.");
             return;
@@ -807,7 +853,7 @@ public:
         for (auto& st_inst : source->data) {
             if (st_inst.no == stage_no && st_inst.location == player_refid) instances_candidates.push_back(&st_inst);
         }
-        // need to now order the instances_candidates by their start_time
+        // need to now order the instances_candidates by their elapsed time
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         std::sort(instances_candidates.begin(), instances_candidates.end(),
                   [curr_time](StageInstance* a, StageInstance* b) { 
@@ -815,6 +861,7 @@ public:
             });
 
         for (auto& instance : instances_candidates) {
+            if (!item_count) break;
             if (item_count <= instance->count) {
                 instance->count -= item_count;
                 StageInstance new_instance(*instance);
@@ -825,11 +872,14 @@ public:
                 }
                 logger::trace("Linked external container.");
                 break;
-            } else {
+            } 
+            else {
                 item_count -= instance->count;
                 instance->location = externalcontainer;
             }
         }
+
+        source->CleanUpData();
 
    //     if (Utilities::FunctionsSkyrim::IsFavorited(stage_formid, externalcontainer)) {
    //         logger::trace("Faved item successfully transferred to external container.");
@@ -837,7 +887,6 @@ public:
    //     }
 
 
-        source->CleanUpData();
         // Stage new_stage(formid, item_count, externalcontainer);
         // SourceDataKey new_sourcedatakey()
         // src->data[chest_refid] = externalcontainer;
@@ -854,11 +903,22 @@ public:
     }
 
     void UnLinkExternalContainer(const FormID stage_formid, Count count,const RefID externalcontainer) { 
-        if (!externalcontainer) return RaiseMngrErr("External container is null.");
+        ENABLE_IF_NOT_UNINSTALLED
+
         if (!stage_formid) {
-            logger::error("Fake formid is null.");
+			logger::error("Fake formid is null.");
+			return;
+		}
+        if (!count) {
+			logger::error("Item count is 0.");
+			return;
+		}
+
+        if (!externalcontainer) {
+            logger::critical("External container is null.");
             return;
         }
+        
         if (!IsExternalContainer(stage_formid, externalcontainer)) {
             logger::error("External container is not registered.");
             return;
@@ -875,7 +935,7 @@ public:
         for (auto& st_inst : source->data) {
             if (st_inst.no == stage_no && st_inst.location == externalcontainer) instances_candidates.push_back(&st_inst);
         }
-        // need to now order the instances_candidates by their start_time
+        // need to now order the instances_candidates by their elapsed time
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         std::sort(instances_candidates.begin(), instances_candidates.end(),
                   [curr_time](StageInstance* a, StageInstance* b) { 
@@ -883,6 +943,7 @@ public:
             });
 
         for (auto& instance : instances_candidates) {
+            if (!count) break;
             if (count <= instance->count) {
                 instance->count -= count;
                 StageInstance new_instance(*instance);
@@ -891,8 +952,9 @@ public:
                 if (!source->InsertNewInstance(new_instance)) {
                     return RaiseMngrErr("UnLinkExternalContainer: InsertNewInstance failed.");
                 }
-				return;
-			} else {
+				break;
+			} 
+            else {
                 count -= instance->count;
                 instance->location = player_refid;
 			}
@@ -900,6 +962,8 @@ public:
         
         source->CleanUpData();
         logger::trace("Unlinked external container.");
+
+        // TODO: add delayer stuff here and prolly also updating
 
         // I need to be able to determine the stage of the stored item
 
@@ -972,7 +1036,7 @@ public:
                 if (IsStage(ref) && update.new_is_fake){
                     Utilities::FunctionsSkyrim::SwapObjects(ref, src->GetBoundObject());
                 }
-                _UpdateSpoilageInWorld(ref, *update.newstage, update.new_is_fake);
+                ApplySpoilageInWorld(ref, *update.newstage, update.new_is_fake);
             } 
             else {
                 logger::critical("UpdateSpoilage: Unknown ref type.");
@@ -1022,8 +1086,9 @@ public:
         const auto formid = wo_ref->GetBaseObject()->GetFormID();
         if (!RefIsRegistered(wo_ref->GetFormID())) {
             if (worldobjectsspoil) {
-                // bcs it shoulda been registered already before picking up
+                // bcs it shoulda been registered already before picking up (with some exceptions)
                 logger::warn("SwapWithStage: Not registered world object refid: {}, formid: {}", wo_refid, formid);
+                Print();
             }
             Register(formid, wo_ref->extraList.GetCount(), wo_ref->GetFormID());
             auto source = GetSource(formid);
@@ -1035,25 +1100,22 @@ public:
             Utilities::FunctionsSkyrim::PrintObjectExtraData(wo_ref);
             return;
 		}
-        auto source = GetSource(formid);
-        if (!source) return RaiseMngrErr("Source not found.");
-        for (auto& st_inst : source->data) {
-            if (st_inst.location == wo_ref->GetFormID()) {
-                if (!source->IsFakeStage(st_inst.no)) {
-                    logger::warn("SwapWithStage: Not a fake stage.");
-                    return;
-                }
-                // it is fake stage
-                Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source->stages[st_inst.no].GetBound(),false);
-                // remove the extra data that cause issues when dropping
-                for (const auto& i : Settings::xRemove)
-                    wo_ref->extraList.RemoveByType(static_cast<RE::ExtraDataType>(i));
-                Utilities::FunctionsSkyrim::PrintObjectExtraData(wo_ref);
-                logger::trace("SwapWithStage: Swapped.");
-				return;
-			}
-		}
-        logger::warn("SwapWithStage: Not found in source.");
+        const auto st_inst = GetWOStageInstance(wo_ref);
+        if (!st_inst) {
+            logger::warn("SwapWithStage: Stage instance not found.");
+			return;
+        }
+        if (!st_inst->xtra.is_fake) {
+            logger::warn("SwapWithStage: Not a fake stage.");
+            return;
+        }
+        // it is fake stage
+        Utilities::FunctionsSkyrim::SwapObjects(wo_ref, st_inst->GetBound(), false);
+        // remove the extra data that cause issues when dropping
+        for (const auto& i : Settings::xRemove)
+            wo_ref->extraList.RemoveByType(static_cast<RE::ExtraDataType>(i));
+        Utilities::FunctionsSkyrim::PrintObjectExtraData(wo_ref);
+        logger::trace("SwapWithStage: Swapped.");
     }
 
     void Reset() {
