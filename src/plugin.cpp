@@ -118,7 +118,7 @@ public:
 
         if (!M->RefIsRegistered(event->crosshairRef->GetFormID())) {
             logger::trace("Item not registered.");
-            M->RegisterAndUpdate(event->crosshairRef.get());
+            M->RegisterAndStartSpoilage(event->crosshairRef.get());
         }
         else M->UpdateSpoilage(event->crosshairRef.get());
         
@@ -256,7 +256,7 @@ public:
         if (event->newContainer == player_refid) {
             logger::trace("Item entered player inventory.");
             if (!M->IsStage(event->baseObj)) {
-                M->RegisterAndUpdate(event->baseObj, event->itemCount, player_refid);
+                M->RegisterAndStartSpoilage(event->baseObj, event->itemCount, player_refid);
                 if (auto container_menu = RE::UI::GetSingleton()->GetMenu<RE::ContainerMenu>())
                     container_menu->GetRuntimeData().itemList->Update();
             }

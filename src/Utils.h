@@ -862,6 +862,10 @@ namespace Utilities{
             bool crafting_allowed = false;
 
             bool is_favorited = false; // used only when loading and saving
+
+            bool operator==(const FormEditorIDX& other) const {
+				return form_id == other.form_id;
+			}
 		};
 
         // using EditorID = std::string;
@@ -961,13 +965,22 @@ namespace Utilities{
             bool operator==(const StageInstance& other) const {
                 return no == other.no && count == other.count && location == other.location &&
                        start_time == other.start_time && 
-                    _elapsed == other._elapsed;
+                    _elapsed == other._elapsed && xtra == other.xtra;
 			}
             
-            bool SameExceptCount(const StageInstance& other) const {
+   //         [[maybe_unused]] bool SameExceptCount(const StageInstance& other) const {
+   //             return no == other.no && location == other.location &&
+   //                    start_time == other.start_time && _elapsed == other._elapsed;
+			//}
+
+            // times are very close (abs diff less than 0.015h = 0.9min)
+            bool AlmostSameExceptCount(StageInstance& other,const float curr_time) const {
+                // bcs they are in the same inventory they will have same delay magnitude
+                // delay starts might be different but if the elapsed times are close enough, we don't care
                 return no == other.no && location == other.location &&
-                       start_time == other.start_time && _elapsed == other._elapsed;
-			}
+                       std::abs(start_time - other.start_time) < 0.015 &&
+                       std::abs(GetElapsed(curr_time) - other.GetElapsed(curr_time)) < 0.015 && xtra == other.xtra;
+            }
 
             StageInstance& operator=(const StageInstance& other) {
                 if (this != &other) {
@@ -985,11 +998,11 @@ namespace Utilities{
 
             RE::TESBoundObject* GetBound() const { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(xtra.form_id); };
         
-			const float GetElapsed(const float curr_time) {
+			const float GetElapsed(const float curr_time) const {
                 return (curr_time - _delay_start) * GetDelaySlope() + _elapsed;
             }
 
-            const float GetDelaySlope() {
+            const float GetDelaySlope() const {
                 const auto delay_magnitude = std::min(std::max(0.f, _delay_mag), 1.f);
                 return 1 - delay_magnitude;
             }

@@ -426,11 +426,12 @@ struct Source {
         // size before cleanup
         logger::trace("Size before cleanup: {}", data.size());
         // if there are instances with same stage no and location, and start_time, merge them
+        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         for (auto it = data.begin(); it != data.end(); ++it) {
 			for (auto it2 = it; it2 != data.end(); ++it2) {
 				if (it == it2) continue;
                 if (it2->count <= 0) continue;
-                if (it->SameExceptCount(*it)) {
+                if (it->AlmostSameExceptCount(*it, curr_time)) {
 					it->count += it2->count;
 					it2->count = 0;
 				}
