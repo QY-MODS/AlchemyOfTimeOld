@@ -449,6 +449,10 @@ struct Source {
             logger::critical("CleanUpData: Initialisation failed.");
             return;
         }
+        if (data.empty()) {
+            logger::warn("No data found for source {}", editorid);
+            return;
+        }
 		logger::trace("Cleaning up data.");
         PrintData();
         // size before cleanup
@@ -471,7 +475,8 @@ struct Source {
 			if (it->count <= 0) {
 				logger::trace("Erasing stage instance with count {}", it->count);
 				it = data.erase(it);
-            } else if (!stages.count(it->no) || it->xtra.is_decayed) {
+            } 
+            else if (!stages.count(it->no) || it->xtra.is_decayed) {
 				logger::trace("Erasing decayed stage instance with no {}", it->no);
 				it = data.erase(it);
             }

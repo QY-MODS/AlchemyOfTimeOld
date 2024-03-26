@@ -38,6 +38,8 @@ class Manager : public Utilities::SaveLoadData {
 #define ENABLE_IF_NOT_UNINSTALLED if (isUninstalled) return;
 
     [[nodiscard]] Source* GetSource(const FormID real_formid) {
+        if (!real_formid) return nullptr;
+        if (sources.empty()) return nullptr;
         for (auto& src : sources) {
             if (src.formid == real_formid && !src.init_failed) {
                 return &src;
@@ -49,6 +51,7 @@ class Manager : public Utilities::SaveLoadData {
 
     [[nodiscard]] Source* GetStageSource(const FormID stage_formid) {
         if (!stage_formid) return nullptr;
+        if (sources.empty()) return nullptr;
         for (auto& src : sources) {
             for (auto& stage : src.stages) {
                 if (stage.second.formid == stage_formid && !src.init_failed) {
@@ -76,6 +79,7 @@ class Manager : public Utilities::SaveLoadData {
             RaiseMngrErr("Ref is null.");
 			return nullptr;
         }
+        if (sources.empty()) return nullptr;
         for (const auto& src : sources) {
             for (const auto& st_inst : src.data) {
                 if (st_inst.location == wo_refid) return &st_inst;
@@ -95,6 +99,7 @@ class Manager : public Utilities::SaveLoadData {
 
     [[nodiscard]] Source* GetWOSource(RefID wo_refid) {
         if (!wo_refid) return nullptr;
+        if (sources.empty()) return nullptr;
         for (auto& src : sources) {
             for (const auto& st_inst : src.data) {
                 if (st_inst.location == wo_refid) return &src;
@@ -418,6 +423,10 @@ public:
             logger::warn("Refid is null.");
             return false;
         }
+        if (sources.empty()) {
+			logger::warn("Sources is empty.");
+			return false;
+		}
         for (auto& src : sources) {
             for (auto& st_inst : src.data) {
                 //logger::trace("RefIsRegistered: Checking refid {} , st_inst.location {}", refid, st_inst.location);
@@ -510,10 +519,14 @@ public:
         source->PrintData();
         const auto stage_no = GetStageNoFromSource(source, dropped_formid);
         // at the same stage but different start times
-        std::vector<StageInstance*> instances_candidates;
+        std::vector<StageInstance*> instances_candidates = {};
         for (auto& st_inst : source->data) {
             if (st_inst.location == player_refid && st_inst.no == stage_no)
                 instances_candidates.push_back(&st_inst);
+		}
+        if (instances_candidates.empty()) {
+			logger::error("HandleDrop: No instances found.");
+			return;
 		}
         // need to now order the instances_candidates by their elapsed times
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
@@ -630,6 +643,10 @@ public:
         // so it was registered before
         auto source = GetStageSource(pickedup_formid); // registeredsa stage olmak zorunda
         if (!source) return RaiseMngrErr("HandlePickUp: Source not found.");
+        if (source->data.empty()) {
+            logger::warn("HandlePickUp: Source data is empty.");
+			return;
+        }
         source->PrintData();
         for (auto& st_inst: source->data) {
             if (st_inst.location == wo_refid) {
@@ -669,13 +686,22 @@ public:
         logger::trace("HandleConsume");
 
         int total_registered_count = 0;
-        std::vector<StageInstance*> instances_candidates;
+        std::vector<StageInstance*> instances_candidates = {};
         for (auto& st_inst : source->data) {
             if (st_inst.xtra.form_id == stage_formid && st_inst.location == player_refid) {
                 total_registered_count += st_inst.count;
                 instances_candidates.push_back(&st_inst);
             }
         }
+
+        if (instances_candidates.empty()) {
+            logger::warn("HandleConsume: No instances found.");
+            return;
+        }
+        if (total_registered_count == 0) {
+			logger::warn("HandleConsume: Nothing to consume.");
+			return;
+		}
 
         // check if player has the item
         // sometimes player does not have the item but it can still be there with count = 0.
@@ -725,6 +751,10 @@ public:
         std::map<FormID,int> to_remove;
         const auto player_inventory = player_ref->GetInventory();
         for (auto& src : sources) {
+            if (src.data.empty()) {
+				logger::warn("HandleCraftingEnter: Source data is empty.");
+				continue;
+			}
             if (src.qFormType != qform_type) continue;
             src.PrintData();
             // just to align reality and registries:
@@ -748,7 +778,10 @@ public:
             }
         }
         
-
+        if (handle_crafting_instances.empty()) {
+            logger::warn("HandleCraftingEnter: No instances found.");
+            return;
+        }
         for (auto& [formids, counts] : handle_crafting_instances) {
             RemoveItemReverse(player_ref, nullptr, formids.form_id2, counts.first, RE::ITEM_REMOVE_REASON::kRemove);
             AddItem(player_ref, nullptr, formids.form_id1, counts.first);
@@ -764,6 +797,12 @@ public:
     void HandleCraftingExit() {
         ENABLE_IF_NOT_UNINSTALLED
         logger::trace("HandleCraftingExit");
+
+        if (handle_crafting_instances.empty()) {
+			logger::warn("HandleCraftingExit: No instances found.");
+            is_faved.clear();
+			return;
+		}
 
         logger::trace("Crafting menu closed");
         for (auto& [formids, counts] : handle_crafting_instances) {
@@ -849,10 +888,16 @@ public:
         const auto source = GetStageSource(stage_formid);
         if (!source) return RaiseMngrErr("LinkExternalContainer: Source not found.");
         const auto stage_no = GetStageNoFromSource(source, stage_formid);
-        std::vector<StageInstance*> instances_candidates;
+        std::vector<StageInstance*> instances_candidates = {};
         for (auto& st_inst : source->data) {
             if (st_inst.no == stage_no && st_inst.location == player_refid) instances_candidates.push_back(&st_inst);
         }
+
+        if (instances_candidates.empty()) {
+			logger::error("LinkExternalContainer: No instances found.");
+			return;
+		}
+
         // need to now order the instances_candidates by their elapsed time
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         std::sort(instances_candidates.begin(), instances_candidates.end(),
@@ -931,10 +976,16 @@ public:
         if (!source) return RaiseMngrErr("UnLinkExternalContainer: Source not found.");
         const auto stage_no = GetStageNoFromSource(source, stage_formid);
 
-        std::vector<StageInstance*> instances_candidates;
+        std::vector<StageInstance*> instances_candidates = {};
         for (auto& st_inst : source->data) {
             if (st_inst.no == stage_no && st_inst.location == externalcontainer) instances_candidates.push_back(&st_inst);
         }
+
+        if (instances_candidates.empty()) {
+            logger::error("UnLinkExternalContainer: No instances found.");
+            return;
+        }
+
         // need to now order the instances_candidates by their elapsed time
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         std::sort(instances_candidates.begin(), instances_candidates.end(),
@@ -1058,7 +1109,10 @@ public:
             RaiseMngrErr("UpdateSpoilage: ref is null.");
             return false;
         }
-
+        if (sources.empty()) {
+			logger::warn("UpdateSpoilage: Sources is empty.");
+			return false;
+		}
         bool update_took_place = false;
         for (auto& src : sources) {
             auto* src_ptr = &src;
@@ -1124,6 +1178,8 @@ public:
         for (auto& src : sources) src.Reset();
         sources.clear();
         external_favs.clear();         // we will update this in ReceiveData
+        handle_crafting_instances.clear();
+        is_faved.clear();
         Clear();
         setListenMenuOpenClose(true);
         setListenActivate(true);
@@ -1135,6 +1191,7 @@ public:
 
     void SendData() {
         ENABLE_IF_NOT_UNINSTALLED
+            // TODO: dont serialize empty sources!
         // std::lock_guard<std::mutex> lock(mutex);
         logger::info("--------Sending data---------");
         Print();
