@@ -345,8 +345,6 @@ namespace Utilities{
             return nullptr;
         }
 
-
-
         // credits to Qudix on xSE RE Discord for this
         void OpenContainer(RE::TESObjectREFR* a_this, std::uint32_t a_openType) {
             // a_openType is probably in alignment with RE::ContainerMenu::ContainerMode enum
@@ -705,71 +703,87 @@ namespace Utilities{
             return version;
         }
 
-        template <typename T>
-        std::vector<T> mergeVectors(const std::vector<T>& vec1, const std::vector<T>& vec2) {
-            std::vector<T> mergedVec;
+        namespace Vector{
+            
+            template <typename T>
+            std::vector<T> mergeVectors(const std::vector<T>& vec1, const std::vector<T>& vec2) {
+                std::vector<T> mergedVec;
 
-            // Reserve enough space to avoid frequent reallocation
-            mergedVec.reserve(vec1.size() + vec2.size());
+                // Reserve enough space to avoid frequent reallocation
+                mergedVec.reserve(vec1.size() + vec2.size());
 
-            // Insert elements from vec1
-            mergedVec.insert(mergedVec.end(), vec1.begin(), vec1.end());
+                // Insert elements from vec1
+                mergedVec.insert(mergedVec.end(), vec1.begin(), vec1.end());
 
-            // Insert elements from vec2
-            mergedVec.insert(mergedVec.end(), vec2.begin(), vec2.end());
+                // Insert elements from vec2
+                mergedVec.insert(mergedVec.end(), vec2.begin(), vec2.end());
 
-            return mergedVec;
-        }
-
-        std::string toLowercase(const std::string& str) {
-            std::string result = str;
-            std::transform(result.begin(), result.end(), result.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            return result;
-        }
-
-        bool includesString(const std::string& input, const std::vector<std::string>& strings) {
-            std::string lowerInput = toLowercase(input);
-
-            for (const auto& str : strings) {
-                std::string lowerStr = str;
-                std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
-                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (lowerInput.find(lowerStr) != std::string::npos) {
-                    return true;  // The input string includes one of the strings
-                }
+                return mergedVec;
             }
-            return false;  // None of the strings in 'strings' were found in the input string
+            
+            template <typename T>
+            bool VectorHasElement(const std::vector<T>& vec, const T& element) {
+			    return std::find(vec.begin(), vec.end(), element) != vec.end();
+		    }
         }
 
-        bool includesWord(const std::string& input, const std::vector<std::string>& strings) {
-            std::istringstream iss(input);
-            std::vector<std::string> inputWords{std::istream_iterator<std::string>{iss},
-                                                std::istream_iterator<std::string>{}};
+        namespace String {
+            
+            std::string trim(const std::string& str) {
+                // Find the first non-whitespace character from the beginning
+                size_t start = str.find_first_not_of(" \t\n\r");
 
-            for (const auto& str : strings) {
-                std::istringstream iss2(str);
-                std::vector<std::string> strWords{std::istream_iterator<std::string>{iss2},
-                                                  std::istream_iterator<std::string>{}};
+                // If the string is all whitespace, return an empty string
+                if (start == std::string::npos) return "";
 
-                for (const auto& word : strWords) {
-                    std::string lowercaseWord = toLowercase(word);
-                    if (std::find_if(inputWords.begin(), inputWords.end(),
-                                     [&lowercaseWord](const std::string& inputWord) {
-                                         return toLowercase(inputWord) == lowercaseWord;
-                                     }) != inputWords.end()) {
+                // Find the last non-whitespace character from the end
+                size_t end = str.find_last_not_of(" \t\n\r");
+
+                // Return the substring containing the trimmed characters
+                return str.substr(start, end - start + 1);
+            }
+
+            std::string toLowercase(const std::string& str) {
+                std::string result = str;
+                std::transform(result.begin(), result.end(), result.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                return result;
+            }
+
+            bool includesString(const std::string& input, const std::vector<std::string>& strings) {
+                std::string lowerInput = toLowercase(input);
+
+                for (const auto& str : strings) {
+                    std::string lowerStr = str;
+                    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (lowerInput.find(lowerStr) != std::string::npos) {
                         return true;  // The input string includes one of the strings
                     }
                 }
+                return false;  // None of the strings in 'strings' were found in the input string
             }
-            return false;  // None of the strings in 'strings' were found in the input string
+
+            bool includesWord(const std::string& input, const std::vector<std::string>& strings) {
+                std::string lowerInput = toLowercase(input);
+                lowerInput = trim(lowerInput);
+                lowerInput = " " + lowerInput + " ";  // Add spaces to the beginning and end of the string
+
+                for (const auto& str : strings) {
+                    std::string lowerStr = str;
+                    lowerStr = trim(lowerStr);
+                    lowerStr = " " + lowerStr + " ";  // Add spaces to the beginning and end of the string
+                    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (lowerInput.find(lowerStr) != std::string::npos) {
+                        return true;  // The input string includes one of the strings
+                    }
+                }
+                return false;  // None of the strings in 'strings' were found in the input string
+            }
         }
 
 
-        template <typename T>
-        bool VectorHasElement(const std::vector<T>& vec, const T& element) {
-			return std::find(vec.begin(), vec.end(), element) != vec.end();
-		}
 
         bool isValidHexWithLength7or8(const char* input) {
             std::string inputStr(input);
