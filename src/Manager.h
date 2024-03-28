@@ -33,10 +33,18 @@ class Manager : public Utilities::SaveLoadData {
 
     std::unordered_map<std::string, bool> _other_settings;
 
-
+    const unsigned int _instance_limit = 20000000; // a stageinstance is around 48 bytes so 20M is around 1GB
 
 
 #define ENABLE_IF_NOT_UNINSTALLED if (isUninstalled) return;
+
+	[[nodiscard]] const unsigned int GetNInstances() {
+        unsigned int n = 0;
+        for (auto& src : sources) {
+            n += static_cast<unsigned int>(src.data.size());
+        }
+		return n;
+	}
 
     [[nodiscard]] Source* _MakeSource(const FormID some_formid, Settings::DefaultSettings* settings) {
         if (!some_formid) return nullptr;
@@ -66,16 +74,20 @@ class Manager : public Utilities::SaveLoadData {
         auto _qformtype = Settings::GetQFormType(some_formid);
         if (!_qformtype.empty() && Settings::custom_settings.contains(_qformtype)) {
             auto& custom_settings = Settings::custom_settings[_qformtype];
-            for (auto& [name,sttng]: custom_settings){
-                const auto temp_cstm_formid = std::stoul(name, nullptr, 16);
-                if (const auto temp_cstm_form = Utilities::FunctionsSkyrim::GetFormByID(temp_cstm_formid, name)) {
-                    if (temp_cstm_form->GetFormID()==some_formid) return _MakeSource(some_formid, &sttng);
-                }
+            for (auto& [names,sttng]: custom_settings){
                 if (const auto temp_cstm_form = Utilities::FunctionsSkyrim::GetFormByID(some_formid)) {
-                    if (Utilities::Functions::String::includesWord(temp_cstm_form->GetName(), {name})) {
+                    if (Utilities::Functions::String::includesWord(temp_cstm_form->GetName(), names)) {
                         return _MakeSource(some_formid, &sttng);
                     }
                 }
+                for (auto& name : names) {
+                    const auto temp_cstm_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(name);
+                    if (temp_cstm_formid<=0) continue;
+                    if (const auto temp_cstm_form = Utilities::FunctionsSkyrim::GetFormByID(temp_cstm_formid, name)) {
+                        if (temp_cstm_form->GetFormID()==some_formid) return _MakeSource(some_formid, &sttng);
+                    }
+                }
+
             }
         }
 
@@ -327,6 +339,7 @@ class Manager : public Utilities::SaveLoadData {
 
         empty_mgeff = RE::IFormFactory::GetConcreteFormFactoryByType<RE::EffectSetting>()->Create();
         empty_mgeff->magicItemDescription = std::string(" ");
+        empty_mgeff->data.flags.set(RE::EffectSetting::EffectSettingData::Flag::kNoDuration);
 
         if (init_failed) InitFailed();
 
@@ -444,10 +457,26 @@ public:
         }
         if (!location_refid) return RaiseMngrErr("Location refid is null.");
 
+        if (GetNInstances() > _instance_limit) {
+			logger::warn("Instance limit reached.");
+            Utilities::MsgBoxesNotifs::InGame::CustomErrMsg(
+                std::format("The mod is tracking over {} instances. Maybe it is not bad to check your memory usage and "
+                            "contact the mod author.",
+                            _instance_limit));
+		}
+
         logger::trace("Registering new instance.Formid {} , Count {} , Location refid {}", some_formid, count, location_refid);
         // make new registry
         auto src = GetSource(some_formid);  // also saves it to sources if it was created new
-        if (!src) src = _MakeSource(some_formid, nullptr);
+        if (!src) {
+            const auto qform_type = Settings::GetQFormType(some_formid);
+            if (Settings::defaultsettings.contains(qform_type) && !Settings::defaultsettings.empty()) {
+                src = _MakeSource(some_formid, nullptr);
+            } else {
+            	logger::trace("Register: Source not found and not a custom stage.");
+				return;
+            }
+        }
         if (!src) return RaiseMngrErr("Register: Source is null.");
 
         const auto stage_no = src->formid == some_formid ? 0 : GetStageNoFromSource(src, some_formid);

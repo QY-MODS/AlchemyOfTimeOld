@@ -8,8 +8,7 @@
     "spdlog",
     "xbyak",
     "rapidcsv",
-    "clib-util",
-    "yaml-cpp"
+    "clib-util"
   ],
   "overrides": [
     {

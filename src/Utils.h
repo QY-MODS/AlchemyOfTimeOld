@@ -13,7 +13,6 @@
 #include <mutex>
 #include <algorithm>
 #include <ClibUtil/editorID.hpp>
-
 #include "rapidjson/document.h"
 #include <yaml-cpp/yaml.h>
 
@@ -150,6 +149,122 @@ namespace Utilities{
         };
     };
 
+    // Utility functions
+    namespace Functions {
+
+        template <typename Key, typename Value>
+        bool containsValue(const std::map<Key, Value>& myMap, const Value& valueToFind) {
+            for (const auto& pair : myMap) {
+                if (pair.second == valueToFind) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        std::string GetPluginVersion(const unsigned int n_stellen) {
+            const auto fullVersion = SKSE::PluginDeclaration::GetSingleton()->GetVersion();
+            unsigned int i = 1;
+            std::string version = std::to_string(fullVersion.major());
+            if (n_stellen == i) return version;
+            version += "." + std::to_string(fullVersion.minor());
+            if (n_stellen == ++i) return version;
+            version += "." + std::to_string(fullVersion.patch());
+            if (n_stellen == ++i) return version;
+            version += "." + std::to_string(fullVersion.build());
+            return version;
+        }
+
+        namespace Vector{
+            
+            template <typename T>
+            std::vector<T> mergeVectors(const std::vector<T>& vec1, const std::vector<T>& vec2) {
+                std::vector<T> mergedVec;
+
+                // Reserve enough space to avoid frequent reallocation
+                mergedVec.reserve(vec1.size() + vec2.size());
+
+                // Insert elements from vec1
+                mergedVec.insert(mergedVec.end(), vec1.begin(), vec1.end());
+
+                // Insert elements from vec2
+                mergedVec.insert(mergedVec.end(), vec2.begin(), vec2.end());
+
+                return mergedVec;
+            }
+            
+            template <typename T>
+            bool VectorHasElement(const std::vector<T>& vec, const T& element) {
+			    return std::find(vec.begin(), vec.end(), element) != vec.end();
+		    }
+        }
+
+        namespace String {
+            
+            std::string trim(const std::string& str) {
+                // Find the first non-whitespace character from the beginning
+                size_t start = str.find_first_not_of(" \t\n\r");
+
+                // If the string is all whitespace, return an empty string
+                if (start == std::string::npos) return "";
+
+                // Find the last non-whitespace character from the end
+                size_t end = str.find_last_not_of(" \t\n\r");
+
+                // Return the substring containing the trimmed characters
+                return str.substr(start, end - start + 1);
+            }
+
+            std::string toLowercase(const std::string& str) {
+                std::string result = str;
+                std::transform(result.begin(), result.end(), result.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                return result;
+            }
+
+            bool includesString(const std::string& input, const std::vector<std::string>& strings) {
+                std::string lowerInput = toLowercase(input);
+
+                for (const auto& str : strings) {
+                    std::string lowerStr = str;
+                    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (lowerInput.find(lowerStr) != std::string::npos) {
+                        return true;  // The input string includes one of the strings
+                    }
+                }
+                return false;  // None of the strings in 'strings' were found in the input string
+            }
+
+            bool includesWord(const std::string& input, const std::vector<std::string>& strings) {
+                std::string lowerInput = toLowercase(input);
+                lowerInput = trim(lowerInput);
+                lowerInput = " " + lowerInput + " ";  // Add spaces to the beginning and end of the string
+
+                for (const auto& str : strings) {
+                    std::string lowerStr = str;
+                    lowerStr = trim(lowerStr);
+                    lowerStr = " " + lowerStr + " ";  // Add spaces to the beginning and end of the string
+                    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (lowerInput.find(lowerStr) != std::string::npos) {
+                        return true;  // The input string includes one of the strings
+                    }
+                }
+                return false;  // None of the strings in 'strings' were found in the input string
+            }
+        }
+
+
+
+        bool isValidHexWithLength7or8(const char* input) {
+            std::string inputStr(input);
+            std::regex hexRegex("^[0-9A-Fa-f]{7,8}$");  // Allow 7 to 8 characters
+            bool isValid = std::regex_match(inputStr, hexRegex);
+            return isValid;
+        }
+    };
+
     namespace FunctionsSkyrim {
 
         RE::TESForm* GetFormByID(const RE::FormID& id, const std::string& editor_id="") {
@@ -174,6 +289,37 @@ namespace Utilities{
             }
             return nullptr;
         };
+
+        int GetFormEditorIDFromString(const std::string formEditorId) {
+            if (Utilities::Functions::isValidHexWithLength7or8(formEditorId.c_str())) {
+                int form_id_;
+                std::stringstream ss;
+                ss << std::hex << formEditorId;
+                ss >> form_id_;
+                auto temp_form = GetFormByID(form_id_, "");
+                if (temp_form)
+                    return temp_form->GetFormID();
+                else {
+                    logger::error("Formid is null for editorid {}", formEditorId);
+                    return -1;
+                }
+            }
+            if (formEditorId.empty())
+                return 0;
+            else if (!IsPo3Installed()) {
+                logger::error("Po3 is not installed.");
+                MsgBoxesNotifs::Windows::Po3ErrMsg();
+                return -1;
+            }
+            auto temp_form = GetFormByID(0, formEditorId);
+            if (temp_form)
+                return temp_form->GetFormID();
+            else {
+                logger::error("Formid is null for editorid {}", formEditorId);
+                return -1;
+            }
+            return -1;
+        }
 
         std::size_t GetExtraDataListLength(const RE::ExtraDataList* dataList) {
             std::size_t length = 0;
@@ -678,123 +824,6 @@ namespace Utilities{
      //   const _ApplyHavokImpulse ApplyHavokImpulse = (_ApplyHavokImpulse)0x00908260;
      //   RE::SkyrimVM*& g_skyrimVM = *(RE::SkyrimVM**)0x012E568C;
     };
-
-    // Utility functions
-    namespace Functions {
-
-        template <typename Key, typename Value>
-        bool containsValue(const std::map<Key, Value>& myMap, const Value& valueToFind) {
-            for (const auto& pair : myMap) {
-                if (pair.second == valueToFind) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        std::string GetPluginVersion(const unsigned int n_stellen) {
-            const auto fullVersion = SKSE::PluginDeclaration::GetSingleton()->GetVersion();
-            unsigned int i = 1;
-            std::string version = std::to_string(fullVersion.major());
-            if (n_stellen == i) return version;
-            version += "." + std::to_string(fullVersion.minor());
-            if (n_stellen == ++i) return version;
-            version += "." + std::to_string(fullVersion.patch());
-            if (n_stellen == ++i) return version;
-            version += "." + std::to_string(fullVersion.build());
-            return version;
-        }
-
-        namespace Vector{
-            
-            template <typename T>
-            std::vector<T> mergeVectors(const std::vector<T>& vec1, const std::vector<T>& vec2) {
-                std::vector<T> mergedVec;
-
-                // Reserve enough space to avoid frequent reallocation
-                mergedVec.reserve(vec1.size() + vec2.size());
-
-                // Insert elements from vec1
-                mergedVec.insert(mergedVec.end(), vec1.begin(), vec1.end());
-
-                // Insert elements from vec2
-                mergedVec.insert(mergedVec.end(), vec2.begin(), vec2.end());
-
-                return mergedVec;
-            }
-            
-            template <typename T>
-            bool VectorHasElement(const std::vector<T>& vec, const T& element) {
-			    return std::find(vec.begin(), vec.end(), element) != vec.end();
-		    }
-        }
-
-        namespace String {
-            
-            std::string trim(const std::string& str) {
-                // Find the first non-whitespace character from the beginning
-                size_t start = str.find_first_not_of(" \t\n\r");
-
-                // If the string is all whitespace, return an empty string
-                if (start == std::string::npos) return "";
-
-                // Find the last non-whitespace character from the end
-                size_t end = str.find_last_not_of(" \t\n\r");
-
-                // Return the substring containing the trimmed characters
-                return str.substr(start, end - start + 1);
-            }
-
-            std::string toLowercase(const std::string& str) {
-                std::string result = str;
-                std::transform(result.begin(), result.end(), result.begin(),
-                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                return result;
-            }
-
-            bool includesString(const std::string& input, const std::vector<std::string>& strings) {
-                std::string lowerInput = toLowercase(input);
-
-                for (const auto& str : strings) {
-                    std::string lowerStr = str;
-                    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
-                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                    if (lowerInput.find(lowerStr) != std::string::npos) {
-                        return true;  // The input string includes one of the strings
-                    }
-                }
-                return false;  // None of the strings in 'strings' were found in the input string
-            }
-
-            bool includesWord(const std::string& input, const std::vector<std::string>& strings) {
-                std::string lowerInput = toLowercase(input);
-                lowerInput = trim(lowerInput);
-                lowerInput = " " + lowerInput + " ";  // Add spaces to the beginning and end of the string
-
-                for (const auto& str : strings) {
-                    std::string lowerStr = str;
-                    lowerStr = trim(lowerStr);
-                    lowerStr = " " + lowerStr + " ";  // Add spaces to the beginning and end of the string
-                    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
-                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                    if (lowerInput.find(lowerStr) != std::string::npos) {
-                        return true;  // The input string includes one of the strings
-                    }
-                }
-                return false;  // None of the strings in 'strings' were found in the input string
-            }
-        }
-
-
-
-        bool isValidHexWithLength7or8(const char* input) {
-            std::string inputStr(input);
-            std::regex hexRegex("^[0-9A-Fa-f]{7,8}$");  // Allow 7 to 8 characters
-            bool isValid = std::regex_match(inputStr, hexRegex);
-            return isValid;
-        }
-    };
-
     namespace FunctionsJSON {
         
         int GetFormEditorID(const rapidjson::Value& section, const char* memberName) {
