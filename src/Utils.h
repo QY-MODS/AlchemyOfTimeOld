@@ -13,7 +13,9 @@
 #include <mutex>
 #include <algorithm>
 #include <ClibUtil/editorID.hpp>
+
 #include "rapidjson/document.h"
+#include <yaml-cpp/yaml.h>
 
 
 
@@ -830,6 +832,9 @@ namespace Utilities{
             else if (section[memberName].IsInt()) return section[memberName].GetInt();
 			return -1;
         }
+    }
+
+    namespace FunctionsYAML {
     }
 
     namespace Types {

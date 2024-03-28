@@ -252,6 +252,7 @@ public:
             logger::trace("Item entered player inventory.");
             if (!event->oldContainer) {
                 if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)) {
+                    logger::trace("Bought from null old container.");
                     if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()) {
                         M->HandleBuy(event->baseObj, event->itemCount, vendor_chest->GetFormID());
 					}
@@ -282,6 +283,7 @@ public:
                 }
             }
             else if (M->IsExternalContainer(event->baseObj,event->oldContainer)) {
+                logger::trace("from External container to player inventory.");
                 M->UnLinkExternalContainer(event->baseObj,event->itemCount,event->oldContainer);
             }
             // NPC: you dropped this...
@@ -292,6 +294,7 @@ public:
             }
             else {
 				// old container null deil ve registered deil
+                logger::trace("Old container not null and not registered.");
                 M->RegisterAndGo(event->baseObj, event->itemCount, player_refid);
             }
             return RE::BSEventNotifyControl::kContinue;

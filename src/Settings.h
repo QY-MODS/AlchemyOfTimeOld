@@ -105,7 +105,7 @@ namespace Settings {
         
         if (type.empty()) type = GetQFormType(formid);
         if (type.empty()) {
-			logger::error("Type is empty.");
+            logger::trace("Type is empty. for formid: {}", formid);
 			return false;
 		}
         std::string form_string = std::string(form->GetName());
@@ -495,14 +495,15 @@ struct Source {
             return;
         }
 
-        const auto qformtype = Settings::GetQFormType(formid);
-        if (qformtype.empty()) {
+        qFormType = Settings::GetQFormType(formid);
+        if (qFormType.empty()) {
             logger::error("Formtype is not one of the predefined types.");
             InitFailed();
             return;
-        }
+        } else
+            logger::info("Source initializing with QFormType: {}", qFormType);
         
-        if (!defaultsettings) defaultsettings = &Settings::defaultsettings[qformtype];
+        if (!defaultsettings) defaultsettings = &Settings::defaultsettings[qFormType];
         if (!defaultsettings->CheckIntegrity()) {
             logger::critical("Default settings integrity check failed.");
 			InitFailed();
@@ -516,7 +517,7 @@ struct Source {
             // get stages
             
             // POPULATE THIS
-            if (qformtype=="FOOD"){
+            if (qFormType == "FOOD") {
                 if (formtype == RE::FormType::AlchemyItem) GatherStages<RE::AlchemyItem>();
 			    else if (formtype == RE::FormType::Ingredient) GatherStages<RE::IngredientItem>();
             }
@@ -622,7 +623,7 @@ struct Source {
         }
         return nullptr;
     }
-    
+
     [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance) { 
 
         if (init_failed) {
@@ -639,20 +640,55 @@ struct Source {
             logger::error("Count is less than or equal 0.");
             return false;
         }
+        if (stage_instance.location == 0) {
+			logger::error("Location is 0.");
+			return false;
+		}
+        if (stage_instance.xtra.form_id != stages[n].formid) {
+			logger::error("Formid does not match the stage formid.");
+			return false;
+		}
+        if (stage_instance.xtra.is_fake != IsFakeStage(n)) {
+            logger::error("Fake status does not match the stage fake status.");
+            return false;
+        }
+        if (stage_instance.xtra.is_decayed) {
+			logger::error("Decayed status is true.");
+			return false;
+		}
+        if (stage_instance.xtra.crafting_allowed != stages[n].crafting_allowed) {
+			logger::error("Crafting allowed status does not match the stage crafting allowed status.");
+			return false;
+		}
 
         data.push_back(stage_instance);
 
         // fillout the xtra of the emplaced instance
         // get the emplaced instance
-        auto& emplaced_instance = data.back();
+        /*auto& emplaced_instance = data.back();
         emplaced_instance.xtra.form_id = stages[n].formid;
         emplaced_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages[n].GetBound());
         emplaced_instance.xtra.crafting_allowed = stages[n].crafting_allowed;
-        if (IsFakeStage(n)) emplaced_instance.xtra.is_fake = true;
+        if (IsFakeStage(n)) emplaced_instance.xtra.is_fake = true;*/
 
         return true;
     }
 
+    [[nodiscard]] const bool InitInsertInstance(StageNo n, Count c, RefID l) {
+        if (init_failed) {
+            logger::critical("InitInsertInstance: Initialisation failed.");
+            return false;
+        }
+        const float curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+        StageInstance new_instance(curr_time, n, c, l);
+        new_instance.xtra.form_id = stages[n].formid;
+        new_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages[n].GetBound());
+        new_instance.xtra.crafting_allowed = stages[n].crafting_allowed;
+        if (IsFakeStage(n)) new_instance.xtra.is_fake = true;
+
+        return InsertNewInstance(new_instance);
+    }
+    
     Count MoveInstances(const RefID from_ref, const RefID to_ref, const FormID instance_formid, Count count, const bool bias_direction) {
         // bias_direction: true to move older instances first
         if (data.empty()) {
@@ -686,10 +722,6 @@ struct Source {
                 instances_candidates.push_back(&st_inst);
         }
 
-        if (instances_candidates.empty()) {
-            logger::warn("No instances found for formid {} and location {}", instance_formid, from_ref);
-            return 0;
-        }
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         if (bias_direction) {
             std::sort(instances_candidates.begin(), instances_candidates.end(),
@@ -704,6 +736,11 @@ struct Source {
 					  });
 		}
 
+        if (instances_candidates.empty()) {
+            logger::warn("No instances found for formid {} and location {}", instance_formid, from_ref);
+            return 0;
+        }
+
         for (auto& instance : instances_candidates) {
             if (!count) break;
             if (count <= instance->count) {
@@ -715,7 +752,8 @@ struct Source {
                     logger::error("InsertNewInstance failed.");
                     return 0;
                 }
-                break;
+                count = 0;
+                //break;
             } else {
                 count -= instance->count;
                 instance->location = to_ref;
