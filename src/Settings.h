@@ -483,19 +483,20 @@ namespace Settings {
     CustomSettings parseCustoms(std::string _type){
         CustomSettings _custom_settings;
 		const auto filename = std::string(customs_path_) + _type + ".yml";
-		YAML::Node config = YAML::LoadFile(filename);
-        for (const auto& ownerNode : config["ownerlists"]){
+        YAML::Node config = YAML::LoadFile(filename);
+
+        for (const auto& _Node : config["ownerLists"]){
             // we have list of owners at each node or a scalar owner
-            if (ownerNode.IsScalar()) {
-				const auto ownerName = ownerNode.as<std::string>();
-				_custom_settings[std::vector<std::string>{ownerName}] = parseDefaults(ownerName);
+            if (_Node["owners"].IsScalar()) {
+                const auto ownerName = _Node["owners"].as<std::string>();
+                _custom_settings[std::vector<std::string>{ownerName}] = _parseDefaults(_Node);
 			} 
             else {
 				std::vector<std::string> owners;
-				for (const auto& owner : ownerNode) {
+                for (const auto& owner : _Node["owners"]) {
 					owners.push_back(owner.as<std::string>());
 				}
-                _custom_settings[owners] = _parseDefaults(ownerNode);
+                _custom_settings[owners] = _parseDefaults(_Node);
 			}
         }
         return _custom_settings;
