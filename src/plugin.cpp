@@ -166,7 +166,6 @@ public:
                     Utilities::FunctionsSkyrim::RefreshMenu(menuname);
                 }
             } else logger::error("Could not get container.");
-                
         }
         
         return RE::BSEventNotifyControl::kContinue;

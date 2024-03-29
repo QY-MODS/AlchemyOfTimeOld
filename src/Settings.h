@@ -291,6 +291,7 @@ namespace Settings {
         std::map<StageNo, Duration> durations = {};
         std::map<StageNo, StageName> stage_names = {};
         std::map<StageNo,bool> crafting_allowed = {};
+        std::map<StageNo,unsigned int> costoverrides = {};
         std::map<StageNo, std::vector<StageEffect>> effects = {};
         std::vector<StageNo> numbers = {};
         FormID decayed_id = 0;
@@ -545,7 +546,7 @@ struct Source {
     StageDict stages;
     SourceData data = {};
     RE::EffectSetting* empty_mgeff;
-    Settings::DefaultSettings* defaultsettings = nullptr;
+    Settings::DefaultSettings* defaultsettings = nullptr; // eigentlich sollte settings heissen
 
     bool init_failed = false;
     RE::FormType formtype;
@@ -633,7 +634,7 @@ struct Source {
         }
 
         // decayed stage
-        decayed_stage = GetDecayedStage();
+        decayed_stage = GetFinalStage();
         if (!decayed_stage.CheckIntegrity()) {
 			logger::critical("Decayed stage integrity check failed.");
 			InitFailed();
@@ -772,6 +773,26 @@ struct Source {
 
         return InsertNewInstance(new_instance);
     }
+
+    // applies time modulation to all instances in the inventory
+    [[nodiscard]] const bool InitInsertInstance(StageNo n, Count c, RE::TESObjectREFR* inventory_owner){
+        if (!inventory_owner) {
+            logger::error("Inventory owner is null.");
+            return false;
+        }
+        const RefID inventory_owner_refid = inventory_owner->GetFormID();
+        if (!inventory_owner->HasContainer() && inventory_owner_refid != player_refid) {
+        	logger::error("Inventory owner is not a container.");
+			return false;
+        }
+        
+        if (!InitInsertInstance(n, c, inventory_owner_refid)) {
+			logger::error("InitInsertInstance failed.");
+			return false;
+		}
+        UpdateTimeModulationInInventory(inventory_owner);
+        return true;
+    }
     
     Count MoveInstances(const RefID from_ref, const RefID to_ref, const FormID instance_formid, Count count, const bool bias_direction) {
         // bias_direction: true to move older instances first
@@ -848,6 +869,78 @@ struct Source {
 
     }
 
+    // always update before doing this
+    void UpdateTimeModulationInInventory(RE::TESObjectREFR* inventory_owner){
+        if (!inventory_owner) {
+			logger::error("Inventory owner is null.");
+			return;
+		}
+        const RefID inventory_owner_refid = inventory_owner->GetFormID();
+        if (!inventory_owner_refid) {
+            logger::error("Inventory owner refid is 0.");
+            return;
+        }
+
+        if (!inventory_owner->HasContainer() && inventory_owner_refid != player_refid) {
+            logger::error("Inventory owner does not have a container.");
+            return;
+        }
+        
+        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+
+        // get the instances inside this inventory
+        std::vector<StageInstance*> instances = {};
+        for (auto& instance : data) {
+			if (instance.location == inventory_owner_refid) instances.push_back(&instance);
+		}
+        if (instances.empty()) {
+            logger::trace("No instances found for inventory owner {} and source {}", inventory_owner_refid, editorid);
+            return;
+        }
+
+        const auto delayer_best = GetModulatorInInventory(inventory_owner);
+        if (!delayer_best) {
+			logger::trace("No delayer found in inventory.");
+			// need to remove if there is a delayer
+            for (auto& instance : instances) {
+				if (instance->xtra.is_decayed) continue;
+                if (instance->GetDelayMagnitude()==1) continue;
+                instance->SetDelay(curr_time, 1, 0);
+			}
+		} 
+		else {
+            const auto new_delay_mag = defaultsettings->delayers[delayer_best];
+            for (auto& instance : instances) {
+                if (instance->xtra.is_decayed) continue;
+                if (instance->GetDelayMagnitude() == new_delay_mag) continue;
+                instance->SetDelay(curr_time, new_delay_mag, delayer_best);
+            }
+        }
+    }
+
+    void RemoveTimeModulationFromWO(const RefID world_object) {
+        if (!world_object) {
+			logger::error("World object is null.");
+			return;
+		}
+		if (data.empty()) {
+			logger::warn("No data found for source {}", editorid);
+			return;
+		}
+        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+		for (auto& instance : data) {
+			if (instance.location == world_object) {
+                if (instance.GetDelayMagnitude() == 1) break;
+                instance.SetDelay(RE::Calendar::GetSingleton()->GetHoursPassed(), 1,0);
+                break;
+            }
+		}
+    }
+
+    RE::ExtraTextDisplayData* GetTextData(const StageNo _no) {
+        return stages[_no].GetExtraText();
+	}
+
     void CleanUpData() {
         if (init_failed) {
             logger::critical("CleanUpData: Initialisation failed.");
@@ -897,10 +990,6 @@ struct Source {
         logger::trace("Size after cleanup: {}", data.size());
 	}
 
-    RE::ExtraTextDisplayData* GetTextData(const StageNo _no) {
-        return stages[_no].GetExtraText();
-	}
-
     void PrintData() {
         logger::trace("Printing data for source {}", editorid);
 		for (auto& instance : data) {
@@ -927,14 +1016,23 @@ private:
             return false;
         }
         if (st_inst.xtra.is_decayed) return false;  // decayed
+        
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         float diff = st_inst.GetElapsed(curr_time);
-        if (diff < 0) {
-            logger::critical("Time difference is negative. This should not happen!!!!");
-            return false;
-        }
         bool updated = false;
         logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,stages[st_inst.no].duration);
+        
+        while (diff < 0) {
+            logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no - 1);
+            if (st_inst.no > 0) {
+                st_inst.no--;
+			    diff += stages[st_inst.no].duration;
+                updated = true;
+            } else {
+                diff = 0;
+                break;
+            }
+        }
         while (diff > stages[st_inst.no].duration) {
             logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no + 1);
 			diff -= stages[st_inst.no].duration;
@@ -1006,8 +1104,8 @@ private:
                 fake_formid = CreateFake(alch_item);
                 fake_stages.push_back(defaultsettings->numbers[i]);
             }
-            auto duration = defaultsettings->durations[i];
-            auto name = defaultsettings->stage_names[i];
+            const auto duration = defaultsettings->durations[i];
+            const StageName& name = defaultsettings->stage_names[i];
 
             Stage stage(fake_formid, duration, i, name, defaultsettings->crafting_allowed[i], defaultsettings->effects[i]);
             if (!stages.insert({i, stage}).second) {
@@ -1034,6 +1132,11 @@ private:
             if (defaultsettings->effects[i].empty()) continue;
 
             // change mgeff of fake form
+            // POPULATE THIS
+            if (!Utilities::Functions::Vector::VectorHasElement<std::string>({"FOOD"}, qFormType)) {
+                logger::trace("MGEFF not available for this form type {}", qFormType);
+                return;
+            }
 
             std::vector<RE::EffectSetting*> MGEFFs;
             std::vector<uint32_t*> pMGEFFdurations;
@@ -1083,28 +1186,27 @@ private:
                 pMGEFFmagnitudes.push_back(nullptr);
             }
             Utilities::FunctionsSkyrim::OverrideMGEFFs(fake_form->effects, MGEFFs, pMGEFFdurations, pMGEFFmagnitudes);
-
-            // int mg_count = 0;
-            // for (auto& mgeffect : fake_form->effects) {
-            //     logger::trace("Updating mgeffect {}", mg_count);
-            //     if (!mg_count) {
-            //         mgeffect->baseEffect = fake_mgeffect;
-            //         mgeffect->effectItem.magnitude = 10;
-            //         mgeffect->effectItem.duration = 20;
-            //     }
-            //     else mgeffect->baseEffect = empty_mgeff;
-            //     mg_count++;
-            // }
-            // fake_form->effects.push_back(fake_form->effects.front()); // works
         }
-        // update mgeffs
     }
     
-    [[nodiscard]] const Stage GetDecayedStage() {
+    [[nodiscard]] const Stage GetFinalStage() const {
         Stage dcyd_st;
         dcyd_st.formid = defaultsettings->decayed_id;
         return dcyd_st;
     }
+
+    const FormID GetModulatorInInventory(RE::TESObjectREFR* inventory_owner) {
+        const auto inventory = inventory_owner->GetInventory();
+        for (const auto& [dlyr_fid, dlyr_mgntd] : defaultsettings->delayers) {
+            if (const auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(dlyr_fid));
+                entry != inventory.end() && entry->second.first > 0) {
+                return dlyr_fid;
+            }
+        }
+        return 0;
+    }
+        
+
 
     template <typename T>
     const FormID CreateFake(T* real) {

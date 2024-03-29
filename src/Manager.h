@@ -12,7 +12,10 @@ class Manager : public Utilities::SaveLoadData {
     std::map<FormFormID,std::pair<int,Count>> handle_crafting_instances; // real-stage:added-total before adding (both real)
     std::map<FormID, bool> is_faved;
     std::vector<StageInstance*> instances_to_be_updated; // TODO
+
+    std::vector<StageInstance*> queued_time_modulator_updates;
     
+
     bool worldobjectsevolve;
 
     // Use Or Take Compatibility
@@ -37,6 +40,13 @@ class Manager : public Utilities::SaveLoadData {
 
 
 #define ENABLE_IF_NOT_UNINSTALLED if (isUninstalled) return;
+
+    [[nodiscard]] const bool IsTimeModulator(FormID formid,Source* source) {
+        for (auto& dlyer : source->defaultsettings->delayers) {
+            if (dlyer.first == formid) return true;
+        }
+        return false;
+    }
 
 	[[nodiscard]] const unsigned int GetNInstances() {
         unsigned int n = 0;
@@ -425,6 +435,13 @@ public:
         return isUninstalled;
     }
 
+    [[nodiscard]] const bool IsTimeModulator(FormID formid) {
+        for (auto& src : sources) {
+            if (IsTimeModulator(formid, &src)) return true;
+		}
+        return false;
+    }
+
     // use it only for world objects! checks if there is a stage instance for the given refid
     [[nodiscard]] const bool RefIsRegistered(const RefID refid) {
         if (!refid) {
@@ -445,6 +462,7 @@ public:
     }
 
     // TAMAM
+    // giris noktasi
     void RegisterAndGo(const FormID some_formid, const Count count, const RefID location_refid) {
         ENABLE_IF_NOT_UNINSTALLED
         if (!some_formid) {
@@ -480,19 +498,19 @@ public:
         if (!src) return RaiseMngrErr("Register: Source is null.");
 
         const auto stage_no = src->formid == some_formid ? 0 : GetStageNoFromSource(src, some_formid);
-        if (!src->InitInsertInstance(stage_no, count, location_refid)) return RaiseMngrErr("Register: InsertNewInstance failed 1.");
-        logger::trace("New stage created and inserted.");
-
         auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(location_refid);
         if (!ref) return RaiseMngrErr("Register: Ref is null.");
 
         if (ref->HasContainer() || location_refid == player_refid) {
             logger::trace("Registering in inventory.");
+            if (!src->InitInsertInstance(stage_no, count, ref)) return RaiseMngrErr("Register: InsertNewInstance failed 1.");
             const auto stage_formid = src->stages[stage_no].formid;
             // to change from the source form to the stage form
             ApplyEvolutionInInventory(ref, count, some_formid, stage_formid);
-        } else {
+        } 
+        else {
             logger::trace("Registering in world.");
+            if (!src->InitInsertInstance(stage_no, count, location_refid)) return RaiseMngrErr("Register: InsertNewInstance failed 1.");
             auto bound =  src->IsFakeStage(stage_no) ? src->GetBoundObject() : nullptr;
             ApplyStageInWorld(ref, src->stages[stage_no], bound);
         }
@@ -501,6 +519,7 @@ public:
     }
 
     // TAMAM
+    // giris noktasi RegisterAndGo uzerinden
     void RegisterAndGo(RE::TESObjectREFR* wo_ref) {
         if (!worldobjectsevolve) return;
         if (!wo_ref) {
@@ -671,6 +690,7 @@ public:
     }
 
     // TAMAM
+    // giris noktasi RegisterAndGo uzerinden
     void HandlePickUp(const FormID pickedup_formid, const Count count, const RefID wo_refid, const bool eat,
                       RE::TESObjectREFR* npc_ref = nullptr) {
         ENABLE_IF_NOT_UNINSTALLED
@@ -779,6 +799,7 @@ public:
     }
     
     // TAMAM
+    // giris noktasi RegisterAndGo uzerinden
     void HandleBuy(const FormID bought_formid, const Count bought_count, const RefID vendor_chest_refid){
         ENABLE_IF_NOT_UNINSTALLED
 		if (!bought_formid) {
@@ -801,7 +822,7 @@ public:
 
     }
 
-    // TAMAM GIBI
+    // TAMAM
     void HandleCraftingEnter(std::string qform_type) {
         ENABLE_IF_NOT_UNINSTALLED
         logger::trace("HandleCraftingEnter. QFormType: {}",qform_type);
@@ -856,7 +877,7 @@ public:
 
     }
 
-    // TAMAM GIBI
+    // TAMAM
     void HandleCraftingExit() {
         ENABLE_IF_NOT_UNINSTALLED
         logger::trace("HandleCraftingExit");
@@ -900,6 +921,24 @@ public:
 
     }
 
+    void HandleTimeModulation(const FormID modulator_formid,const RefID inventory_refid,const bool entered){
+        ENABLE_IF_NOT_UNINSTALLED
+        /*if (!modulator_formid) {
+            logger::warn("HandleTimeModulation: Formid is null.");
+            return;
+        }
+        if (!inventory_refid) {
+			logger::warn("HandleTimeModulation: Inventory refid is null.");
+			return;
+		}
+        for (auto& src : sources) {
+            if (IsTimeModulator(modulator_formid, &src)) {
+            	if (entered) {
+					if (src.data.empty()) {
+            }
+        }*/
+    }
+
     // TAMAM
     [[nodiscard]] const bool IsExternalContainer(const FormID stage_formid, const RefID refid) {
         if (!refid) return false;
@@ -908,7 +947,7 @@ public:
         if (!ref->HasContainer()) return false;
         const auto src = GetSource(stage_formid);
         if (!src) return false;
-        if (src->formid==stage_formid) return false;
+        if (src->formid==stage_formid) return false; // demek ki stage deil
         for (const auto& st_inst : src->data) {
             if (st_inst.location == refid) return true;
         }
@@ -1068,21 +1107,6 @@ public:
     }
 
     // TAMAM
-    bool UpdateStages(RefID loc_refid) {
-        logger::trace("Manager: Updating stages for loc_refid {}.",loc_refid);
-        if (!loc_refid) {
-			logger::critical("UpdateStages: loc_refid is null.");
-			return false;
-		}
-        auto loc_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(loc_refid);
-        if (!loc_ref) {
-            logger::critical("UpdateStages: loc_ref is null.");
-            return false;
-        }
-        return UpdateStages(loc_ref);
-    }
-
-    // TAMAM
     bool UpdateStages(RE::TESObjectREFR* ref) {
         // assumes that the ref is registered
         logger::trace("Manager: Updating stages.");
@@ -1108,6 +1132,21 @@ public:
             return false;
         }
         return true;
+    }
+
+    // TAMAM
+    bool UpdateStages(RefID loc_refid) {
+        logger::trace("Manager: Updating stages for loc_refid {}.",loc_refid);
+        if (!loc_refid) {
+			logger::critical("UpdateStages: loc_refid is null.");
+			return false;
+		}
+        auto loc_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(loc_refid);
+        if (!loc_ref) {
+            logger::critical("UpdateStages: loc_ref is null.");
+            return false;
+        }
+        return UpdateStages(loc_ref);
     }
 
     // only necessary for the world objects who has fake counterparts
