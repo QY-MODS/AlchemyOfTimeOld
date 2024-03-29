@@ -1011,7 +1011,7 @@ namespace Utilities{
                 _elapsed = 0;
                 _delay_start = start_time;
                 _delay_mag = 1;
-                _delay_formid = 0;
+                //_delay_formid = 0;
             }
         
             //define ==
@@ -1045,7 +1045,7 @@ namespace Utilities{
                     _elapsed = other._elapsed;
                     _delay_start = other._delay_start;
                     _delay_mag = other._delay_mag;
-                    _delay_formid = other._delay_formid;
+                    //_delay_formid = other._delay_formid;
                 }
                 return *this;
             }
@@ -1075,25 +1075,28 @@ namespace Utilities{
                 _elapsed = GetElapsed(curr_time);
                 _delay_start = curr_time;
 				_delay_mag = delay;
-                _delay_formid = formid;
+                //_delay_formid = formid;
 			}
 
             const float GetDelayMagnitude() const {
 				return GetDelaySlope();
 			}
 
-            const FormID GetDelayerFormID() const {
+            /*const FormID GetDelayerFormID() const {
                 return _delay_formid;
-            }
+            }*/
 
+            const float GetHittingTime(float schranke) {
+				// _elapsed + dt*_delay_mag = schranke
+                const auto dt = (schranke - _elapsed) / (GetDelaySlope() + std::numeric_limits<float>::epsilon());
+			}
 
         private:
             float _elapsed; // y coord of the ausgangspunkt/elapsed time since the stage started
             float _delay_start;  // x coord of the ausgangspunkt
             float _delay_mag; // slope
-            FormID _delay_formid; // formid of the time modulator
+            //FormID _delay_formid; // formid of the time modulator
 
-            //friend class StageInstance;
         };
 
         struct StageUpdate {
@@ -1106,16 +1109,6 @@ namespace Utilities{
             StageUpdate(Stage* old, Stage* new_, Count c, RefID l, bool fake)
 				: oldstage(old), newstage(new_), count(c), location(l), new_is_fake(fake) {}
         };
-
-        struct QueuedTModUpdate {
-			StageInstance* stage_instance; // time modulator of other instances
-
-            const float GetRemainingTime(float schwelle,const float t) const {
-				const auto elapsed = stage_instance->GetElapsed(t); // y
-                const auto slope = stage_instance->GetDelaySlope(); // slope
-                return (schwelle - elapsed) / (slope + std::numeric_limits<float>::epsilon());  // y+dx*slope = schwelle
-			}
-		};
 
 
 

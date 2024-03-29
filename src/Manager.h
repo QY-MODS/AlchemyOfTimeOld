@@ -13,7 +13,7 @@ class Manager : public Utilities::SaveLoadData {
     std::map<FormID, bool> is_faved;
     std::vector<StageInstance*> instances_to_be_updated; // TODO
 
-    std::vector<StageInstance*> queued_time_modulator_updates;
+    std::vector<std::pair<StageInstance*,Source*>> queued_time_modulator_updates; // st_instance - owner source
     
 
     bool worldobjectsevolve;
@@ -48,6 +48,15 @@ class Manager : public Utilities::SaveLoadData {
         return false;
     }
 
+    [[nodiscard]] const bool IsStage(FormID some_formid, Source* source) {
+        for (auto& [st_no, stage] : source->stages) {
+            if (stage.formid == some_formid) {
+                return true;
+            }
+        }
+        return false;
+    }
+
 	[[nodiscard]] const unsigned int GetNInstances() {
         unsigned int n = 0;
         for (auto& src : sources) {
@@ -56,9 +65,9 @@ class Manager : public Utilities::SaveLoadData {
 		return n;
 	}
 
-    [[nodiscard]] Source* _MakeSource(const FormID some_formid, Settings::DefaultSettings* settings) {
-        if (!some_formid) return nullptr;
-        Source new_source(some_formid, "", empty_mgeff, settings);
+    [[nodiscard]] Source* _MakeSource(const FormID source_formid, Settings::DefaultSettings* settings) {
+        if (!source_formid) return nullptr;
+        Source new_source(source_formid, "", empty_mgeff, settings);
         if (new_source.init_failed) return nullptr;
         sources.push_back(new_source);
         return &sources.back();
@@ -79,7 +88,7 @@ class Manager : public Utilities::SaveLoadData {
             }
         }
         // doesnt exist so we make new
-        // registered stageler arasinda deil
+        // registered stageler arasinda deil. yani fake de deil
         // custom stage mi deil mi onu anlamam lazim
         auto _qformtype = Settings::GetQFormType(some_formid);
         if (!_qformtype.empty() && Settings::custom_settings.contains(_qformtype)) {
@@ -98,6 +107,42 @@ class Manager : public Utilities::SaveLoadData {
                     }
                 }
 
+            }
+        }
+
+        logger::info("Source not found");
+        return nullptr;
+    };
+
+    [[maybe_unused]] Source* GetStageSource(const FormID some_formid) {
+        if (!some_formid) return nullptr;
+        // maybe it already exists
+        for (auto& src : sources) {
+            if (src.init_failed) continue;
+            if (IsStage(some_formid, &src)) return &src;
+        }
+        // registered stageler arasinda deil
+        // custom stage mi deil mi onu anlamam lazim
+        auto _qformtype = Settings::GetQFormType(some_formid);
+        if (!_qformtype.empty() && Settings::custom_settings.contains(_qformtype)) {
+            auto& custom_settings = Settings::custom_settings[_qformtype];
+            for (auto& [names, sttng] : custom_settings) {
+                if (const auto temp_cstm_form = Utilities::FunctionsSkyrim::GetFormByID(some_formid)) {
+                    if (Utilities::Functions::String::includesWord(temp_cstm_form->GetName(), names)) {
+                        auto _src = _MakeSource(some_formid, &sttng);
+                        if (IsStage(some_formid, _src)) return _src;
+                    }
+                }
+                for (auto& name : names) {
+                    const auto temp_cstm_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(name);
+                    if (temp_cstm_formid <= 0) continue;
+                    if (const auto temp_cstm_form = Utilities::FunctionsSkyrim::GetFormByID(temp_cstm_formid, name)) {
+                        if (temp_cstm_form->GetFormID() == some_formid) {
+                            auto _src = _MakeSource(some_formid, &sttng);
+                            if (IsStage(some_formid, _src)) return _src;
+                        }
+                    }
+                }
             }
         }
 
@@ -486,10 +531,11 @@ public:
         logger::trace("Registering new instance.Formid {} , Count {} , Location refid {}", some_formid, count, location_refid);
         // make new registry
         auto src = GetSource(some_formid);  // also saves it to sources if it was created new
+        // can be null if it is not a custom stage and not registered before
         if (!src) {
             const auto qform_type = Settings::GetQFormType(some_formid);
             if (Settings::defaultsettings.contains(qform_type) && !Settings::defaultsettings.empty()) {
-                src = _MakeSource(some_formid, nullptr);
+                src = _MakeSource(some_formid, nullptr); // stage item olarak dusunulduyse, custom a baslangic itemi olarak koymali
             } else {
             	logger::trace("Register: Source not found and not a custom stage.");
 				return;
@@ -563,8 +609,8 @@ public:
         if (!source) {
             logger::critical("HandleDrop: Source not found! Can be if it was never registered before.");
             return;
-        } else if (source->formid == dropped_formid) {
-			logger::warn("HandleDrop: Source same formid as dropped one! Can be bcs the item's evolution did not start yet.");
+        } else if (source->formid == dropped_formid && !IsStage(dropped_formid, source)) {
+			logger::warn("HandleDrop: Source same formid as dropped one! Can be bcs the item's evolution did not start yet or the stage item is the same as source item.");
 			return;
 		}
         
@@ -597,7 +643,7 @@ public:
                 instances_candidates.push_back(&st_inst);
 		}
         if (instances_candidates.empty()) {
-			logger::error("HandleDrop: No instances found.");
+			logger::error("HandleDrop: No instances found. Can be when dropping not yet registered stage items.");
 			return;
 		}
         // need to now order the instances_candidates by their elapsed times
@@ -682,6 +728,13 @@ public:
             }
         }
 
+        if (count > 0) {
+            logger::warn("HandleDrop: Count is still greater than 0. Adding the rest to inventory.");
+            AddItem(player_ref, nullptr, dropped_formid, count);
+            const auto __stage_no = GetStageNoFromSource(source, dropped_formid);
+            source->InitInsertInstance(__stage_no, count, player_ref);
+        }
+
         // TODO: add delayer stuff
 
         source->CleanUpData();
@@ -735,7 +788,7 @@ public:
             logger::warn("HandleConsume:Source not found.");
             return;
         }
-        if (stage_formid == source->formid) {
+        if (stage_formid == source->formid && !IsStage(stage_formid, source)) {
 			logger::warn("HandleConsume:Formid is the same as the source formid.");
 			return;
 		}
@@ -947,7 +1000,7 @@ public:
         if (!ref->HasContainer()) return false;
         const auto src = GetSource(stage_formid);
         if (!src) return false;
-        if (src->formid==stage_formid) return false; // demek ki stage deil
+        if (src->formid==stage_formid && !IsStage(stage_formid,src)) return false;
         for (const auto& st_inst : src->data) {
             if (st_inst.location == refid) return true;
         }
@@ -992,8 +1045,8 @@ public:
         if (!source) {
             logger::trace("LinkExternalContainer: Source not found.");
 			return;
-        } else if (source->formid == some_formid) {
-            logger::trace("LinkExternalContainer: Source same formid");
+        } else if (source->formid == some_formid && !IsStage(some_formid,source)) {
+            logger::trace("LinkExternalContainer: Source same formid and not stage");
             return;
         }
 
@@ -1033,8 +1086,8 @@ public:
         if (!source) {
             logger::trace("LinkExternalContainer: Source not found.");
             return;
-        } else if (source->formid == some_formid) {
-            logger::trace("LinkExternalContainer: Source same formid");
+        } else if (source->formid == some_formid && !IsStage(some_formid,source)) {
+            logger::trace("LinkExternalContainer: Source same formid and not stage");
             return;
         }
 
@@ -1055,7 +1108,7 @@ public:
     }
 
     // TAMAM
-    bool _UpdateStages(std::vector<RE::TESObjectREFR*> refs, Source* src) {
+    bool _UpdateStages(std::vector<RE::TESObjectREFR*> refs, Source* src, const float curr_time) {
 
         if (!src) {
             RaiseMngrErr("_UpdateStages: Source is null.");
@@ -1076,7 +1129,7 @@ public:
             ids_refs[ref->GetFormID()] = ref;
             refids.push_back(ref->GetFormID());
         }
-        auto updated_stages = src->UpdateAllStages(refids);
+        auto updated_stages = src->UpdateAllStages(refids, curr_time);
         if (updated_stages.empty()) {
 			logger::trace("No update2");
 			return false;
@@ -1106,6 +1159,72 @@ public:
         return true;
     }
 
+    bool _UpdateTimeModulators(RE::TESObjectREFR* ref, const float curr_time) {
+        std::vector<std::pair<StageInstance*,Source*>> queued_updates; // pair: stageinstance, schranke
+        const RefID refid = ref->GetFormID();
+        for (auto& qu_src : queued_time_modulator_updates) {
+            auto q_u = qu_src.first;
+            if (!q_u) continue;
+            auto owner_src = qu_src.second;
+            if (!owner_src) continue;
+            if (!(q_u >= &*owner_src->data.begin() && q_u < &*owner_src->data.end())){
+                logger::critical("UpdateStages: Queued update not in source.");
+				continue;
+            }
+            if (q_u->GetDelaySlope() == 0) continue;
+            if (q_u->location != refid) continue;
+            if (q_u->xtra.is_decayed) continue;
+            if (!owner_src->stages.contains(q_u->no)) continue;
+            const auto schranke = q_u->GetDelaySlope() > 0 ? owner_src->stages[q_u->no].duration : 0.f;
+            if (q_u->GetDelaySlope()<0 && q_u->no == 0) continue;
+            const auto hitting_time = q_u->GetHittingTime(schranke);
+            if (hitting_time > curr_time) continue;
+            queued_updates.push_back({q_u, owner_src});
+		}
+        while (!queued_updates.empty()) {
+            std::sort(queued_updates.begin(), queued_updates.end(),
+                        [](std::pair<StageInstance*, Source*> a, std::pair<StageInstance*, Source*> b) {
+                            const auto schranke_a = a.first->GetDelaySlope() > 0 ? a.second->stages[a.first->no].duration : 0.f;
+                            const auto schranke_b = b.first->GetDelaySlope() > 0 ? b.second->stages[b.first->no].duration : 0.f;
+                            return a.first->GetHittingTime(schranke_a) < b.first->GetHittingTime(schranke_b);
+                        });
+            auto& [q_u, owner_src] = queued_updates[0];
+            // remove it if it is decayed. will be nullptr if that is the case
+            if (!q_u) {
+				queued_updates.erase(queued_updates.begin());
+				continue;
+			}
+            // just in case
+            if (q_u->xtra.is_decayed) {
+                queued_updates.erase(queued_updates.begin());
+                continue;
+            }
+            const auto schranke = q_u->GetDelaySlope() > 0 ? owner_src->stages[q_u->no].duration : 0.f;
+            const auto hitting_time = q_u->GetHittingTime(schranke);
+            if (hitting_time > curr_time) {
+				queued_updates.erase(queued_updates.begin());
+				continue;
+			}
+            const auto t = hitting_time + std::min(0.015f, curr_time - hitting_time);
+            if (!_UpdateStages({ref}, owner_src, t)) {
+				logger::error("_UpdateTimeModulators: UpdateStages failed.");
+				return false;
+			}
+                
+            // remove it if it is decayed. will be nullptr if that is the case
+            if (!q_u) {
+                queued_updates.erase(queued_updates.begin());
+                continue;
+            }
+            // just in case
+            if (q_u->xtra.is_decayed) {
+                queued_updates.erase(queued_updates.begin());
+                continue;
+            }
+        }
+        return true;
+        
+    }
     // TAMAM
     bool UpdateStages(RE::TESObjectREFR* ref) {
         // assumes that the ref is registered
@@ -1118,12 +1237,22 @@ public:
 			logger::warn("UpdateStages: Sources is empty.");
 			return false;
 		}
-        if (!ref->HasContainer() && !ref->IsPlayerRef() && !worldobjectsevolve) return false;
+        
+        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+        
+        if (!ref->HasContainer() && !ref->IsPlayerRef()) {
+            if (!worldobjectsevolve) return false;
+        } else _UpdateTimeModulators(ref,curr_time);
+
+
+        // need to handle queued_time_modulator_updates
+        // order them by GetRemainingTime method of QueuedTModUpdate
+
 
         bool update_took_place = false;
         for (auto& src : sources) {
             auto* src_ptr = &src;
-            const bool temp_update_took_place = _UpdateStages({ref}, src_ptr);
+            const bool temp_update_took_place = _UpdateStages({ref}, src_ptr, curr_time);
             if (!update_took_place) update_took_place = temp_update_took_place;
         }
 

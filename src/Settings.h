@@ -658,7 +658,7 @@ struct Source {
         return Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid, editorid);
     };
 
-    const std::vector<StageUpdate> UpdateAllStages(const std::vector<RefID>& filter = {}) {
+    const std::vector<StageUpdate> UpdateAllStages(const std::vector<RefID>& filter,const float curr_time) {
         logger::trace("Updating all stages.");
         if (init_failed) {
             logger::critical("UpdateAllStages: Initialisation failed.");
@@ -681,7 +681,7 @@ struct Source {
 			}
             Stage* old_stage = &stages[instance.no];
             Stage* new_stage = nullptr;
-            if (_UpdateStageInstance(instance)) {
+            if (_UpdateStageInstance(instance, curr_time)) {
                 if (instance.xtra.is_decayed || !stages.contains(instance.no)) {
                     new_stage = &decayed_stage;
 				}
@@ -1010,14 +1010,13 @@ struct Source {
 private:
 
     // counta karismiyor
-    [[nodiscard]] const bool _UpdateStageInstance(StageInstance& st_inst) {
+    [[nodiscard]] const bool _UpdateStageInstance(StageInstance& st_inst, const float curr_time) {
         if (init_failed) {
         	logger::critical("_UpdateStage: Initialisation failed.");
             return false;
         }
         if (st_inst.xtra.is_decayed) return false;  // decayed
         
-        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         float diff = st_inst.GetElapsed(curr_time);
         bool updated = false;
         logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,stages[st_inst.no].duration);
