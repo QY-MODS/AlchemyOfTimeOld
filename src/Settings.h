@@ -6,6 +6,8 @@ using namespace Utilities::Types;
 
 namespace Settings {
 
+    bool failed_to_load = false;
+
     namespace oldstuff {
     
       //  DefaultSettings _parseDefaults(const rapidjson::Value& owner) {
@@ -290,8 +292,9 @@ namespace Settings {
         std::map<StageNo, FormID> items = {};
         std::map<StageNo, Duration> durations = {};
         std::map<StageNo, StageName> stage_names = {};
-        std::map<StageNo,bool> crafting_allowed = {};
-        std::map<StageNo,unsigned int> costoverrides = {};
+        std::map<StageNo, bool> crafting_allowed = {};
+        std::map<StageNo, int> costoverrides = {};
+        std::map<StageNo, float> weightoverrides = {};
         std::map<StageNo, std::vector<StageEffect>> effects = {};
         std::vector<StageNo> numbers = {};
         FormID decayed_id = 0;
@@ -319,7 +322,7 @@ namespace Settings {
                     logger::error("Key {} not found in numbers.", i);
                     return false;
                 }
-                if (!items.count(i) || !items.count(i) || !durations.count(i) || !stage_names.count(i) ||
+                if (!items.count(i) || !crafting_allowed.count(i) || !durations.count(i) || !stage_names.count(i) ||
                     !effects.count(i)) {
 					logger::error("Key {} not found in all maps.", i);
 					return false;
@@ -406,6 +409,7 @@ namespace Settings {
     }
 
     DefaultSettings _parseDefaults(const YAML::Node& config) {
+        logger::info("Parsing settings.");
         DefaultSettings settings;
          //we have:stages, decayedFormEditorID and delayers
         if (!config["stages"] || config["stages"].size() == 0) {
@@ -413,8 +417,13 @@ namespace Settings {
             return settings;
         }
         for (const auto& stageNode : config["stages"]) {
+            if (!stageNode["no"] || stageNode["no"].IsNull()) {
+				logger::error("No is missing for stage.");
+				return DefaultSettings();
+			}
             const auto temp_no = stageNode["no"].as<StageNo>();
             // add to numbers
+            logger::info("Stage no: {}", temp_no);
             settings.numbers.push_back(temp_no);
             const auto temp_formeditorid = stageNode["FormEditorID"].as<std::string>();
             const auto temp_formid = temp_formeditorid.empty()
@@ -425,28 +434,58 @@ namespace Settings {
                 return DefaultSettings();
             }
             // add to items
+            logger::info("Formid");
             settings.items[temp_no] = temp_formid;
             // add to durations
+            logger::info("Duration");
             settings.durations[temp_no] = stageNode["duration"].as<Duration>();
             // add to stage_names
-            settings.stage_names[temp_no] = stageNode["name"].as<StageName>();
+            logger::info("Name");
+            if (!stageNode["name"].IsNull()) {
+                const auto temp_name = stageNode["name"].as<StageName>();
+                // if it is empty, or just whitespace, set it to empty
+                if (temp_name.empty() || std::all_of(temp_name.begin(), temp_name.end(), isspace))
+					settings.stage_names[temp_no] = "";
+				else settings.stage_names[temp_no] = stageNode["name"].as<StageName>();
+            } else settings.stage_names[temp_no] = "";
+            // add to costoverrides
+            logger::info("Cost");
+            if (stageNode["value"] && !stageNode["value"].IsNull()) {
+                settings.costoverrides[temp_no] = stageNode["value"].as<int>();
+            } else settings.costoverrides[temp_no] = -1;  // Or whatever default value you prefer
+            // add to weightoverrides
+            logger::info("Weight");
+            if (stageNode["weight"] && !stageNode["weight"].IsNull()) {
+                settings.weightoverrides[temp_no] = stageNode["weight"].as<float>();
+            } else settings.weightoverrides[temp_no] = -1.0f;  // Or whatever default value you prefer
+            
             // add to crafting_allowed
+            logger::info("Crafting");
             settings.crafting_allowed[temp_no] = stageNode["crafting_allowed"].as<bool>();
+
+
             // add to effects
+            logger::info("Effects");
             std::vector<StageEffect> effects;
-            for (const auto& effectNode : stageNode["mgeffect"]) {
-                const auto temp_effect_formeditorid = effectNode["FormEditorID"].as<std::string>();
-                const auto temp_effect_formid =
-                    temp_effect_formeditorid.empty()
-                        ? 0
-                        : Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_effect_formeditorid);
-                if (temp_effect_formid < 0) {
-                    logger::error("Effect Formid is less than 0.");
-                    return DefaultSettings();
+            if (!stageNode["mgeffect"] || stageNode["mgeffect"].size() == 0) {
+				logger::info("Effects are empty.");
+            } else {
+                for (const auto& effectNode : stageNode["mgeffect"]) {
+                    const auto temp_effect_formeditorid = effectNode["FormEditorID"].as<std::string>();
+                    const auto temp_effect_formid =
+                        temp_effect_formeditorid.empty()
+                            ? 0
+                            : Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_effect_formeditorid);
+                    if (temp_effect_formid < 0) {
+                        logger::error("Effect Formid is less than 0.");
+                        return DefaultSettings();
+                    }
+                    if (temp_effect_formid>0){
+                        const auto temp_magnitude = effectNode["magnitude"].as<float>();
+                        const auto temp_duration = effectNode["duration"].as<Duration>();
+                        effects.push_back(StageEffect(temp_effect_formid, temp_magnitude, temp_duration));
+                    } else effects.push_back(StageEffect(temp_effect_formid, 0, 0));
                 }
-                const auto temp_magnitude = effectNode["magnitude"].as<float>();
-                const auto temp_duration = effectNode["duration"].as<Duration>();
-                effects.push_back(StageEffect(temp_effect_formid, temp_magnitude, temp_duration));
             }
             settings.effects[temp_no] = effects;
         }
@@ -459,6 +498,7 @@ namespace Settings {
         }
         settings.decayed_id = temp_decayed_id;
         // delayers
+        logger::info("timeModulators");
         for (const auto& modulator : config["timeModulators"]) {
             const auto temp_formeditorid = modulator["FormEditorID"].as<std::string>();
             const auto temp_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
@@ -477,8 +517,10 @@ namespace Settings {
 
     DefaultSettings parseDefaults(std::string _type){ 
         const auto filename = std::string(defaults_path_) + _type + ".yml";
-        YAML::Node config = YAML::LoadFile(filename);
-        return _parseDefaults(config);
+        logger::info("Filename: {}", filename);
+		YAML::Node config = YAML::LoadFile(filename);
+        logger::info("asldkjf�sadjn");
+		return _parseDefaults(config);
     }
 
     CustomSettings parseCustoms(std::string _type){
@@ -504,18 +546,34 @@ namespace Settings {
     }
 
     void LoadSettings() {
-        try {
             for (const auto& _qftype: Settings::QFORMS) {
-			    defaultsettings[_qftype] = parseDefaults(_qftype);
-			    custom_settings[_qftype] = parseCustoms(_qftype);
+                try {
+                    logger::info("Loading defaultsettings for {}", _qftype);
+			        defaultsettings[_qftype] = parseDefaults(_qftype);
+                } catch (const std::exception& ex) {
+                    logger::critical("Failed to load default settings for {}: {}", _qftype, ex.what());
+                    failed_to_load = true;
+                    return;
+                }
+                try {
+                    logger::info("Loading custom settings for {}", _qftype);
+			        custom_settings[_qftype] = parseCustoms(_qftype);
+                } catch (const std::exception&) {
+                    logger::critical("Failed to load custom settings for {}", _qftype);
+					failed_to_load = true;
+                    return;
+                }
                 for (const auto& [key,_] : custom_settings[_qftype]) {
                     logger::trace("Key: {}", key.front());
                 }
-                exclude_list[_qftype] = LoadExcludeList(_qftype);
+                try {
+                    exclude_list[_qftype] = LoadExcludeList(_qftype);
+                } catch (const std::exception&) {
+                    logger::critical("Failed to load exclude list for {}", _qftype);
+                    failed_to_load = true;
+                    return;
+                }
 		    }
-        } catch (const std::exception&) {
-            logger::critical("Failed to load settings.");
-        }
     }
 
     // 0x99 - ExtraTextDisplayData 
@@ -540,7 +598,7 @@ namespace Settings {
 }
 
 struct Source {
-    // TODO: reconsider consts here
+    
     FormID formid=0;
     std::string editorid="";
     StageDict stages;
@@ -648,7 +706,7 @@ struct Source {
         }
     };
 
-    const std::string_view GetName() {
+    [[maybe_unused]] const std::string_view GetName() {
         auto form = Utilities::FunctionsSkyrim::GetFormByID(formid, editorid);
         if (form) return form->GetName();
         else return "";
@@ -694,7 +752,7 @@ struct Source {
         return updated_instances;
     }
 
-    [[nodiscard]] const bool IsFakeStage(const StageNo no) {
+    [[nodiscard]] const bool IsFakeStage(const StageNo no) const {
         return Utilities::Functions::Vector::VectorHasElement<StageNo>(fake_stages, no);
     }
 
@@ -709,7 +767,7 @@ struct Source {
         return nullptr;
     }
 
-    [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance) { 
+    [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance, RefID loc) { 
 
         if (init_failed) {
             logger::critical("InsertData: Initialisation failed.");
@@ -790,7 +848,7 @@ struct Source {
 			logger::error("InitInsertInstance failed.");
 			return false;
 		}
-        UpdateTimeModulationInInventory(inventory_owner);
+        SetDelayOfInstances({&data.back()}, RE::Calendar::GetSingleton()->GetHoursPassed(), inventory_owner);
         return true;
     }
     
@@ -870,11 +928,12 @@ struct Source {
     }
 
     // always update before doing this
-    void UpdateTimeModulationInInventory(RE::TESObjectREFR* inventory_owner){
+    void UpdateTimeModulationInInventory(RE::TESObjectREFR* inventory_owner, const float curr_time) {
         if (!inventory_owner) {
-			logger::error("Inventory owner is null.");
-			return;
-		}
+            logger::error("Inventory owner is null.");
+            return;
+        }
+
         const RefID inventory_owner_refid = inventory_owner->GetFormID();
         if (!inventory_owner_refid) {
             logger::error("Inventory owner refid is 0.");
@@ -917,29 +976,6 @@ struct Source {
             }
         }
     }
-
-    void RemoveTimeModulationFromWO(const RefID world_object) {
-        if (!world_object) {
-			logger::error("World object is null.");
-			return;
-		}
-		if (data.empty()) {
-			logger::warn("No data found for source {}", editorid);
-			return;
-		}
-        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
-		for (auto& instance : data) {
-			if (instance.location == world_object) {
-                if (instance.GetDelayMagnitude() == 1) break;
-                instance.SetDelay(RE::Calendar::GetSingleton()->GetHoursPassed(), 1,0);
-                break;
-            }
-		}
-    }
-
-    RE::ExtraTextDisplayData* GetTextData(const StageNo _no) {
-        return stages[_no].GetExtraText();
-	}
 
     void CleanUpData() {
         if (init_failed) {
@@ -1119,13 +1155,16 @@ private:
             }
             if (Utilities::Functions::Vector::VectorHasElement<StageNo>(fake_stages, i)) {
                 // Update name of the fake form
-                fake_form->fullName = std::string(fake_form->fullName.c_str()) + " (" + name + ")";
-                logger::info("Updated name of fake form to {}", name);
+                if (!name.empty()) {
+                    fake_form->fullName = std::string(fake_form->fullName.c_str()) + " (" + name + ")";
+                    logger::info("Updated name of fake form to {}", name);
+                }
                 // Update value of the fake form
-                if (i == 1)
-                    Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(fake_form, 1);
-                else if (i > 1)
-                    Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(fake_form, 0);
+                const auto temp_value = defaultsettings->costoverrides[i];
+                if (temp_value >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(fake_form, temp_value);
+                // Update weight of the fake form
+                const auto temp_weight = defaultsettings->weightoverrides[i];
+                if (temp_weight >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetWeight(fake_form, temp_weight);
             }
 
             if (defaultsettings->effects[i].empty()) continue;
@@ -1204,9 +1243,20 @@ private:
         }
         return 0;
     }
+
+    void SetDelayOfInstances(std::vector<StageInstance>& instances, const float curr_time,
+                             RE::TESObjectREFR* inventory_owner) {
+        if (instances.empty()) {
+			logger::warn("No instances found.");
+			return;
+		}
+        const auto delayer_best = GetModulatorInInventory(inventory_owner);
+        const float __delay = delayer_best == 0 ? 1 : defaultsettings->delayers[delayer_best];
+        for (auto& instance : instances) {
+            instance.SetDelay(curr_time, __delay, delayer_best);
+        }
+	}
         
-
-
     template <typename T>
     const FormID CreateFake(T* real) {
         logger::trace("CreateFakeContainer");
@@ -1271,6 +1321,27 @@ private:
         return true;
 	}
 
+    [[maybe_unused]] const bool WouldHaveBeenDecayed(StageInstance* st_inst){
+        if (!st_inst) {
+			logger::error("Stage instance is null.");
+			return false;
+		}
+		if (st_inst->xtra.is_decayed) return true;
+        StageNo curr_stageno = st_inst->no;
+        if (!stages.contains(curr_stageno)) {
+            logger::error("Stage {} does not exist.", curr_stageno);
+            return true;
+        }
+		float diff = st_inst->GetElapsed(RE::Calendar::GetSingleton()->GetHoursPassed());
+        const auto last_stage_no = stages.rbegin()->first;
+        float total_duration = 0;
+        while (curr_stageno <= last_stage_no) {
+            total_duration += stages[curr_stageno].duration;
+            curr_stageno+=1;
+		}
+        if (diff> total_duration) return true;
+		return false;
+    };
 
     void InitFailed(){
         logger::error("Initialisation failed.");

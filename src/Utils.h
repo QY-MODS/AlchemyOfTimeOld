@@ -944,6 +944,7 @@ namespace Utilities{
 
             bool crafting_allowed;
 
+
             Stage(){};
             Stage(FormID f, Duration d, StageNo s, StageName n, bool ca,std::vector<StageEffect> e)
                 : formid(f), duration(d), no(s), name(n), crafting_allowed(ca) ,mgeffect(e) {
@@ -966,7 +967,7 @@ namespace Utilities{
 
             RE::TESBoundObject* GetBound() const { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid); };
 
-            [[nodiscard]] const bool CheckIntegrity() {
+            [[nodiscard]] const bool CheckIntegrity() const {
                 if (!formid || !GetBound()) {
 					logger::error("FormID or bound is null");
 					return false;
@@ -977,16 +978,10 @@ namespace Utilities{
                 }
 				return true;
             }
-            
-            RE::ExtraTextDisplayData* GetExtraText() {
-                _textData = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
-                _textData->SetName(GetBound()->GetName());
-                return _textData;
-            }
 
-        private:
-            //[[maybe_unused]] RE::ExtraTextDisplayData* _textData = nullptr;
-            RE::ExtraTextDisplayData* _textData = nullptr;
+            const char* GetExtraText() {
+                return GetBound()->GetName();
+            }
 
         };
 
@@ -1011,7 +1006,7 @@ namespace Utilities{
                 _elapsed = 0;
                 _delay_start = start_time;
                 _delay_mag = 1;
-                //_delay_formid = 0;
+                _delay_formid = 0;
             }
         
             //define ==
@@ -1037,15 +1032,18 @@ namespace Utilities{
 
             StageInstance& operator=(const StageInstance& other) {
                 if (this != &other) {
+                    
                     start_time = other.start_time;
                     no = other.no;
                     count = other.count;
                     location = other.location;
+                    
                     xtra = other.xtra;
+
                     _elapsed = other._elapsed;
                     _delay_start = other._delay_start;
                     _delay_mag = other._delay_mag;
-                    //_delay_formid = other._delay_formid;
+                    _delay_formid = other._delay_formid;
                 }
                 return *this;
             }
@@ -1072,30 +1070,37 @@ namespace Utilities{
             void SetDelay(const float curr_time,const float delay,const FormID formid) {
                 // yeni steigungla yeni ausgangspunkt yapiyoruz
                 // call only from UpdateTimeModulationInInventory
+                
+                if (_delay_formid == formid) return;
+
                 _elapsed = GetElapsed(curr_time);
                 _delay_start = curr_time;
 				_delay_mag = delay;
-                //_delay_formid = formid;
+                _delay_formid = formid;
+			}
+
+            void RemoveTimeMod(const float curr_time) {
+				SetDelay(curr_time, 1, 0);
 			}
 
             const float GetDelayMagnitude() const {
 				return GetDelaySlope();
 			}
 
-            /*const FormID GetDelayerFormID() const {
+            const FormID GetDelayerFormID() const {
                 return _delay_formid;
-            }*/
+            }
 
             const float GetHittingTime(float schranke) {
 				// _elapsed + dt*_delay_mag = schranke
-                const auto dt = (schranke - _elapsed) / (GetDelaySlope() + std::numeric_limits<float>::epsilon());
+                return (schranke - _elapsed) / (GetDelaySlope() + std::numeric_limits<float>::epsilon());
 			}
 
         private:
             float _elapsed; // y coord of the ausgangspunkt/elapsed time since the stage started
             float _delay_start;  // x coord of the ausgangspunkt
             float _delay_mag; // slope
-            //FormID _delay_formid; // formid of the time modulator
+            FormID _delay_formid; // formid of the time modulator
 
         };
 

@@ -12,9 +12,8 @@ class Manager : public Utilities::SaveLoadData {
     std::map<FormFormID,std::pair<int,Count>> handle_crafting_instances; // real-stage:added-total before adding (both real)
     std::map<FormID, bool> is_faved;
     std::vector<StageInstance*> instances_to_be_updated; // TODO
-
-    std::vector<std::pair<StageInstance*,Source*>> queued_time_modulator_updates; // st_instance - owner source
     
+    std::map<RefID,std::vector<StageInstance*>> is_also_time_modulator;
 
     bool worldobjectsevolve;
 
@@ -40,13 +39,6 @@ class Manager : public Utilities::SaveLoadData {
 
 
 #define ENABLE_IF_NOT_UNINSTALLED if (isUninstalled) return;
-
-    [[nodiscard]] const bool IsTimeModulator(FormID formid,Source* source) {
-        for (auto& dlyer : source->defaultsettings->delayers) {
-            if (dlyer.first == formid) return true;
-        }
-        return false;
-    }
 
     [[nodiscard]] const bool IsStage(FormID some_formid, Source* source) {
         for (auto& [st_no, stage] : source->stages) {
@@ -176,7 +168,7 @@ class Manager : public Utilities::SaveLoadData {
         return nullptr;
     }
 
-    [[nodiscard]] const StageInstance* GetWOStageInstance(RE::TESObjectREFR* wo_ref) {
+    [[nodiscard]] StageInstance* GetWOStageInstance(RE::TESObjectREFR* wo_ref) {
         if (!wo_ref) {
             RaiseMngrErr("Ref is null.");
             return nullptr;
@@ -229,13 +221,16 @@ class Manager : public Utilities::SaveLoadData {
 
     }
 
-    void _ApplyStageInWorld_Fake(RE::TESObjectREFR* wo_ref, RE::ExtraTextDisplayData* xText) {
-        if (!xText) {
+    void _ApplyStageInWorld_Fake(RE::TESObjectREFR* wo_ref, const char* xname) {
+        if (!xname) {
             logger::error("ExtraTextDisplayData is null.");
             return;
         }
         logger::trace("Setting text display data.");
         wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
+        auto xText = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
+        xText->SetName(xname);
+        logger::trace("{}", xText->displayName);
         wo_ref->extraList.Add(xText);
     }
 
@@ -245,13 +240,13 @@ class Manager : public Utilities::SaveLoadData {
         Utilities::FunctionsSkyrim::SwapObjects(wo_ref, stage_bound);
     }
 
-    void ApplyStageInWorld(RE::TESObjectREFR* wo_ref, Stage& stage, RE::TESBoundObject* source_bound = nullptr){
+    void ApplyStageInWorld(RE::TESObjectREFR* wo_ref, Stage& stage, RE::TESBoundObject* source_bound = nullptr) {
         if (!source_bound) _ApplyStageInWorld_Custom(wo_ref, stage.GetBound());
-        else{
+        else {
             Utilities::FunctionsSkyrim::SwapObjects(wo_ref, source_bound);
             _ApplyStageInWorld_Fake(wo_ref, stage.GetExtraText());
         }
-    };
+    }
 
     [[maybe_unused]] void AlignRegistries(std::vector<RefID> locs) {
         ENABLE_IF_NOT_UNINSTALLED
@@ -374,6 +369,112 @@ class Manager : public Utilities::SaveLoadData {
         return false;
     }
     
+    // TAMAM
+    bool _UpdateStages(std::vector<RE::TESObjectREFR*> refs, Source* src, const float curr_time) {
+        if (!src) {
+            RaiseMngrErr("_UpdateStages: Source is null.");
+            return false;
+        }
+        if (refs.empty()) {
+            RaiseMngrErr("_UpdateStages: Refs is empty.");
+            return false;
+        }
+
+        std::map<RefID, RE::TESObjectREFR*> ids_refs;
+        std::vector<RefID> refids;
+        for (auto& ref : refs) {
+            if (!ref) {
+                RaiseMngrErr("_UpdateStages: ref is null.");
+                return false;
+            }
+            ids_refs[ref->GetFormID()] = ref;
+            refids.push_back(ref->GetFormID());
+        }
+        auto updated_stages = src->UpdateAllStages(refids, curr_time);
+        if (updated_stages.empty()) {
+            logger::trace("No update2");
+            return false;
+        }
+
+        for (auto& update : updated_stages) {
+            if (!update.oldstage || !update.newstage || !update.count || !update.location) {
+                logger::error("_UpdateStages: Update is null.");
+                continue;
+            }
+            auto ref = ids_refs[update.location];
+            if (ref->HasContainer() || ref->IsPlayerRef()) {
+                ApplyEvolutionInInventory(ref, update.count, update.oldstage->formid, update.newstage->formid);
+            }
+            // WO
+            else if (worldobjectsevolve) {
+                logger::trace("_UpdateStages: ref out in the world.");
+                auto bound = src->IsFakeStage(update.newstage->no) ? src->GetBoundObject() : nullptr;
+                ApplyStageInWorld(ref, *update.newstage, bound);
+            } else {
+                logger::critical("_UpdateStages: Unknown ref type.");
+                return false;
+            }
+        }
+        src->CleanUpData();
+        return true;
+    }
+
+    // only for time modulators which are also stages. currently returned value is not used
+    bool _UpdateTimeModulators(RE::TESObjectREFR* inventory_owner, const float curr_time) {
+        std::vector<std::pair<StageInstance*, Source*>> queued_updates;  // pair: stageinstance, source owner
+        //const RefID refid = inventory_owner->GetFormID();
+
+
+        if (queued_updates.empty()) {
+            logger::trace("No queued updates.");
+            return false;
+        }
+
+        int max_try = 100;
+        while (!queued_updates.empty() && max_try > 0) {
+            // order them by hitting time
+            std::sort(
+                queued_updates.begin(), queued_updates.end(),
+                [](std::pair<StageInstance*, Source*> a, std::pair<StageInstance*, Source*> b) {
+                    const auto schranke_a = a.first->GetDelaySlope() > 0 ? a.second->stages[a.first->no].duration : 0.f;
+                    const auto schranke_b = b.first->GetDelaySlope() > 0 ? b.second->stages[b.first->no].duration : 0.f;
+                    return a.first->GetHittingTime(schranke_a) < b.first->GetHittingTime(schranke_b);
+                });
+
+            auto& [q_u, owner_src] = queued_updates[0];
+            // remove it if it is decayed. will be nullptr if that is the case. or if other messed up stuff happened
+            // like null owner_src
+            if (!owner_src || !q_u || q_u->xtra.is_decayed || !owner_src->stages.contains(q_u->no)) {
+                logger::trace("Decayed or not in source stages.");
+                queued_updates.erase(queued_updates.begin());
+                continue;
+            }
+
+            const auto schranke = q_u->GetDelaySlope() > 0 ? owner_src->stages[q_u->no].duration : 0.f;
+            const auto hitting_time = q_u->GetHittingTime(schranke);
+            if (hitting_time > curr_time) {
+                queued_updates.erase(queued_updates.begin());
+                continue;
+            }
+            const auto t = hitting_time + std::min(0.015f, curr_time - hitting_time);
+            if (!_UpdateStages({inventory_owner}, owner_src, t)) {
+                logger::error("_UpdateTimeModulators: UpdateStages failed.");
+                return false;
+            }
+
+            // remove it if it is decayed. will be nullptr if that is the case
+            if (!owner_src || !q_u || q_u->xtra.is_decayed || !owner_src->stages.contains(q_u->no)) {
+                logger::trace("Decayed or not in source stages 2.");
+                queued_updates.erase(queued_updates.begin());
+                continue;
+            }
+
+            max_try--;  // loops without erase
+        }
+
+        return true;
+    }
+
     void RaiseMngrErr(const std::string err_msg_ = "Error") {
         logger::critical("{}", err_msg_);
         Utilities::MsgBoxesNotifs::InGame::CustomErrMsg(err_msg_);
@@ -409,11 +510,6 @@ class Manager : public Utilities::SaveLoadData {
         // add safety check for the sources size say 5 million
     }
 
-    void Uninstall() {
-        isUninstalled = true;
-        // Uninstall other settings...
-        // Settings::UninstallOtherSettings();
-    }
 
     void setListenActivate(const bool value) {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
@@ -437,6 +533,12 @@ class Manager : public Utilities::SaveLoadData {
 
 public:
     Manager(std::vector<Source>& data) : sources(data) { Init(); };
+
+    void Uninstall() {
+        isUninstalled = true;
+        // Uninstall other settings...
+        // Settings::UninstallOtherSettings();
+    }
 
     static Manager* GetSingleton(std::vector<Source>& data) {
         static Manager singleton(data);
@@ -478,13 +580,6 @@ public:
     [[nodiscard]] bool getUninstalled() {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         return isUninstalled;
-    }
-
-    [[nodiscard]] const bool IsTimeModulator(FormID formid) {
-        for (auto& src : sources) {
-            if (IsTimeModulator(formid, &src)) return true;
-		}
-        return false;
     }
 
     // use it only for world objects! checks if there is a stage instance for the given refid
@@ -590,6 +685,7 @@ public:
     }
 
     // TAMAM
+    // update oncesinde ettiini varsayiyo
     void HandleDrop(const FormID dropped_formid, Count count, RE::TESObjectREFR* dropped_stage_ref){
         ENABLE_IF_NOT_UNINSTALLED
         
@@ -658,7 +754,9 @@ public:
         for (auto* instance : instances_candidates) {
             
             if (!count) break;
-            
+
+            instance->RemoveTimeMod(curr_time);
+
             if (count <= instance->count) {
                 logger::trace("instance count: {} vs count {}", instance->count,count);
                 instance->count -= count;
@@ -668,7 +766,7 @@ public:
                 new_instance.count = count;
 
                 if (!handled_first_stack) {
-                    logger::trace("SADSJFHÖADF 1");
+                    logger::trace("SADSJFHOADF 1");
                     if (Utilities::FunctionsSkyrim::GetObjectCount(dropped_stage_ref) != static_cast<int16_t>(count)) {
                         Utilities::FunctionsSkyrim::SetObjectCount(dropped_stage_ref, count);
                     }
@@ -682,7 +780,7 @@ public:
                     handled_first_stack = true;
                 } 
                 else {
-                    logger::trace("SADSJFHÖADF 2");
+                    logger::trace("SADSJFHOADF 2");
                     const auto bound_to_drop = instance->xtra.is_fake ? source->GetBoundObject() : instance->GetBound();
                     auto new_ref = Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(bound_to_drop, count, nullptr);
                     if (!new_ref) return RaiseMngrErr("HandleDrop: New ref is null.");
@@ -703,7 +801,7 @@ public:
                 count -= instance->count;
                 logger::trace("instance count: {} vs count {}", instance->count,count);
                 if (!handled_first_stack) {
-                    logger::trace("SADSJFHÖADF 3");
+                    logger::trace("SADSJFHOADF 3");
                     if (Utilities::FunctionsSkyrim::GetObjectCount(dropped_stage_ref) != static_cast<int16_t>(count)) {
                         Utilities::FunctionsSkyrim::SetObjectCount(dropped_stage_ref, instance->count);
                     }
@@ -714,7 +812,7 @@ public:
                     handled_first_stack = true;
                 } 
                 else {
-                    logger::trace("SADSJFHÖADF 4");
+                    logger::trace("SADSJFHOADF 4");
                     const auto bound_to_drop = instance->xtra.is_fake ? source->GetBoundObject() : instance->GetBound();
                     auto new_ref =
                         Utilities::FunctionsSkyrim::DropObjectIntoTheWorld(bound_to_drop, instance->count, nullptr);
@@ -732,7 +830,9 @@ public:
             logger::warn("HandleDrop: Count is still greater than 0. Adding the rest to inventory.");
             AddItem(player_ref, nullptr, dropped_formid, count);
             const auto __stage_no = GetStageNoFromSource(source, dropped_formid);
-            source->InitInsertInstance(__stage_no, count, player_ref);
+            if (!source->InitInsertInstance(__stage_no, count, player_ref)) {
+            	return RaiseMngrErr("HandleDrop: InsertNewInstance failed 2.");
+            }
         }
 
         // TODO: add delayer stuff
@@ -744,6 +844,7 @@ public:
 
     // TAMAM
     // giris noktasi RegisterAndGo uzerinden
+    // registeredsa update ediyo inventoryi
     void HandlePickUp(const FormID pickedup_formid, const Count count, const RefID wo_refid, const bool eat,
                       RE::TESObjectREFR* npc_ref = nullptr) {
         ENABLE_IF_NOT_UNINSTALLED
@@ -777,6 +878,7 @@ public:
         // TODO: add delayer stuff here and prolly also updating
     }
     // TAMAM
+    // UpdateStages
     void HandleConsume(const FormID stage_formid) {
         ENABLE_IF_NOT_UNINSTALLED
         if (!stage_formid) {
@@ -845,6 +947,8 @@ public:
                 instance->count = 0;
 			}
 		}
+
+        UpdateStages(player_ref);
 
         source->CleanUpData();
         logger::trace("HandleConsume: updated.");
@@ -974,22 +1078,23 @@ public:
 
     }
 
-    void HandleTimeModulation(const FormID modulator_formid,const RefID inventory_refid,const bool entered){
+    void HandleTimeModulationInInventory(RefID inventory_owner_refid){
         ENABLE_IF_NOT_UNINSTALLED
-        /*if (!modulator_formid) {
-            logger::warn("HandleTimeModulation: Formid is null.");
-            return;
-        }
-        if (!inventory_refid) {
-			logger::warn("HandleTimeModulation: Inventory refid is null.");
+        if (!inventory_owner_refid) {
+			logger::warn("HandleTimeModulationInInventory: Inventory owner refid is null.");
 			return;
 		}
-        for (auto& src : sources) {
-            if (IsTimeModulator(modulator_formid, &src)) {
-            	if (entered) {
-					if (src.data.empty()) {
-            }
-        }*/
+        auto inventory_owner = RE::TESForm::LookupByID<RE::TESObjectREFR>(inventory_owner_refid);
+        if (!inventory_owner) {
+            logger::warn("HandleTimeModulationInInventory: Inventory owner is null.");
+            return;
+        }
+        if (!inventory_owner->HasContainer() && inventory_owner_refid!=player_refid) {
+			logger::warn("HandleTimeModulationInInventory: Inventory owner does not have a container.");
+			return;
+		}
+
+        UpdateStages(inventory_owner);
     }
 
     // TAMAM
@@ -1019,6 +1124,13 @@ public:
 		}
         return false;
     }
+
+    [[nodiscard]] const bool IsExternalContainer(const RefID refid) {
+		if (!refid) return false;
+		auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(refid);
+		if (!ref) return false;
+		return IsExternalContainer(ref);
+	}
 
     // TAMAM
     void LinkExternalContainer(const FormID some_formid, Count item_count, const RefID externalcontainer) {
@@ -1108,124 +1220,7 @@ public:
     }
 
     // TAMAM
-    bool _UpdateStages(std::vector<RE::TESObjectREFR*> refs, Source* src, const float curr_time) {
-
-        if (!src) {
-            RaiseMngrErr("_UpdateStages: Source is null.");
-            return false;
-        }
-        if (refs.empty()) {
-			RaiseMngrErr("_UpdateStages: Refs is empty.");
-			return false;
-		}
-
-        std::map<RefID, RE::TESObjectREFR*> ids_refs;
-        std::vector<RefID> refids;
-        for (auto& ref : refs) {
-            if (!ref) {
-                RaiseMngrErr("_UpdateStages: ref is null.");
-                return false;
-            }
-            ids_refs[ref->GetFormID()] = ref;
-            refids.push_back(ref->GetFormID());
-        }
-        auto updated_stages = src->UpdateAllStages(refids, curr_time);
-        if (updated_stages.empty()) {
-			logger::trace("No update2");
-			return false;
-		}
-
-        for (auto& update : updated_stages) {
-            if (!update.oldstage || !update.newstage || !update.count || !update.location) {
-                logger::error("_UpdateStages: Update is null.");
-                continue;
-            }
-            auto ref = ids_refs[update.location];
-            if (ref->HasContainer() || ref->IsPlayerRef()) {
-                ApplyEvolutionInInventory(ref, update.count, update.oldstage->formid, update.newstage->formid);
-            }
-            // WO
-            else if (worldobjectsevolve) {
-                logger::trace("_UpdateStages: ref out in the world.");
-                auto bound = src->IsFakeStage(update.newstage->no) ? src->GetBoundObject() : nullptr;
-                ApplyStageInWorld(ref, *update.newstage, bound);
-            } 
-            else {
-                logger::critical("_UpdateStages: Unknown ref type.");
-                return false;
-            }
-        }
-        src->CleanUpData();
-        return true;
-    }
-
-    bool _UpdateTimeModulators(RE::TESObjectREFR* ref, const float curr_time) {
-        std::vector<std::pair<StageInstance*,Source*>> queued_updates; // pair: stageinstance, schranke
-        const RefID refid = ref->GetFormID();
-        for (auto& qu_src : queued_time_modulator_updates) {
-            auto q_u = qu_src.first;
-            if (!q_u) continue;
-            auto owner_src = qu_src.second;
-            if (!owner_src) continue;
-            if (!(q_u >= &*owner_src->data.begin() && q_u < &*owner_src->data.end())){
-                logger::critical("UpdateStages: Queued update not in source.");
-				continue;
-            }
-            if (q_u->GetDelaySlope() == 0) continue;
-            if (q_u->location != refid) continue;
-            if (q_u->xtra.is_decayed) continue;
-            if (!owner_src->stages.contains(q_u->no)) continue;
-            const auto schranke = q_u->GetDelaySlope() > 0 ? owner_src->stages[q_u->no].duration : 0.f;
-            if (q_u->GetDelaySlope()<0 && q_u->no == 0) continue;
-            const auto hitting_time = q_u->GetHittingTime(schranke);
-            if (hitting_time > curr_time) continue;
-            queued_updates.push_back({q_u, owner_src});
-		}
-        while (!queued_updates.empty()) {
-            std::sort(queued_updates.begin(), queued_updates.end(),
-                        [](std::pair<StageInstance*, Source*> a, std::pair<StageInstance*, Source*> b) {
-                            const auto schranke_a = a.first->GetDelaySlope() > 0 ? a.second->stages[a.first->no].duration : 0.f;
-                            const auto schranke_b = b.first->GetDelaySlope() > 0 ? b.second->stages[b.first->no].duration : 0.f;
-                            return a.first->GetHittingTime(schranke_a) < b.first->GetHittingTime(schranke_b);
-                        });
-            auto& [q_u, owner_src] = queued_updates[0];
-            // remove it if it is decayed. will be nullptr if that is the case
-            if (!q_u) {
-				queued_updates.erase(queued_updates.begin());
-				continue;
-			}
-            // just in case
-            if (q_u->xtra.is_decayed) {
-                queued_updates.erase(queued_updates.begin());
-                continue;
-            }
-            const auto schranke = q_u->GetDelaySlope() > 0 ? owner_src->stages[q_u->no].duration : 0.f;
-            const auto hitting_time = q_u->GetHittingTime(schranke);
-            if (hitting_time > curr_time) {
-				queued_updates.erase(queued_updates.begin());
-				continue;
-			}
-            const auto t = hitting_time + std::min(0.015f, curr_time - hitting_time);
-            if (!_UpdateStages({ref}, owner_src, t)) {
-				logger::error("_UpdateTimeModulators: UpdateStages failed.");
-				return false;
-			}
-                
-            // remove it if it is decayed. will be nullptr if that is the case
-            if (!q_u) {
-                queued_updates.erase(queued_updates.begin());
-                continue;
-            }
-            // just in case
-            if (q_u->xtra.is_decayed) {
-                queued_updates.erase(queued_updates.begin());
-                continue;
-            }
-        }
-        return true;
-        
-    }
-    // TAMAM
+    // queued time modulator updates, update stages, update time modulators in inventory
     bool UpdateStages(RE::TESObjectREFR* ref) {
         // assumes that the ref is registered
         logger::trace("Manager: Updating stages.");
@@ -1240,19 +1235,22 @@ public:
         
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         
-        if (!ref->HasContainer() && !ref->IsPlayerRef()) {
-            if (!worldobjectsevolve) return false;
-        } else _UpdateTimeModulators(ref,curr_time);
-
+        // time modulator updates
+        const bool is_inventory = ref->HasContainer() || ref->IsPlayerRef();
+        bool update_took_place = false;
+        if (is_inventory) {
+            const bool temp_update_took_place = _UpdateTimeModulators(ref, curr_time);
+            if (!update_took_place) update_took_place = temp_update_took_place;
+        }
+        else if (!worldobjectsevolve) return false;
 
         // need to handle queued_time_modulator_updates
         // order them by GetRemainingTime method of QueuedTModUpdate
 
-
-        bool update_took_place = false;
         for (auto& src : sources) {
             auto* src_ptr = &src;
             const bool temp_update_took_place = _UpdateStages({ref}, src_ptr, curr_time);
+            if (is_inventory) src_ptr->UpdateTimeModulationInInventory(ref, curr_time);
             if (!update_took_place) update_took_place = temp_update_took_place;
         }
 
@@ -1295,6 +1293,13 @@ public:
         for (const auto& i : Settings::xRemove)
             wo_ref->extraList.RemoveByType(static_cast<RE::ExtraDataType>(i));
         Utilities::FunctionsSkyrim::SwapObjects(wo_ref, st_inst->GetBound(), false);
+    }
+
+    [[nodiscard]] const bool IsTimeModulator(const FormID formid) {
+        for (const auto& src : sources) {
+            if (src.IsTimeModulator(formid)) return true;
+        }
+        return false;
     }
 
     void Reset() {
