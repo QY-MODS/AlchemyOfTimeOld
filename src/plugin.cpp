@@ -16,8 +16,9 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
     OurEventSink& operator=(OurEventSink&&) = delete;
 
 
-    bool block_droptake = false;
     RE::UI* ui = RE::UI::GetSingleton();
+
+    bool listen_menu = true;
 
     FormID fake_equipped_id;  // set in equip event only when equipped and used in container event (consume)
     RefID picked_up_refid;
@@ -26,6 +27,12 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
     bool furniture_entered = false;
 
     RE::NiPointer<RE::TESObjectREFR> furniture = nullptr;
+
+    void RefreshMenu(const char* menuname) { 
+        listen_menu = false;
+        Utilities::FunctionsSkyrim::RefreshMenu(menuname);
+        listen_menu = true;
+	}
 
 public:
     static OurEventSink* GetSingleton() {
@@ -38,6 +45,7 @@ public:
          if (!event) return RE::BSEventNotifyControl::kContinue;
          if (!event->actor->IsPlayerRef()) return RE::BSEventNotifyControl::kContinue;
         
+         // only for tracking consumed items
          if (!Utilities::FunctionsSkyrim::IsFoodItem(event->baseObject)) return RE::BSEventNotifyControl::kContinue;
 
          fake_equipped_id = event->equipped ? event->baseObject : 0;
@@ -130,6 +138,7 @@ public:
         
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->opening) return RE::BSEventNotifyControl::kContinue;
+        if (!listen_menu) return RE::BSEventNotifyControl::kContinue;
 
         if (!ui->IsMenuOpen(RE::FavoritesMenu::MENU_NAME) &&
             !ui->IsMenuOpen(RE::InventoryMenu::MENU_NAME) &&
@@ -140,13 +149,13 @@ public:
         // return if menu is not favorite menu, container menu, barter menu or inventory menu
         if (menuname == RE::FavoritesMenu::MENU_NAME) {
             logger::trace("Favorites menu is open.");
-            if (M->UpdateStages(player_refid)) Utilities::FunctionsSkyrim::RefreshMenu(menuname);
+            if (M->UpdateStages(player_refid)) RefreshMenu(menuname);
             logger::trace("Spoilage updated.");
             return RE::BSEventNotifyControl::kContinue;
         }
         else if (menuname == RE::InventoryMenu::MENU_NAME) {
             logger::trace("Inventory menu is open.");
-            if (M->UpdateStages(player_refid)) Utilities::FunctionsSkyrim::RefreshMenu(menuname);
+            if (M->UpdateStages(player_refid)) RefreshMenu(menuname);
             logger::trace("Spoilage updated.");
             return RE::BSEventNotifyControl::kContinue;
         }
@@ -157,16 +166,15 @@ public:
             if (const auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()) {
                 vendor_updated = M->UpdateStages(vendor_chest->GetFormID());
             } else logger ::error("Could not get vendor chest.");
-            if (player_updated || vendor_updated) Utilities::FunctionsSkyrim::RefreshMenu(menuname);
+            if (player_updated || vendor_updated) RefreshMenu(menuname);
             return RE::BSEventNotifyControl::kContinue;
         } else if (menuname == RE::ContainerMenu::MENU_NAME) {
             logger::trace("Container menu is open.");
             if (auto container = Utilities::FunctionsSkyrim::GetContainerFromMenu()) {
                 if (M->UpdateStages(player_refid) || M->UpdateStages(container->GetFormID())) {
-                    Utilities::FunctionsSkyrim::RefreshMenu(menuname);
+                    RefreshMenu(menuname);
                 }
             } else logger::error("Could not get container.");
-                
         }
         
         return RE::BSEventNotifyControl::kContinue;
@@ -218,7 +226,6 @@ public:
         return RE::BSEventNotifyControl::kContinue;
     }
 
-    
     // TAMAM
     RE::BSEventNotifyControl ProcessEvent(const RE::TESContainerChangedEvent* event,
                                                                    RE::BSTEventSource<RE::TESContainerChangedEvent>*) {
@@ -230,130 +237,149 @@ public:
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->itemCount) return RE::BSEventNotifyControl::kContinue;
         if (!event->baseObj) return RE::BSEventNotifyControl::kContinue;
-        if (!Settings::IsItem(event->baseObj)) return RE::BSEventNotifyControl::kContinue;
+        if (event->oldContainer==event->newContainer) return RE::BSEventNotifyControl::kContinue;
 
-        if (event->oldContainer != player_refid && event->newContainer != player_refid && event->reference &&
-            M->RefIsRegistered(Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(event->reference)) && event->newContainer) {
-            auto external_ref = RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->newContainer);
-            if (external_ref && external_ref->HasContainer()) {
-                M->HandlePickUp(event->baseObj, event->itemCount, event->reference.native_handle(),false,external_ref);
+
+        if (Settings::IsItem(event->baseObj)){
+            if (event->oldContainer != player_refid && event->newContainer != player_refid && event->reference &&
+                M->RefIsRegistered(Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(event->reference)) && event->newContainer) {
+                auto external_ref = RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->newContainer);
+                if (external_ref && external_ref->HasContainer()) {
+                    M->HandlePickUp(event->baseObj, event->itemCount, event->reference.native_handle(),false,external_ref);
+                }
+			    else logger::trace("ExternalRef not found.");
             }
-			else logger::trace("ExternalRef not found.");
-        }
         
-        if (event->oldContainer != player_refid && event->newContainer != player_refid)
-            return RE::BSEventNotifyControl::kContinue;
+            if (event->oldContainer != player_refid && event->newContainer != player_refid)
+                return RE::BSEventNotifyControl::kContinue;
         
-        logger::trace("Container change event.");
-        //logger::trace("IsStage: {}", M->IsStage(event->baseObj));
+            logger::trace("Container change event.");
+            //logger::trace("IsStage: {}", M->IsStage(event->baseObj));
 
-        // to player inventory <-
-        if (event->newContainer == player_refid) {
-            logger::trace("Item entered player inventory.");
-            if (!event->oldContainer) {
-                if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)) {
-                    logger::trace("Bought from null old container.");
-                    if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()) {
-                        M->HandleBuy(event->baseObj, event->itemCount, vendor_chest->GetFormID());
-					}
-					else {
-						logger::error("Could not get vendor chest");
-						Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Could not get vendor chest.");
+            // to player inventory <-
+            if (event->newContainer == player_refid) {
+                logger::trace("Item entered player inventory.");
+                if (!event->oldContainer) {
+                    if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)) {
+                        logger::trace("Bought from null old container.");
+                        if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()) {
+                            M->HandleBuy(event->baseObj, event->itemCount, vendor_chest->GetFormID());
+					    }
+					    else {
+						    logger::error("Could not get vendor chest");
+						    Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Could not get vendor chest.");
+                        }
+                    }
+                    else { // demek ki world object
+                        auto reference_ = event->reference;
+                        logger::trace("Reference: {}", reference_.native_handle());
+                        auto ref_id = Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(reference_);
+                        if (!ref_id) {
+                            logger::info("Could not find reference");
+                            ref_id = picked_up_refid;
+                            if (std::abs(picked_up_time - RE::Calendar::GetSingleton()->GetHoursPassed())>0.01f) {
+                                logger::warn("Picked up time: {}, calendar time: {}", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
+                            }
+                            if (!ref_id) {
+                                logger::error("Could not find reference with RefID {}", picked_up_refid);
+                                return RE::BSEventNotifyControl::kContinue;
+                            }
+                        }
+                        logger::trace("Reference found: {}", ref_id);
+                        picked_up_refid = 0;
+                        picked_up_time = 0;
+                        M->HandlePickUp(event->baseObj, event->itemCount, ref_id, activate_eat);
                     }
                 }
-                else { // demek ki world object
+                else if (M->IsExternalContainer(event->baseObj,event->oldContainer)) {
+                    logger::trace("from External container to player inventory.");
+                    M->UnLinkExternalContainer(event->baseObj,event->itemCount,event->oldContainer);
+                }
+                // NPC: you dropped this...
+                else if (auto ref_id__ = Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(event->reference)) {
+                    logger::info("NPC: you dropped this...Reference handle refid: {}", ref_id__);
+                    // bi sekilde yukarda external olarak registerlanmadiysa... ya da genel:
+                    M->HandlePickUp(event->baseObj, event->itemCount, ref_id__, false);
+                }
+                else {
+				    // old container null deil ve registered deil
+                    logger::trace("Old container not null and not registered.");
+                    M->RegisterAndGo(event->baseObj, event->itemCount, player_refid);
+                }
+            }
+
+            // from player inventory ->
+            if (event->oldContainer == player_refid) {
+                // a fake container left player inventory
+                logger::trace("Fake container left player inventory.");
+                // drop event
+                if (!event->newContainer) {
+                    logger::trace("Dropped.");
+                    M->setListenCrosshair(false);
                     auto reference_ = event->reference;
                     logger::trace("Reference: {}", reference_.native_handle());
-                    auto ref_id = Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(reference_);
-                    if (!ref_id) {
-                        logger::info("Could not find reference");
-                        ref_id = picked_up_refid;
-                        if (std::abs(picked_up_time - RE::Calendar::GetSingleton()->GetHoursPassed())>0.01f) {
-                            logger::warn("Picked up time: {}, calendar time: {}", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
-                        }
-                        if (!ref_id) {
-                            logger::error("Could not find reference with RefID {}", picked_up_refid);
-                            return RE::BSEventNotifyControl::kContinue;
-                        }
+                    RE::TESObjectREFR* ref = Utilities::FunctionsSkyrim::TryToGetRefFromHandle(reference_);
+                    if (ref) logger::trace("Dropped ref name: {}", ref->GetBaseObject()->GetName());
+                    if (!ref) {
+                        // iterate through all objects in the cell................
+                        logger::info("Iterating through all references in the cell.");
+                        ref = Utilities::FunctionsSkyrim::TryToGetRefInCell(event->baseObj,event->itemCount);
+                    } 
+                    if (ref) {
+                        M->HandleDrop(event->baseObj, event->itemCount, ref);
                     }
-                    logger::trace("Reference found: {}", ref_id);
-                    picked_up_refid = 0;
-                    picked_up_time = 0;
-                    M->HandlePickUp(event->baseObj, event->itemCount, ref_id, activate_eat);
-                }
-            }
-            else if (M->IsExternalContainer(event->baseObj,event->oldContainer)) {
-                logger::trace("from External container to player inventory.");
-                M->UnLinkExternalContainer(event->baseObj,event->itemCount,event->oldContainer);
-            }
-            // NPC: you dropped this...
-            else if (auto ref_id__ = Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(event->reference)) {
-                logger::info("NPC: you dropped this...Reference handle refid: {}", ref_id__);
-                // bi sekilde yukarda external olarak registerlanmadiysa... ya da genel:
-                M->HandlePickUp(event->baseObj, event->itemCount, ref_id__, false);
-            }
-            else {
-				// old container null deil ve registered deil
-                logger::trace("Old container not null and not registered.");
-                M->RegisterAndGo(event->baseObj, event->itemCount, player_refid);
-            }
-            return RE::BSEventNotifyControl::kContinue;
-        }
-
-        // from player inventory ->
-        if (event->oldContainer == player_refid) {
-            // a fake container left player inventory
-            logger::trace("Fake container left player inventory.");
-            // drop event
-            if (!event->newContainer) {
-                logger::trace("Dropped.");
-                M->setListenCrosshair(false);
-                auto reference_ = event->reference;
-                logger::trace("Reference: {}", reference_.native_handle());
-                RE::TESObjectREFR* ref = Utilities::FunctionsSkyrim::TryToGetRefFromHandle(reference_);
-                if (ref) logger::trace("Dropped ref name: {}", ref->GetBaseObject()->GetName());
-                if (!ref) {
-                    // iterate through all objects in the cell................
-                    logger::info("Iterating through all references in the cell.");
-                    ref = Utilities::FunctionsSkyrim::TryToGetRefInCell(event->baseObj,event->itemCount);
-                } 
-                if (ref) {
-                    M->HandleDrop(event->baseObj, event->itemCount, ref);
-                }
-                else if (event->baseObj == fake_equipped_id) {
-                    M->HandleConsume(event->baseObj);
-                    fake_equipped_id = 0;
-                } 
-                else if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)){
-                    if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()){
-                        M->LinkExternalContainer(event->baseObj, event->itemCount, event->newContainer);
-                    } else {
-                        logger::error("Could not get vendor chest");
-						Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Could not get vendor chest.");
+                    else if (event->baseObj == fake_equipped_id) {
+                        M->HandleConsume(event->baseObj);
+                        fake_equipped_id = 0;
+                    } 
+                    else if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)){
+                        if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()){
+                            M->LinkExternalContainer(event->baseObj, event->itemCount, event->newContainer);
+                        } else {
+                            logger::error("Could not get vendor chest");
+						    Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Could not get vendor chest.");
 					
+                        }
+                    }
+                    else logger::warn("Ref not found at HandleDrop! Hopefully due to consume.");
+                    M->setListenCrosshair(true);
+                }
+                // Barter transfer
+                else if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)) {
+                    logger::info("Sold container.");
+                    M->LinkExternalContainer(event->baseObj, event->itemCount, event->newContainer);
+                }
+                // container transfer
+                else if (RE::UI::GetSingleton()->IsMenuOpen(RE::ContainerMenu::MENU_NAME)) {
+                    logger::trace("Container menu is open.");
+                    M->LinkExternalContainer(event->baseObj,event->itemCount,event->newContainer);
+                }
+                else {
+                    Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Food got removed from player inventory due to unknown reason.");
+                    // remove from one of the instances
+                    M->HandleConsume(event->baseObj);
+                }
+            }
+        } 
+        
+        if (M->IsTimeModulator(event->baseObj)) {
+            if (event->oldContainer == player_refid || event->newContainer== player_refid) {
+                M->UpdateStages(player_refid);
+            }
+            if (M->IsExternalContainer(event->oldContainer)) {
+				M->UpdateStages(event->oldContainer);
+			}
+            if (M->IsExternalContainer(event->newContainer)) {
+                M->UpdateStages(event->newContainer);
+            }
+            if (!event->newContainer){
+                if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)) {
+                    if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()) {
+                        M->UpdateStages(vendor_chest);
                     }
                 }
-                else logger::warn("Ref not found at HandleDrop! Hopefully due to consume.");
-                M->setListenCrosshair(true);
             }
-            // Barter transfer
-            else if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)) {
-                logger::info("Sold container.");
-                M->LinkExternalContainer(event->baseObj, event->itemCount, event->newContainer);
-            }
-            // container transfer
-            else if (RE::UI::GetSingleton()->IsMenuOpen(RE::ContainerMenu::MENU_NAME)) {
-                logger::trace("Container menu is open.");
-                M->LinkExternalContainer(event->baseObj,event->itemCount,event->newContainer);
-            }
-            else {
-                Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Food got removed from player inventory due to unknown reason.");
-                // remove from one of the instances
-                M->HandleConsume(event->baseObj);
-            }
-
         }
-
 
 
         return RE::BSEventNotifyControl::kContinue;
@@ -369,11 +395,14 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         Settings::LoadSettings();
         auto sources = std::vector<Source>();
         M = Manager::GetSingleton(sources);
-        auto mgeff = RE::TESForm::LookupByID<RE::EffectSetting>(0x0003eb42);
-        if (mgeff) logger::trace("{}", mgeff->FORMTYPE);
     }
     if (message->type == SKSE::MessagingInterface::kPostLoadGame) {
         logger::trace("Post-load game.");
+        if (Settings::failed_to_load) {
+            Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Failed to load settings. Check log for details.");
+            M->Uninstall();
+			return;
+        }
         // Post-load
         if (!M) return;
         // EventSink

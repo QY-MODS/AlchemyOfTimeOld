@@ -944,6 +944,7 @@ namespace Utilities{
 
             bool crafting_allowed;
 
+
             Stage(){};
             Stage(FormID f, Duration d, StageNo s, StageName n, bool ca,std::vector<StageEffect> e)
                 : formid(f), duration(d), no(s), name(n), crafting_allowed(ca) ,mgeffect(e) {
@@ -966,52 +967,73 @@ namespace Utilities{
 
             RE::TESBoundObject* GetBound() const { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid); };
 
-            [[nodiscard]] const bool CheckIntegrity() {
+            [[nodiscard]] const bool CheckIntegrity() const {
                 if (!formid || !GetBound()) {
 					logger::error("FormID or bound is null");
 					return false;
 				}
+                if (duration <= 0) {
+                    logger::error("Duration is 0 or negative");
+                    return false;
+                }
 				return true;
             }
-            
-            RE::ExtraTextDisplayData* GetExtraText() {
-                _textData = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
-                _textData->SetName(GetBound()->GetName());
-                return _textData;
-            }
 
-        private:
-            //[[maybe_unused]] RE::ExtraTextDisplayData* _textData = nullptr;
-            RE::ExtraTextDisplayData* _textData = nullptr;
+            const char* GetExtraText() {
+                return GetBound()->GetName();
+            }
 
         };
 
         using Stages = std::vector<Stage>;
         using StageDict = std::map<StageNo, Stage>;
 
+        struct StageInstancePlain{
+            float start_time;
+            StageNo no;
+            Count count;
+            
+            float _elapsed;
+            float _delay_start;
+            float _delay_mag;
+            FormID _delay_formid;
+
+            bool is_fake = false;
+            bool is_decayed = false;
+            bool crafting_allowed = false;
+
+            bool is_favorited = false; // used only when loading and saving
+		};
+
+
         struct StageInstance {
             float start_time; // start time of the stage
             StageNo no;
             Count count;
-            RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is
+            //RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is
                              // out in the world
             FormEditorIDX xtra;
 
             //StageInstance() : start_time(0), no(0), count(0), location(0) {}
-            StageInstance(float st, StageNo n, Count c, RefID l
+            StageInstance(const float st, const StageNo n, const Count c
+                //, RefID l
                 //,std::string ei
             )
-                : start_time(st), no(n), count(c), location(l)
+                : start_time(st), no(n), count(c)
+                //, location(l)
                 //,editorid(ei) 
             {
                 _elapsed = 0;
                 _delay_start = start_time;
-                _delay_mag = 0;
+                _delay_mag = 1;
+                _delay_formid = 0;
             }
         
             //define ==
-            bool operator==(const StageInstance& other) const {
-                return no == other.no && count == other.count && location == other.location &&
+            // assumes that they are in the same inventory
+			[[nodiscard]] bool operator==(const StageInstance& other) const {
+                return no == other.no && count == other.count && 
+                    //location == other.location &&
                        start_time == other.start_time && 
                     _elapsed == other._elapsed && xtra == other.xtra;
 			}
@@ -1022,24 +1044,30 @@ namespace Utilities{
 			//}
 
             // times are very close (abs diff less than 0.015h = 0.9min)
-            bool AlmostSameExceptCount(StageInstance& other,const float curr_time) const {
+            // assumes that they are in the same inventory
+			[[nodiscard]] bool AlmostSameExceptCount(StageInstance& other,const float curr_time) const {
                 // bcs they are in the same inventory they will have same delay magnitude
                 // delay starts might be different but if the elapsed times are close enough, we don't care
-                return no == other.no && location == other.location &&
+                return no == other.no && 
+                    //location == other.location &&
                        std::abs(start_time - other.start_time) < 0.015 &&
                        std::abs(GetElapsed(curr_time) - other.GetElapsed(curr_time)) < 0.015 && xtra == other.xtra;
             }
 
             StageInstance& operator=(const StageInstance& other) {
                 if (this != &other) {
+                    
                     start_time = other.start_time;
                     no = other.no;
                     count = other.count;
-                    location = other.location;
+                    //location = other.location;
+                    
                     xtra = other.xtra;
+
                     _elapsed = other._elapsed;
                     _delay_start = other._delay_start;
                     _delay_mag = other._delay_mag;
+                    _delay_formid = other._delay_formid;
                 }
                 return *this;
             }
@@ -1051,54 +1079,92 @@ namespace Utilities{
             }
 
             const float GetDelaySlope() const {
-                const auto delay_magnitude = std::min(std::max(0.f, _delay_mag), 1.f);
-                return 1 - delay_magnitude;
+                const auto delay_magnitude = std::min(std::max(-10.f, _delay_mag), 10.f);
+                //return 1 - delay_magnitude;
+                return delay_magnitude;
             }
-
-            /*void SetDelay(const float delay) { 
-                _delay_start = delay;
-                _delay_mag = delay;
-			}*/
 
             void SetNewStart(const float curr_time, const float overshot) {
                 // overshot: by how much is the schwelle already ueberschritten
-                start_time = curr_time - overshot / GetDelaySlope();
+                start_time = curr_time - overshot / (GetDelaySlope() + std::numeric_limits<float>::epsilon());
                 _delay_start = start_time;
                 _elapsed = 0;
 			}
 
-    //        void RankUp(const FormID new_formid,const std::string new_editorid, const bool fake,const bool decayed, const bool craftingallowed){
-    //            xtra.form_id = new_formid;
-    //            xtra.editor_id = new_editorid;
-				//xtra.is_fake = fake;
-				//xtra.is_decayed = decayed;
-				//xtra.crafting_allowed = craftingallowed;
-    //            no++;
-    //        }
+            void SetDelay(const float curr_time,const float delay,const FormID formid) {
+                // yeni steigungla yeni ausgangspunkt yapiyoruz
+                // call only from UpdateTimeModulationInInventory
+                
+                if (_delay_formid == formid) return;
 
+                _elapsed = GetElapsed(curr_time);
+                _delay_start = curr_time;
+				_delay_mag = delay;
+                _delay_formid = formid;
+			}
+
+            void RemoveTimeMod(const float curr_time) {
+				SetDelay(curr_time, 1, 0);
+			}
+
+            const float GetDelayMagnitude() const {
+				return GetDelaySlope();
+			}
+
+            const FormID GetDelayerFormID() const {
+                return _delay_formid;
+            }
+
+            const float GetHittingTime(float schranke) {
+				// _elapsed + dt*_delay_mag = schranke
+                return (schranke - _elapsed) / (GetDelaySlope() + std::numeric_limits<float>::epsilon());
+			}
+
+            StageInstancePlain GetPlain() const {
+                StageInstancePlain plain;
+                plain.start_time = start_time;
+                plain.no = no;
+                plain.count = count;
+
+                plain.is_fake = xtra.is_fake;
+                plain.is_decayed = xtra.is_decayed;
+                plain.crafting_allowed = xtra.crafting_allowed;
+				//plain.is_favorited = xtra.is_favorited;
+
+                plain._elapsed = _elapsed;
+                plain._delay_start = _delay_start;
+                plain._delay_mag = _delay_mag;
+                plain._delay_formid = _delay_formid;
+                
+                return plain;
+            }
 
         private:
             float _elapsed; // y coord of the ausgangspunkt/elapsed time since the stage started
             float _delay_start;  // x coord of the ausgangspunkt
-            float _delay_mag; // 1 - slope
+            float _delay_mag; // slope
+            FormID _delay_formid; // formid of the time modulator
 
-            //friend class StageInstance;
         };
 
         struct StageUpdate {
             Stage* oldstage=nullptr;
             Stage* newstage=nullptr;
             Count count=0;
-            RefID location=0;
+            //RefID location=0;
             bool new_is_fake=false;
 
-            StageUpdate(Stage* old, Stage* new_, Count c, RefID l, bool fake)
-				: oldstage(old), newstage(new_), count(c), location(l), new_is_fake(fake) {}
+            StageUpdate(Stage* old, Stage* new_, Count c, 
+                //RefID l,
+                bool fake)
+				: oldstage(old), newstage(new_), count(c), 
+                //location(l), 
+                new_is_fake(fake) {}
         };
 
 
 
-        using SourceData = std::vector<StageInstance>;
+        using SourceData = std::map<RefID,std::vector<StageInstance>>;
         using SaveDataLHS = FormEditorID;
         using SaveDataRHS = SourceData;
     }
