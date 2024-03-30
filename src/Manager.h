@@ -714,7 +714,7 @@ public:
 
         auto source = GetSource(dropped_formid);
         if (!source) {
-            logger::critical("HandleDrop: Source not found! Can be if it was never registered before.");
+            logger::warn("HandleDrop: Source not found! Can be if it was never registered before.");
             return;
         } 
         else if (source->formid == dropped_formid && !IsStage(dropped_formid, source)) {
@@ -1280,8 +1280,10 @@ public:
 
         // need to handle queued_time_modulator_updates
         // order them by GetRemainingTime method of QueuedTModUpdate
-
+        const auto refid = ref->GetFormID();
         for (auto& src : sources) {
+            if (!src.data.contains(refid)) continue;
+            if (src.data[refid].empty()) continue;
             auto* src_ptr = &src;
             const bool temp_update_took_place = _UpdateStages({ref}, src_ptr, curr_time);
             if (is_inventory) src_ptr->UpdateTimeModulationInInventory(ref, curr_time);

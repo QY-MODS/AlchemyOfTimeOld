@@ -772,7 +772,7 @@ struct Source {
         }
 
         if (data.count(inventory_owner_refid) == 0) {
-			logger::error("Inventory owner refid not found in data.");
+			logger::error("Inventory owner refid not found in data: {} and source {}", inventory_owner_refid, editorid);
 			return;
 		}
 

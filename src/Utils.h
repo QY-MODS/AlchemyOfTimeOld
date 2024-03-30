@@ -222,6 +222,12 @@ namespace Utilities{
                 return result;
             }
 
+            std::string replaceLineBreaksWithSpace(const std::string& input) {
+                std::string result = input;
+                std::replace(result.begin(), result.end(), '\n', ' ');
+                return result;
+            }
+
             bool includesString(const std::string& input, const std::vector<std::string>& strings) {
                 std::string lowerInput = toLowercase(input);
 
@@ -238,6 +244,7 @@ namespace Utilities{
 
             bool includesWord(const std::string& input, const std::vector<std::string>& strings) {
                 std::string lowerInput = toLowercase(input);
+                lowerInput = replaceLineBreaksWithSpace(lowerInput);
                 lowerInput = trim(lowerInput);
                 lowerInput = " " + lowerInput + " ";  // Add spaces to the beginning and end of the string
 
@@ -247,6 +254,9 @@ namespace Utilities{
                     lowerStr = " " + lowerStr + " ";  // Add spaces to the beginning and end of the string
                     std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(),
                                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    
+                    //logger::trace("lowerInput: {} lowerStr: {}", lowerInput, lowerStr);
+
                     if (lowerInput.find(lowerStr) != std::string::npos) {
                         return true;  // The input string includes one of the strings
                     }
@@ -315,7 +325,7 @@ namespace Utilities{
             if (temp_form)
                 return temp_form->GetFormID();
             else {
-                logger::error("Formid is null for editorid {}", formEditorId);
+                logger::warn("Formid is null for editorid {}", formEditorId);
                 return -1;
             }
             return -1;

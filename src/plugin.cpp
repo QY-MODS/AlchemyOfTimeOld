@@ -289,6 +289,7 @@ public:
                         picked_up_refid = 0;
                         picked_up_time = 0;
                         M->HandlePickUp(event->baseObj, event->itemCount, ref_id, activate_eat);
+                        activate_eat = false;
                     }
                 }
                 else if (M->IsExternalContainer(event->baseObj,event->oldContainer)) {
