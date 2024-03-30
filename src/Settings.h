@@ -8,278 +8,6 @@ namespace Settings {
 
     bool failed_to_load = false;
 
-    namespace oldstuff {
-    
-      //  DefaultSettings _parseDefaults(const rapidjson::Value& owner) {
-      //      DefaultSettings settings;
-
-      //      // Access the "stages" array
-      //      if (owner.HasMember("stages") && owner["stages"].IsArray()) {
-      //          const rapidjson::Value& stages = owner["stages"];
-      //          logger::trace("Stages size: {}", stages.Size());
-      //          for (rapidjson::SizeType i = 0; i < stages.Size(); i++) {
-      //              const rapidjson::Value& stage = stages[i];
-
-      //              // Parse stage properties
-      //              if (!stage.HasMember("no")) {
-      //                  logger::error("No is missing for stage {}", i);
-      //                  return settings;
-      //              }
-      //              // Parse no
-      //              StageNo no = stage["no"].GetUint();
-      //              // Parse formid
-      //              FormID formid;
-      //              auto temp_formid = Utilities::FunctionsJSON::GetFormEditorID(stage, "FormEditorID");
-      //              if (temp_formid < 0) {
-      //                  logger::error("FormEditorID is missing for stage {}", no);
-      //                  return DefaultSettings();
-      //              } else
-      //                  formid = temp_formid;
-      //              // Parse duration
-      //              Duration duration;
-      //              if (stage.HasMember("duration"))
-      //                  duration = stage["duration"].GetUint();
-      //              else {
-      //                  logger::error("Duration is missing for stage {}", no);
-      //                  return DefaultSettings();
-      //              }
-      //              // Parse name
-      //              StageName name = "";
-      //              if (stage.HasMember("name"))
-      //                  name = stage["name"].GetString();
-      //              else
-      //                  logger::warn("name is missing for stage {}", no);
-
-      //              // parse crafting eligibility
-      //              bool crafting_allowed = false;
-      //              if (stage.HasMember("crafting_allowed"))
-      //                  crafting_allowed = stage["crafting_allowed"].GetBool();
-      //              else
-      //                  logger::warn("Crafting allowed is missing for stage {}", no);
-
-      //              // Parse mgeffect
-      //              std::vector<StageEffect> effects;
-      //              if (stage.HasMember("mgeffect") && stage["mgeffect"].IsArray()) {
-      //                  const rapidjson::Value& mgeffect = stage["mgeffect"];
-      //                  for (rapidjson::SizeType j = 0; j < mgeffect.Size(); j++) {
-      //                      const rapidjson::Value& effect = mgeffect[j];
-      //                      FormID beffect;
-      //                      temp_formid = Utilities::FunctionsJSON::GetFormEditorID(effect, "FormEditorID");
-      //                      if (temp_formid < 0)
-      //                          continue;
-      //                      else
-      //                          beffect = temp_formid;
-      //                      if (!effect.HasMember("magnitude") || !effect.HasMember("duration")) {
-      //                          logger::error("Magnitude or duration is missing for effect {}", j);
-      //                          return DefaultSettings();
-      //                      }
-      //                      float magnitude = effect["magnitude"].GetFloat();
-      //                      Duration effectDuration = effect["duration"].GetUint();
-      //                      effects.push_back(StageEffect(beffect, magnitude, effectDuration));
-      //                  }
-      //              }
-
-      //              // Populate settings with parsed data
-      //              // if no exist already raise error
-      //              if (Utilities::Functions::Vector::VectorHasElement<StageNo>(settings.numbers, no)) {
-      //                  logger::error("No {} already exists.", no);
-      //                  return DefaultSettings();
-      //              }
-
-      //              settings.numbers.push_back(no);
-      //              settings.items[no] = formid;
-      //              settings.durations[no] = duration;
-      //              settings.stage_names[no] = name;
-      //              settings.crafting_allowed[no] = crafting_allowed;
-      //              settings.effects[no] = effects;
-      //          }
-      //      }
-
-      //      auto temp_decayed_id = Utilities::FunctionsJSON::GetFormEditorID(owner, "decayedFormEditorID");
-      //      if (temp_decayed_id < 0) {
-      //          logger::error("DecayedFormEditorID is missing.");
-      //          return DefaultSettings();
-      //      } else
-      //          settings.decayed_id = temp_decayed_id;
-
-      //      if (!settings.CheckIntegrity()) {
-      //          logger::critical("Settings integrity check failed.");
-      //          return DefaultSettings();
-      //      }
-      //      return settings;
-
-      //      // Populate settings with parsed data specific to this owner
-      //  }
-
-      //  DefaultSettings parseDefaults(const std::string& _type_) {
-
-      //      DefaultSettings settings;
-      //      const auto filename = std::string(defaults_path_) + _type_ + ".json";
-      //      logger::trace("Filename: {}", filename);
-      //      // Open the JSON file
-      //      std::ifstream file(filename);
-      //      if (!file.is_open()) {
-      //          logger::error("Failed to open file: {}",filename);
-      //          return settings;
-      //      }
-
-      //      // Read the entire file into a string
-      //      std::string jsonStr;
-      //      file.seekg(0, std::ios::end);
-      //      jsonStr.reserve(file.tellg());
-      //      file.seekg(0, std::ios::beg);
-      //      jsonStr.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-      //      file.close();
-
-      //      // Parse the JSON string
-      //      rapidjson::Document doc;
-      //      doc.Parse(jsonStr.c_str());
-      //      if (doc.HasParseError()) {
-      //          logger::critical("JSON parse error: {}", doc.GetParseError());
-      //          Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("JSON parse error: " + std::to_string(doc.GetParseError()));
-      //          return settings;
-      //      }
-
-      //      // Access the "stages" array
-      //      if (doc.HasMember("stages") && doc["stages"].IsArray()) {
-      //          const rapidjson::Value& stages = doc["stages"];
-      //          logger::trace("Stages size: {}", stages.Size());
-      //          for (rapidjson::SizeType i = 0; i < stages.Size(); i++) {
-      //              const rapidjson::Value& stage = stages[i];
-
-      //              // Parse stage properties
-      //              if (!stage.HasMember("no")) {
-				  //      logger::error("No is missing for stage {}", i);
-					 //   return settings;
-				  //  }
-      //              // Parse no
-      //              StageNo no = stage["no"].GetUint();
-      //              // Parse formid
-      //              FormID formid;
-      //              auto temp_formid = Utilities::FunctionsJSON::GetFormEditorID(stage, "FormEditorID");
-      //              if (temp_formid < 0) {
-					 //   logger::error("FormEditorID is missing for stage {}", no);
-					 //   return DefaultSettings();
-      //              } else formid = temp_formid;
-      //              // Parse duration
-      //              Duration duration;
-      //              if (stage.HasMember("duration")) duration = stage["duration"].GetUint();
-      //              else {
-      //                  logger::error("Duration is missing for stage {}", no);
-      //                  return DefaultSettings();
-      //              }
-      //              // Parse name
-      //              StageName name = "";
-      //              if (stage.HasMember("name")) name = stage["name"].GetString();
-      //              else logger::warn("name is missing for stage {}", no);
-
-      //              // parse crafting eligibility
-      //              bool crafting_allowed = false;
-      //              if (stage.HasMember("crafting_allowed")) crafting_allowed = stage["crafting_allowed"].GetBool();
-      //              else logger::warn("Crafting allowed is missing for stage {}", no);
-      //          
-      //              // Parse mgeffect
-      //              std::vector<StageEffect> effects;
-      //              if (stage.HasMember("mgeffect") && stage["mgeffect"].IsArray()) {
-      //                  const rapidjson::Value& mgeffect = stage["mgeffect"];
-      //                  for (rapidjson::SizeType j = 0; j < mgeffect.Size(); j++) {
-      //                      const rapidjson::Value& effect = mgeffect[j];
-      //                      FormID beffect;
-      //                      temp_formid = Utilities::FunctionsJSON::GetFormEditorID(effect, "FormEditorID");
-      //                      if (temp_formid < 0) continue;
-      //                      else beffect = temp_formid;
-      //                      if (!effect.HasMember("magnitude") || !effect.HasMember("duration")) {
-						//	    logger::error("Magnitude or duration is missing for effect {}", j);
-						//	    return DefaultSettings();
-						//    }
-      //                      float magnitude = effect["magnitude"].GetFloat();
-      //                      Duration effectDuration = effect["duration"].GetUint();
-      //                      effects.push_back(StageEffect(beffect, magnitude, effectDuration));
-      //                  }
-      //              }
-
-      //              // Populate settings with parsed data
-      //              // if no exist already raise error
-      //              if (Utilities::Functions::Vector::VectorHasElement<StageNo>(settings.numbers, no)) {
-      //                  logger::error("No {} already exists.", no);
-      //                  return DefaultSettings();
-      //              }
-      //          
-      //              settings.numbers.push_back(no);
-      //              settings.items[no] = formid;
-      //              settings.durations[no] = duration;
-      //              settings.stage_names[no] = name;
-      //              settings.crafting_allowed[no] = crafting_allowed;
-      //              settings.effects[no] = effects;
-      //          }
-      //      }
-
-      //      auto temp_decayed_id = Utilities::FunctionsJSON::GetFormEditorID(doc, "decayedFormEditorID");
-      //      if (temp_decayed_id < 0) {
-      //          logger::error("DecayedFormEditorID is missing.");
-      //          return DefaultSettings();
-      //      } else settings.decayed_id = temp_decayed_id;
-
-      //      if (!settings.CheckIntegrity()) {
-			   // logger::critical("Settings integrity check failed.");
-			   // return DefaultSettings();
-		    //}
-      //      return settings;
-      //  }
-
-      //  std::map<std::string, DefaultSettings, CompareByLength> parseCustoms(const std::string& _type_) {
-
-      //      std::map<std::string, DefaultSettings, CompareByLength> _custom_settings;
-
-      //      const auto filename = std::string(customs_path_) + _type_ + ".json";
-      //      std::ifstream file(filename);
-      //      if (!file.is_open()) {
-      //          logger::error("Failed to open file: {}", filename);
-      //          return _custom_settings;
-      //      }
-
-      //      // Read the entire file into a string
-      //      std::string jsonStr;
-      //      file.seekg(0, std::ios::end);
-      //      jsonStr.reserve(file.tellg());
-      //      file.seekg(0, std::ios::beg);
-      //      jsonStr.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-      //      file.close();
-
-      //      // Parse the JSON string
-      //      rapidjson::Document doc;
-      //      doc.Parse(jsonStr.c_str());
-      //      if (doc.HasParseError()) {
-      //          logger::error("JSON parse error: {}", doc.GetParseError());
-      //          _custom_settings.clear();
-      //          return _custom_settings;
-      //      }
-
-      //      // Iterate over each owner
-      //      for (auto it = doc.MemberBegin(); it != doc.MemberEnd(); ++it) {
-      //          const std::string& ownerName = it->name.GetString();
-      //          const rapidjson::Value& owner = it->value;
-
-      //          logger::trace("Owner: {}", ownerName);
-
-      //          // Call your existing parsing function for stages of each owner
-      //          DefaultSettings ownerSettings = _parseDefaults(owner);
-
-      //          _custom_settings[ownerName] = ownerSettings;
-      //      }
-      //      return _custom_settings;
-      //  }
-
-      //  struct CompareByLength {
-      //      bool operator()(const std::string& a, const std::string& b) const {
-      //          if (a.length() == b.length()) {
-      //              return a < b;  // If lengths are equal, use lexicographical comparison
-      //          }
-      //          return a.length() < b.length();  // Otherwise, compare strings by their lengths
-      //      }
-      //  };
-    }
-
     constexpr std::uint32_t kSerializationVersion = 626;
     constexpr std::uint32_t kDataKey = 'QAOT';
 
@@ -380,6 +108,11 @@ namespace Settings {
             logger::trace("Type is empty. for formid: {}", formid);
 			return false;
 		}
+        if (!Settings::exclude_list.count(type)) {
+			logger::critical("Type not found in exclude list. for formid: {}", formid);
+            return false;
+        }
+
         std::string form_string = std::string(form->GetName());
         
         /*const auto exlude_list = LoadExcludeList(postfix);*/
@@ -519,7 +252,7 @@ namespace Settings {
         const auto filename = std::string(defaults_path_) + _type + ".yml";
         logger::info("Filename: {}", filename);
 		YAML::Node config = YAML::LoadFile(filename);
-        logger::info("asldkjfï¿½sadjn");
+        logger::info("asldkjfösadjn");
 		return _parseDefaults(config);
     }
 
@@ -602,7 +335,7 @@ struct Source {
     FormID formid=0;
     std::string editorid="";
     StageDict stages;
-    SourceData data = {};
+    SourceData data; // change this to a map with refid as key and vector of instances as value
     RE::EffectSetting* empty_mgeff;
     Settings::DefaultSettings* defaultsettings = nullptr; // eigentlich sollte settings heissen
 
@@ -611,6 +344,8 @@ struct Source {
     std::string qFormType;
     std::vector<StageNo> fake_stages = {};
     Stage decayed_stage;
+
+    std::vector<StageInstance*> queued_time_modulator_updates;
 
     Source(const FormID id, const std::string id_str, RE::EffectSetting* e_m, Settings::DefaultSettings* sttngs=nullptr)
         : formid(id), editorid(id_str), empty_mgeff(e_m), defaultsettings(sttngs) {
@@ -716,36 +451,36 @@ struct Source {
         return Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid, editorid);
     };
 
-    const std::vector<StageUpdate> UpdateAllStages(const std::vector<RefID>& filter,const float curr_time) {
+    const std::map<RefID,std::vector<StageUpdate>> UpdateAllStages(const std::vector<RefID>& filter,const float curr_time) {
         logger::trace("Updating all stages.");
         if (init_failed) {
             logger::critical("UpdateAllStages: Initialisation failed.");
             return {};
         }
         // save the updated instances
-        std::vector<StageUpdate> updated_instances = {};
+        std::map<RefID, std::vector<StageUpdate>> updated_instances;
         if (data.empty()) {
 			logger::warn("No data found for source {}", editorid);
 			return updated_instances;
 		}
         for (auto& reffid : filter) {
             logger::trace("Refid in filter: {}", reffid);
-        }
-        for (auto& instance : data) {
-            // if the refid is not in the filter, skip
-            if (!Utilities::Functions::Vector::VectorHasElement<RefID>(filter, instance.location)) {
-				//logger::trace("Refid {} not in filter. Skipping.", instance.location);
+            if (!data.count(reffid)) {
+				logger::warn("Refid {} not found in data.", reffid);
 				continue;
 			}
-            Stage* old_stage = &stages[instance.no];
-            Stage* new_stage = nullptr;
-            if (_UpdateStageInstance(instance, curr_time)) {
-                if (instance.xtra.is_decayed || !stages.contains(instance.no)) {
-                    new_stage = &decayed_stage;
-				}
-                else new_stage = &stages[instance.no];
-                auto is_fake__ = IsFakeStage(instance.no);
-                updated_instances.emplace_back(old_stage, new_stage, instance.count, instance.location, is_fake__);
+            auto& instances = data[reffid];
+            for (auto& instance : instances) {
+                Stage* old_stage = &stages[instance.no];
+                Stage* new_stage = nullptr;
+                if (_UpdateStageInstance(instance, curr_time)) {
+                    if (instance.xtra.is_decayed || !stages.contains(instance.no)) {
+                        new_stage = &decayed_stage;
+				    }
+                    else new_stage = &stages[instance.no];
+                    auto is_fake__ = IsFakeStage(instance.no);
+                    updated_instances[reffid].emplace_back(old_stage, new_stage, instance.count, is_fake__);
+                }
             }
         }
         CleanUpData();
@@ -767,7 +502,7 @@ struct Source {
         return nullptr;
     }
 
-    [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance, RefID loc) { 
+    [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance, const RefID loc) { 
 
         if (init_failed) {
             logger::critical("InsertData: Initialisation failed.");
@@ -783,10 +518,10 @@ struct Source {
             logger::error("Count is less than or equal 0.");
             return false;
         }
-        if (stage_instance.location == 0) {
+        /*if (stage_instance.location == 0) {
 			logger::error("Location is 0.");
 			return false;
-		}
+		}*/
         if (stage_instance.xtra.form_id != stages[n].formid) {
 			logger::error("Formid does not match the stage formid.");
 			return false;
@@ -804,7 +539,10 @@ struct Source {
 			return false;
 		}
 
-        data.push_back(stage_instance);
+        if (!data.count(loc)) {
+            data[loc] = {};
+        }
+        data[loc].push_back(stage_instance);
 
         // fillout the xtra of the emplaced instance
         // get the emplaced instance
@@ -823,13 +561,13 @@ struct Source {
             return false;
         }
         const float curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
-        StageInstance new_instance(curr_time, n, c, l);
+        StageInstance new_instance(curr_time, n, c);
         new_instance.xtra.form_id = stages[n].formid;
         new_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages[n].GetBound());
         new_instance.xtra.crafting_allowed = stages[n].crafting_allowed;
         if (IsFakeStage(n)) new_instance.xtra.is_fake = true;
 
-        return InsertNewInstance(new_instance);
+        return InsertNewInstance(new_instance,l);
     }
 
     // applies time modulation to all instances in the inventory
@@ -848,10 +586,40 @@ struct Source {
 			logger::error("InitInsertInstance failed.");
 			return false;
 		}
-        SetDelayOfInstances({&data.back()}, RE::Calendar::GetSingleton()->GetHoursPassed(), inventory_owner);
+        
+        SetDelayOfInstance(data[inventory_owner_refid].back(), RE::Calendar::GetSingleton()->GetHoursPassed(),
+                            inventory_owner);
         return true;
     }
     
+    [[nodiscard]] const bool MoveInstance(const RefID from_ref, const RefID to_ref, StageInstance* st_inst) {
+        // Check if the from_ref exists in the data map
+        if (data.count(from_ref) == 0) {
+            return false;
+        }
+
+        // Get the vector of instances from the from_ref key
+        std::vector<StageInstance>& from_instances = data[from_ref];
+        StageInstance new_instance(*st_inst);
+
+        // Find the instance in the from_instances vector
+        auto it = std::find(from_instances.begin(), from_instances.end(), *st_inst);
+        if (it == from_instances.end()) {
+            return false;
+        }
+
+        // Remove the instance from the from_instances vector
+        from_instances.erase(it);
+
+        // Add the instance to the to_ref key vector
+        if (data.count(to_ref) == 0) {
+			data[to_ref] = {};
+		}
+        data[to_ref].push_back(new_instance);
+
+        return true;
+    }
+
     Count MoveInstances(const RefID from_ref, const RefID to_ref, const FormID instance_formid, Count count, const bool bias_direction) {
         // bias_direction: true to move older instances first
         if (data.empty()) {
@@ -879,24 +647,34 @@ struct Source {
             return 0;
         }
 
-        std::vector<StageInstance*> instances_candidates = {};
-        for (auto& st_inst : data) {
-            if (st_inst.xtra.form_id == instance_formid && st_inst.location == from_ref)
-                instances_candidates.push_back(&st_inst);
+        if (data.count(from_ref) == 0) {
+			logger::error("From refid not found in data.");
+            return count;
+		}
+
+        std::vector<size_t> instances_candidates = {};
+        size_t index__ = 0;
+        for (auto& st_inst : data[from_ref]) {
+            if (st_inst.xtra.form_id == instance_formid) {
+                instances_candidates.push_back(index__);
+            }
+            index__++;
         }
 
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         if (bias_direction) {
             std::sort(instances_candidates.begin(), instances_candidates.end(),
-                      [curr_time](StageInstance* a, StageInstance* b) {
-                          return a->GetElapsed(curr_time) > b->GetElapsed(curr_time);  // move the older stuff
+                      [this, from_ref, curr_time](size_t a, size_t b) {
+                          return this->data[from_ref][a].GetElapsed(curr_time) >
+                                 this->data[from_ref][b].GetElapsed(curr_time);  // move the older stuff
                       });
         } 
         else {
-			std::sort(instances_candidates.begin(), instances_candidates.end(),
-					  [curr_time](StageInstance* a, StageInstance* b) {
-						  return a->GetElapsed(curr_time) < b->GetElapsed(curr_time);  // move the newer stuff
-					  });
+            std::sort(instances_candidates.begin(), instances_candidates.end(),
+                      [this, from_ref, curr_time](size_t a, size_t b) {
+                          return this->data[from_ref][a].GetElapsed(curr_time) <
+                                 this->data[from_ref][b].GetElapsed(curr_time);  // move the newer stuff
+                      });
 		}
 
         if (instances_candidates.empty()) {
@@ -904,27 +682,75 @@ struct Source {
             return 0;
         }
 
-        for (auto& instance : instances_candidates) {
+        std::vector<size_t> removed_indices;
+        for (size_t index: instances_candidates) {
             if (!count) break;
+            
+            StageInstance* instance = nullptr;
+            if (removed_indices.empty()) {
+                instance = &data[from_ref][index];
+            } else {
+                int shift = 0;
+                for (size_t removed_index : removed_indices) {
+                    if (index == removed_index) {
+                        logger::critical("Index is equal to removed index.");
+                        return count;
+                    }
+                    if (index > removed_index) shift++;
+                }
+                instance = &data[from_ref][index - shift];
+            }
+
             if (count <= instance->count) {
                 instance->count -= count;
                 StageInstance new_instance(*instance);
                 new_instance.count = count;
-                new_instance.location = to_ref;
-                if (!InsertNewInstance(new_instance)) {
+                if (!InsertNewInstance(new_instance, to_ref)) {
                     logger::error("InsertNewInstance failed.");
                     return 0;
                 }
                 count = 0;
                 //break;
             } else {
+                if (!MoveInstance(from_ref, to_ref, instance)) {
+					logger::error("MoveInstance failed.");
+                    return count;
+				}
                 count -= instance->count;
-                instance->location = to_ref;
+                removed_indices.push_back(index);
             }
         }
 
         return count;
 
+    }
+    
+    /*void RemoveTimeModulationFromWO(const RefID world_object) {
+        if (!world_object) {
+			logger::error("World object is null.");
+			return;
+		}
+		if (data.empty()) {
+			logger::warn("No data found for source {}", editorid);
+			return;
+		}
+		for (auto& instance : data) {
+			if (instance.location == world_object) {
+                if (instance.GetDelayMagnitude() == 1) break;
+                instance.SetDelay(RE::Calendar::GetSingleton()->GetHoursPassed(), 1,0);
+                break;
+            }
+		}
+    }*/
+    
+    [[nodiscard]] const bool IsTimeModulator(const FormID _form_id) const {
+        if (!_form_id) return false;
+        for (const auto& [_, instances] : data) {
+			for (const auto& instance : instances) {
+				if (instance.GetDelayerFormID() == _form_id) return true;
+			}
+		}
+        return false;
     }
 
     // always update before doing this
@@ -944,37 +770,18 @@ struct Source {
             logger::error("Inventory owner does not have a container.");
             return;
         }
-        
-        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
 
-        // get the instances inside this inventory
-        std::vector<StageInstance*> instances = {};
-        for (auto& instance : data) {
-			if (instance.location == inventory_owner_refid) instances.push_back(&instance);
+        if (data.count(inventory_owner_refid) == 0) {
+			logger::error("Inventory owner refid not found in data.");
+			return;
 		}
-        if (instances.empty()) {
+
+        if (data[inventory_owner_refid].empty()) {
             logger::trace("No instances found for inventory owner {} and source {}", inventory_owner_refid, editorid);
             return;
         }
 
-        const auto delayer_best = GetModulatorInInventory(inventory_owner);
-        if (!delayer_best) {
-			logger::trace("No delayer found in inventory.");
-			// need to remove if there is a delayer
-            for (auto& instance : instances) {
-				if (instance->xtra.is_decayed) continue;
-                if (instance->GetDelayMagnitude()==1) continue;
-                instance->SetDelay(curr_time, 1, 0);
-			}
-		} 
-		else {
-            const auto new_delay_mag = defaultsettings->delayers[delayer_best];
-            for (auto& instance : instances) {
-                if (instance->xtra.is_decayed) continue;
-                if (instance->GetDelayMagnitude() == new_delay_mag) continue;
-                instance->SetDelay(curr_time, new_delay_mag, delayer_best);
-            }
-        }
+        SetDelayOfInstances(inventory_owner_refid, curr_time, inventory_owner);
     }
 
     void CleanUpData() {
@@ -991,32 +798,44 @@ struct Source {
         // size before cleanup
         logger::trace("Size before cleanup: {}", data.size());
         // if there are instances with same stage no and location, and start_time, merge them
-        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
-        for (auto it = data.begin(); it != data.end(); ++it) {
-			for (auto it2 = it; it2 != data.end(); ++it2) {
-				if (it == it2) continue;
-                if (it2->count <= 0) continue;
-                if (it->AlmostSameExceptCount(*it2, curr_time)) {
-                    logger::trace("Merging stage instances with count {} and {}", it->count, it2->count);
-					it->count += it2->count;
-					it2->count = 0;
-				}
-			}
-		}
-		// erase instances with count <= 0
-		for (auto it = data.begin(); it != data.end();) {
-			if (it->count <= 0) {
-				logger::trace("Erasing stage instance with count {}", it->count);
-				it = data.erase(it);
-            } 
-            else if (!stages.count(it->no) || it->xtra.is_decayed) {
-				logger::trace("Erasing decayed stage instance with no {}", it->no);
-				it = data.erase(it);
+        
+        for (auto it = data.begin(); it != data.end();) {
+            if (it->second.empty()) {
+                logger::trace("Erasing key from data: {}", it->first);
+                it = data.erase(it);
+            } else {
+                ++it;
             }
-            else {
-				++it;
-			}
-		}
+        }
+
+        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+        for (auto& [_, instances] : data) {
+            for (auto it = instances.begin(); it != instances.end(); ++it) {
+                for (auto it2 = it; it2 != instances.end(); ++it2) {
+				    if (it == it2) continue;
+                    if (it2->count <= 0) continue;
+                    if (it->AlmostSameExceptCount(*it2, curr_time)) {
+                        logger::trace("Merging stage instances with count {} and {}", it->count, it2->count);
+					    it->count += it2->count;
+					    it2->count = 0;
+				    }
+			    }
+		    }
+		    // erase instances with count <= 0
+            for (auto it = instances.begin(); it != instances.end();) {
+			    if (it->count <= 0) {
+				    logger::trace("Erasing stage instance with count {}", it->count);
+                    it = instances.erase(it);
+                } 
+                else if (!stages.count(it->no) || it->xtra.is_decayed) {
+				    logger::trace("Erasing decayed stage instance with no {}", it->no);
+                    it = instances.erase(it);
+                }
+                else {
+				    ++it;
+			    }
+		    }
+        }
         
         if (!CheckIntegrity()) {
 			logger::critical("CheckIntegrity failed");
@@ -1028,9 +847,13 @@ struct Source {
 
     void PrintData() {
         logger::trace("Printing data for source {}", editorid);
-		for (auto& instance : data) {
-            logger::trace("No: {}, Location: {}, Count: {}, Start time: {}", instance.no, instance.location,
-                          instance.count, instance.start_time);
+		for (auto& [loc,instances] : data) {
+            logger::trace("Location: {}", loc);
+            for (auto& instance : instances) {
+                logger::trace("No: {}, Count: {}, Start time: {}", instance.no,
+                    //instance.location,
+                              instance.count, instance.start_time);
+            }
 		}
 	
     }
@@ -1244,18 +1067,30 @@ private:
         return 0;
     }
 
-    void SetDelayOfInstances(std::vector<StageInstance>& instances, const float curr_time,
+    void SetDelayOfInstances(const RefID loc, const float curr_time,
                              RE::TESObjectREFR* inventory_owner) {
-        if (instances.empty()) {
-			logger::warn("No instances found.");
+        if (!inventory_owner) {
+			logger::error("Inventory owner is null.");
 			return;
 		}
+        if (!data.count(loc)) {
+            logger::error("Location {} does not exist.", loc);
+            return;
+        }
         const auto delayer_best = GetModulatorInInventory(inventory_owner);
         const float __delay = delayer_best == 0 ? 1 : defaultsettings->delayers[delayer_best];
-        for (auto& instance : instances) {
+        for (auto& instance : data[loc]) {
             instance.SetDelay(curr_time, __delay, delayer_best);
         }
 	}
+
+    void SetDelayOfInstance(StageInstance& instance, const float curr_time,
+                             RE::TESObjectREFR* inventory_owner) {
+
+        const auto delayer_best = GetModulatorInInventory(inventory_owner);
+        const float __delay = delayer_best == 0 ? 1 : defaultsettings->delayers[delayer_best];
+        instance.SetDelay(curr_time, __delay, delayer_best);
+    }
         
     template <typename T>
     const FormID CreateFake(T* real) {
@@ -1299,15 +1134,15 @@ private:
 		}
         // stages must have keys [0,...,n-1]
         for (auto i = 0; i < stages.size(); i++) {
-            //if (!stages.count(i)) {
-            //    logger::error("Key {} not found in stages.", i);
-            //    return false;
-            //}
+            if (!stages.count(i)) {
+                logger::error("Key {} not found in stages.", i);
+                return false;
+            }
             // ayni formid olmicak
-            if (stages[i].formid == formid) {
+            /*if (stages[i].formid == formid) {
                 logger::error("Formid {} is the same as the source formid.", formid);
 				return false;
-            }
+            }*/
             if (!stages[i].CheckIntegrity()) {
 				logger::error("Stage {} integrity check failed.", i);
 				return false;

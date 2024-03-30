@@ -52,7 +52,9 @@ class Manager : public Utilities::SaveLoadData {
 	[[nodiscard]] const unsigned int GetNInstances() {
         unsigned int n = 0;
         for (auto& src : sources) {
-            n += static_cast<unsigned int>(src.data.size());
+            for (const auto& [loc, _] : src.data) {
+                n += static_cast<unsigned int>(src.data[loc].size());
+            }
         }
 		return n;
 	}
@@ -160,11 +162,17 @@ class Manager : public Utilities::SaveLoadData {
         }
         if (sources.empty()) return nullptr;
         for (auto& src : sources) {
-            for (auto& st_inst : src.data) {
-                if (st_inst.location == wo_refid) return &st_inst;
-            }
+            if (!src.data.contains(wo_refid)) continue;
+            auto& instances = src.data[wo_refid];
+            if (instances.size() == 1) return &instances[0];
+            else if (instances.empty()) {
+                logger::error("Stage instance found but empty.");
+            } 
+            else if (instances.size() > 1) {
+				logger::error("Multiple stage instances found.");
+			}
         }
-        RaiseMngrErr("Stage instance not found.");
+        logger::error("Stage instance not found.");
         return nullptr;
     }
 
@@ -180,8 +188,12 @@ class Manager : public Utilities::SaveLoadData {
         if (!wo_refid) return nullptr;
         if (sources.empty()) return nullptr;
         for (auto& src : sources) {
-            for (const auto& st_inst : src.data) {
-                if (st_inst.location == wo_refid) return &src;
+            if (src.data.contains(wo_refid) && !src.data[wo_refid].empty()) {
+                if (src.data[wo_refid].size() == 1) return &src;
+                else if (src.data[wo_refid].size() > 1) {
+                    RaiseMngrErr("Multiple stage instances found.");
+                    return nullptr;
+                }
             }
         }
         return nullptr;
@@ -248,17 +260,17 @@ class Manager : public Utilities::SaveLoadData {
         }
     }
 
-    [[maybe_unused]] void AlignRegistries(std::vector<RefID> locs) {
-        ENABLE_IF_NOT_UNINSTALLED
-        logger::trace("Aligning registries.");
-		for (auto& src : sources) {
-			for (auto& st_inst : src.data) {
-                if (!Utilities::Functions::Vector::VectorHasElement(locs,st_inst.location)) continue;
-                // POPULATE THIS
-                if (st_inst.location == player_refid) HandleConsume(st_inst.xtra.form_id);
-			}
-		}
-    }
+  //  [[maybe_unused]] void AlignRegistries(std::vector<RefID> locs) {
+  //      ENABLE_IF_NOT_UNINSTALLED
+  //      logger::trace("Aligning registries.");
+		//for (auto& src : sources) {
+		//	for (auto& st_inst : src.data) {
+  //              if (!Utilities::Functions::Vector::VectorHasElement(locs,st_inst.location)) continue;
+  //              // POPULATE THIS
+  //              if (st_inst.location == player_refid) HandleConsume(st_inst.xtra.form_id);
+		//	}
+		//}
+  //  }
 
     const RE::ObjectRefHandle RemoveItemReverse(RE::TESObjectREFR* moveFrom, RE::TESObjectREFR* moveTo, FormID item_id, Count count,
                                                 RE::ITEM_REMOVE_REASON reason) {
@@ -396,23 +408,25 @@ class Manager : public Utilities::SaveLoadData {
             return false;
         }
 
-        for (auto& update : updated_stages) {
-            if (!update.oldstage || !update.newstage || !update.count || !update.location) {
-                logger::error("_UpdateStages: Update is null.");
-                continue;
-            }
-            auto ref = ids_refs[update.location];
-            if (ref->HasContainer() || ref->IsPlayerRef()) {
-                ApplyEvolutionInInventory(ref, update.count, update.oldstage->formid, update.newstage->formid);
-            }
-            // WO
-            else if (worldobjectsevolve) {
-                logger::trace("_UpdateStages: ref out in the world.");
-                auto bound = src->IsFakeStage(update.newstage->no) ? src->GetBoundObject() : nullptr;
-                ApplyStageInWorld(ref, *update.newstage, bound);
-            } else {
-                logger::critical("_UpdateStages: Unknown ref type.");
-                return false;
+        for (auto& [loc,updates] : updated_stages) {
+            for (auto& update : updates) {
+                if (!update.oldstage || !update.newstage || !update.count) {
+                    logger::error("_UpdateStages: Update is null.");
+                    continue;
+                }
+                auto ref = ids_refs[loc];
+                if (ref->HasContainer() || ref->IsPlayerRef()) {
+                    ApplyEvolutionInInventory(ref, update.count, update.oldstage->formid, update.newstage->formid);
+                }
+                // WO
+                else if (worldobjectsevolve) {
+                    logger::trace("_UpdateStages: ref out in the world.");
+                    auto bound = src->IsFakeStage(update.newstage->no) ? src->GetBoundObject() : nullptr;
+                    ApplyStageInWorld(ref, *update.newstage, bound);
+                } else {
+                    logger::critical("_UpdateStages: Unknown ref type.");
+                    return false;
+                }
             }
         }
         src->CleanUpData();
@@ -593,10 +607,7 @@ public:
 			return false;
 		}
         for (auto& src : sources) {
-            for (auto& st_inst : src.data) {
-                //logger::trace("RefIsRegistered: Checking refid {} , st_inst.location {}", refid, st_inst.location);
-                if (st_inst.location == refid) return true;
-            }
+            if (src.data.contains(refid)) return true;
         }
         return false;
     }
@@ -705,7 +716,8 @@ public:
         if (!source) {
             logger::critical("HandleDrop: Source not found! Can be if it was never registered before.");
             return;
-        } else if (source->formid == dropped_formid && !IsStage(dropped_formid, source)) {
+        } 
+        else if (source->formid == dropped_formid && !IsStage(dropped_formid, source)) {
 			logger::warn("HandleDrop: Source same formid as dropped one! Can be bcs the item's evolution did not start yet or the stage item is the same as source item.");
 			return;
 		}
@@ -733,31 +745,50 @@ public:
         
         source->PrintData();
         // at the same stage but different start times
-        std::vector<StageInstance*> instances_candidates = {};
-        for (auto& st_inst : source->data) {
-            if (st_inst.location == player_refid && st_inst.xtra.form_id == dropped_formid)
-                instances_candidates.push_back(&st_inst);
-		}
+        std::vector<size_t> instances_candidates = {};
+        if (source->data.contains(player_refid)){
+            size_t index__ = 0;
+            for (auto& st_inst : source->data[player_refid]) {
+                if (st_inst.xtra.form_id == dropped_formid) {
+                    instances_candidates.push_back(index__);
+                }
+                index__++;
+		    }
+        }
         if (instances_candidates.empty()) {
 			logger::error("HandleDrop: No instances found. Can be when dropping not yet registered stage items.");
 			return;
 		}
         // need to now order the instances_candidates by their elapsed times
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
-        std::sort(instances_candidates.begin(), instances_candidates.end(),
-                  [curr_time](StageInstance* a, StageInstance* b) {
-            return a->GetElapsed(curr_time) > b->GetElapsed(curr_time);  // use up the old stuff first
+        std::sort(instances_candidates.begin(), instances_candidates.end(), 
+            [source,curr_time](size_t a, size_t b) {
+            return source->data[player_refid][a].GetElapsed(curr_time) >
+                   source->data[player_refid][b].GetElapsed(curr_time);  // use up the old stuff first
 		});
 
         logger::trace("HandleDrop: setting count");
         bool handled_first_stack = false;
-        for (auto* instance : instances_candidates) {
+        std::vector<size_t> removed_indices;
+        for (size_t index : instances_candidates) {
             
             if (!count) break;
-
+            StageInstance* instance = nullptr;
+            if (removed_indices.empty()) {
+                instance = &source->data[player_refid][index];
+            } 
+			else {
+                int shift = 0;
+				for (size_t removed_index: removed_indices) {
+                    if (index == removed_index) return RaiseMngrErr("HandleDrop: Index already removed.");
+                    if (index > removed_index) shift++;
+				}
+                instance = &source->data[player_refid][index - shift];
+			}
             instance->RemoveTimeMod(curr_time);
 
             if (count <= instance->count) {
+                
                 logger::trace("instance count: {} vs count {}", instance->count,count);
                 instance->count -= count;
                 logger::trace("instance count: {} vs count {}", instance->count,count);
@@ -771,8 +802,7 @@ public:
                         Utilities::FunctionsSkyrim::SetObjectCount(dropped_stage_ref, count);
                     }
                     //dropped_stage_ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
-                    new_instance.location = dropped_stage_ref->GetFormID();
-                    if (!source->InsertNewInstance(new_instance)) {
+                    if (!source->InsertNewInstance(new_instance, dropped_stage_ref->GetFormID())) {
                         return RaiseMngrErr("HandleDrop: InsertNewInstance failed.");
                     }
                     auto bound = new_instance.xtra.is_fake ? source->GetBoundObject() : nullptr;
@@ -787,8 +817,7 @@ public:
                     if (new_ref->extraList.GetCount() != count) {
 						logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), count);
 					}
-                    new_instance.location = new_ref->GetFormID();
-                    if (!source->InsertNewInstance(new_instance)) {
+                    if (!source->InsertNewInstance(new_instance, new_ref->GetFormID())) {
                         return RaiseMngrErr("HandleDrop: InsertNewInstance failed.");
                     }
                     if (new_instance.xtra.is_fake) _ApplyStageInWorld_Fake(new_ref, source->stages[new_instance.no].GetExtraText());
@@ -797,16 +826,22 @@ public:
                 /*break;*/
             } 
             else {
+
                 logger::trace("instance count: {} vs count {}", instance->count,count);
                 count -= instance->count;
                 logger::trace("instance count: {} vs count {}", instance->count,count);
+                
+                removed_indices.push_back(index);
+
                 if (!handled_first_stack) {
                     logger::trace("SADSJFHOADF 3");
                     if (Utilities::FunctionsSkyrim::GetObjectCount(dropped_stage_ref) != static_cast<int16_t>(count)) {
                         Utilities::FunctionsSkyrim::SetObjectCount(dropped_stage_ref, instance->count);
                     }
                     //dropped_stage_ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
-                    instance->location = dropped_stage_ref->GetFormID();
+                    if (!source->MoveInstance(player_refid, dropped_stage_ref->GetFormID(), instance)) {
+                        return RaiseMngrErr("HandleDrop: MoveInstance failed.");
+                    }
                     auto bound = instance->xtra.is_fake ? source->GetBoundObject() : nullptr;
                     ApplyStageInWorld(dropped_stage_ref, source->stages[instance->no], bound);
                     handled_first_stack = true;
@@ -820,7 +855,9 @@ public:
                     if (new_ref->extraList.GetCount() != instance->count) {
                         logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), instance->count);
                     }
-                    instance->location = new_ref->GetFormID();
+                    if (!source->MoveInstance(player_refid, new_ref->GetFormID(), instance)) {
+						return RaiseMngrErr("HandleDrop: MoveInstance failed.");
+					}
                     if (instance->xtra.is_fake) _ApplyStageInWorld_Fake(new_ref, source->stages[instance->no].GetExtraText());
                 }
             }
@@ -864,7 +901,7 @@ public:
         if (!source) return RaiseMngrErr("HandlePickUp: Source not found.");
         auto st_inst = GetWOStageInstance(wo_refid);
         if (!st_inst) return RaiseMngrErr("HandlePickUp: Source not found.");
-        st_inst->location = npc_refid;
+        if (!source->MoveInstance(wo_refid, npc_refid, st_inst)) return RaiseMngrErr("HandlePickUp: MoveInstance failed.");
         if (st_inst->xtra.is_fake) {
             if (pickedup_formid != source->formid) logger::warn("HandlePickUp: Not the same formid as source formid. OK if NPC picked up.");
             ApplyEvolutionInInventory(npc_ref, count, pickedup_formid, st_inst->xtra.form_id);
@@ -899,8 +936,8 @@ public:
 
         int total_registered_count = 0;
         std::vector<StageInstance*> instances_candidates = {};
-        for (auto& st_inst : source->data) {
-            if (st_inst.xtra.form_id == stage_formid && st_inst.location == player_refid) {
+        for (auto& st_inst : source->data[player_refid]) {
+            if (st_inst.xtra.form_id == stage_formid) {
                 total_registered_count += st_inst.count;
                 instances_candidates.push_back(&st_inst);
             }
@@ -1000,8 +1037,9 @@ public:
             // just to align reality and registries:
             logger::info("HandleCraftingEnter: Just to align reality and registries");
             //AlignRegistries({player_refid});
-            for (auto& st_inst : src.data) {
-                if (!st_inst.xtra.crafting_allowed || st_inst.location != player_refid) continue;
+            if (!src.data.contains(player_refid)) continue;
+            for (auto& st_inst : src.data[player_refid]) {
+                if (!st_inst.xtra.crafting_allowed) continue;
                 const auto stage_formid = st_inst.xtra.form_id;
                 const FormFormID temp = {src.formid, stage_formid}; // formid1: source formid, formid2: stage formid
                 if (!handle_crafting_instances.contains(temp)) {
@@ -1106,9 +1144,7 @@ public:
         const auto src = GetSource(stage_formid);
         if (!src) return false;
         if (src->formid==stage_formid && !IsStage(stage_formid,src)) return false;
-        for (const auto& st_inst : src->data) {
-            if (st_inst.location == refid) return true;
-        }
+        if (src->data.contains(refid)) return true;
         return false;
     }
 
@@ -1118,9 +1154,7 @@ public:
         if (!external_ref->HasContainer()) return false;
         const auto external_refid = external_ref->GetFormID();
         for (const auto& src : sources) {
-			for (const auto& st_inst : src.data) {
-                if (st_inst.location == external_refid) return true;
-			}
+			if (src.data.contains(external_refid)) return true;
 		}
         return false;
     }

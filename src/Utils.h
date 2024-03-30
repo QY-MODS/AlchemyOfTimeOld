@@ -988,19 +988,39 @@ namespace Utilities{
         using Stages = std::vector<Stage>;
         using StageDict = std::map<StageNo, Stage>;
 
+        struct StageInstancePlain{
+            float start_time;
+            StageNo no;
+            Count count;
+            
+            float _elapsed;
+            float _delay_start;
+            float _delay_mag;
+            FormID _delay_formid;
+
+            bool is_fake = false;
+            bool is_decayed = false;
+            bool crafting_allowed = false;
+
+            bool is_favorited = false; // used only when loading and saving
+		};
+
+
         struct StageInstance {
             float start_time; // start time of the stage
             StageNo no;
             Count count;
-            RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is
+            //RefID location;  // RefID of the container where the fake food is stored or the real food itself when it is
                              // out in the world
             FormEditorIDX xtra;
 
             //StageInstance() : start_time(0), no(0), count(0), location(0) {}
-            StageInstance(float st, StageNo n, Count c, RefID l
+            StageInstance(const float st, const StageNo n, const Count c
+                //, RefID l
                 //,std::string ei
             )
-                : start_time(st), no(n), count(c), location(l)
+                : start_time(st), no(n), count(c)
+                //, location(l)
                 //,editorid(ei) 
             {
                 _elapsed = 0;
@@ -1010,8 +1030,10 @@ namespace Utilities{
             }
         
             //define ==
-            bool operator==(const StageInstance& other) const {
-                return no == other.no && count == other.count && location == other.location &&
+            // assumes that they are in the same inventory
+			[[nodiscard]] bool operator==(const StageInstance& other) const {
+                return no == other.no && count == other.count && 
+                    //location == other.location &&
                        start_time == other.start_time && 
                     _elapsed == other._elapsed && xtra == other.xtra;
 			}
@@ -1022,10 +1044,12 @@ namespace Utilities{
 			//}
 
             // times are very close (abs diff less than 0.015h = 0.9min)
-            bool AlmostSameExceptCount(StageInstance& other,const float curr_time) const {
+            // assumes that they are in the same inventory
+			[[nodiscard]] bool AlmostSameExceptCount(StageInstance& other,const float curr_time) const {
                 // bcs they are in the same inventory they will have same delay magnitude
                 // delay starts might be different but if the elapsed times are close enough, we don't care
-                return no == other.no && location == other.location &&
+                return no == other.no && 
+                    //location == other.location &&
                        std::abs(start_time - other.start_time) < 0.015 &&
                        std::abs(GetElapsed(curr_time) - other.GetElapsed(curr_time)) < 0.015 && xtra == other.xtra;
             }
@@ -1036,7 +1060,7 @@ namespace Utilities{
                     start_time = other.start_time;
                     no = other.no;
                     count = other.count;
-                    location = other.location;
+                    //location = other.location;
                     
                     xtra = other.xtra;
 
@@ -1096,6 +1120,25 @@ namespace Utilities{
                 return (schranke - _elapsed) / (GetDelaySlope() + std::numeric_limits<float>::epsilon());
 			}
 
+            StageInstancePlain GetPlain() const {
+                StageInstancePlain plain;
+                plain.start_time = start_time;
+                plain.no = no;
+                plain.count = count;
+
+                plain.is_fake = xtra.is_fake;
+                plain.is_decayed = xtra.is_decayed;
+                plain.crafting_allowed = xtra.crafting_allowed;
+				//plain.is_favorited = xtra.is_favorited;
+
+                plain._elapsed = _elapsed;
+                plain._delay_start = _delay_start;
+                plain._delay_mag = _delay_mag;
+                plain._delay_formid = _delay_formid;
+                
+                return plain;
+            }
+
         private:
             float _elapsed; // y coord of the ausgangspunkt/elapsed time since the stage started
             float _delay_start;  // x coord of the ausgangspunkt
@@ -1108,16 +1151,20 @@ namespace Utilities{
             Stage* oldstage=nullptr;
             Stage* newstage=nullptr;
             Count count=0;
-            RefID location=0;
+            //RefID location=0;
             bool new_is_fake=false;
 
-            StageUpdate(Stage* old, Stage* new_, Count c, RefID l, bool fake)
-				: oldstage(old), newstage(new_), count(c), location(l), new_is_fake(fake) {}
+            StageUpdate(Stage* old, Stage* new_, Count c, 
+                //RefID l,
+                bool fake)
+				: oldstage(old), newstage(new_), count(c), 
+                //location(l), 
+                new_is_fake(fake) {}
         };
 
 
 
-        using SourceData = std::vector<StageInstance>;
+        using SourceData = std::map<RefID,std::vector<StageInstance>>;
         using SaveDataLHS = FormEditorID;
         using SaveDataRHS = SourceData;
     }
