@@ -21,7 +21,6 @@ namespace Settings
                                                         {"POSN",false},
                                                         {"ARMO",false},
 														{"WEAP",false},
-														{"AMMO",false},
 														{"SCRL",false},
 														{"BOOK",false},
 														{"SLGM",false},
@@ -126,6 +125,8 @@ namespace Settings
     const std::vector<std::string> xQFORMS = {"ARMO", "WEAP", "SLGM", "MEDC", "POSN"};  // xdata is carried over in item transitions
     
     const std::vector<std::string> fakes_allowedQFORMS = {"FOOD", "MISC"};
+    const std::vector<std::string> consumableQFORMS = {"FOOD", "INGR", "MEDC", "POSN", "SCRL", "BOOK", "SLGM", "MISC"};
+    const std::vector<std::string> updateonequipQFORMS = {"ARMO", "WEAP"};
     const std::vector<std::string> mgeffs_allowedQFORMS = {"FOOD"};
 
     const std::map<unsigned int, std::vector<std::string>> qform_bench_map = {
@@ -150,7 +151,7 @@ namespace Settings
     }
 
     void LoadINISettings() {
-        logger::info("Loading ini settings: OtherStuff");
+        logger::info("Loading ini settings");
 
 
         CSimpleIniA ini;
@@ -176,12 +177,12 @@ namespace Settings
 				}
             }
 		}
-
-        if (!ini.GetLongValue("Other Settings", "nMaxInstancesInThousands", 200)) {
-			ini.SetLongValue("Other Settings", "nMaxInstancesInThousands", 200);
+        if (!ini.KeyExists("Other Settings", "nMaxInstancesInThousands")) {
+            ini.SetLongValue("Other Settings", "nMaxInstancesInThousands", 200);
             nMaxInstances = 200000;
-        } else
-            nMaxInstances = 1000 * ini.GetLongValue("Other Settings", "nMaxInstancesInThousands", 200);
+        } else nMaxInstances = 1000 * ini.GetLongValue("Other Settings", "nMaxInstancesInThousands", 200);
+
+        nMaxInstances = std::min(nMaxInstances, 2000000);
 
 		ini.SaveFile(INI_path);
     }
@@ -197,8 +198,6 @@ namespace Settings
             return Utilities::FunctionsSkyrim::FormIsOfType(formid,RE::TESObjectARMO::FORMTYPE);
         else if (qformtype == "WEAP")
 			return Utilities::FunctionsSkyrim::FormIsOfType(formid,RE::TESObjectWEAP::FORMTYPE);
-        else if (qformtype == "AMMO")
-            return Utilities::FunctionsSkyrim::FormIsOfType(formid, RE::TESAmmo::FORMTYPE);
         else if (qformtype == "SCRL")
             return Utilities::FunctionsSkyrim::FormIsOfType(formid, RE::ScrollItem::FORMTYPE);
 		else if (qformtype == "BOOK")
@@ -552,7 +551,6 @@ struct Source {
 			else if (qFormType == "POSN") GatherStages<RE::AlchemyItem>();
 			else if (qFormType == "ARMO") GatherStages<RE::TESObjectARMO>();
 			else if (qFormType == "WEAP") GatherStages<RE::TESObjectWEAP>();
-			else if (qFormType == "AMMO") GatherStages<RE::TESAmmo>();
 			else if (qFormType == "SCRL") GatherStages<RE::ScrollItem>();
 			else if (qFormType == "BOOK") GatherStages<RE::TESObjectBOOK>();
 			else if (qFormType == "SLGM") GatherStages<RE::TESSoulGem>();
@@ -935,6 +933,7 @@ struct Source {
 
     // always update before doing this
     void UpdateTimeModulationInInventory(RE::TESObjectREFR* inventory_owner, const float _time) {
+        logger::trace("Updating time modulation in inventory.");
         if (!inventory_owner) {
             logger::error("Inventory owner is null.");
             return;

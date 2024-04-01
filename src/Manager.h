@@ -26,6 +26,7 @@ class Manager : public Utilities::SaveLoadData {
     // 0x0003eb42 damage health
 
     bool listen_activate = true;
+    bool listen_equip = true;
     bool listen_crosshair = true;
     bool listen_container_change = true;
     bool listen_menuopenclose = true;
@@ -224,6 +225,17 @@ class Manager : public Utilities::SaveLoadData {
         }
         else AddItem(inventory_owner, nullptr, new_item, update_count);*/
         if (entry == inventory.end()) logger::error("Item not found in inventory.");
+        // check if it is hotkeyed
+        /*bool is_hotkeyed = false;
+        std::uint8_t hotkey;
+        if (entry->second.second && entry->second.second->extraLists && !entry->second.second->extraLists->empty()) {
+			if (entry->second.second->extraLists->front()) {
+                if (entry->second.second->extraLists->front()->HasType<RE::ExtraHotkey>()) {
+					is_hotkeyed = true;
+                    hotkey = entry->second.second->extraLists->front()->GetByType<RE::ExtraHotkey>()->hotkey.underlying();
+				}
+			}
+		}*/
         else {
             RemoveItemReverse(inventory_owner, nullptr, old_item, std::min(update_count, entry->second.first),
                               RE::ITEM_REMOVE_REASON::kRemove);
@@ -300,12 +312,20 @@ class Manager : public Utilities::SaveLoadData {
 		}
         if (Utilities::Functions::Vector::HasElement<std::string>(Settings::xQFORMS, _qformtype_)) {
 			_ApplyEvolutionInInventoryX(inventory_owner, update_count, old_item, new_item);
-		} else _ApplyEvolutionInInventory(inventory_owner, update_count, old_item, new_item);
+        } 
+        else if (is_faved || is_equipped) {
+            _ApplyEvolutionInInventoryX(inventory_owner, update_count, old_item, new_item);
+        }
+        else _ApplyEvolutionInInventory(inventory_owner, update_count, old_item, new_item);
 
         if (is_faved) Utilities::FunctionsSkyrim::Inventory::FavoriteItem(
 			RE::TESForm::LookupByID<RE::TESBoundObject>(new_item), inventory_owner);
-		if (is_equipped) Utilities::FunctionsSkyrim::Inventory::EquipItem(
-			RE::TESForm::LookupByID<RE::TESBoundObject>(new_item));
+        if (is_equipped) {
+            setListenEquip(false);
+            Utilities::FunctionsSkyrim::Inventory::EquipItem(
+			    RE::TESForm::LookupByID<RE::TESBoundObject>(new_item));
+            setListenEquip(true);
+        }
     }
 
     void _ApplyStageInWorld_Fake(RE::TESObjectREFR* wo_ref, const char* xname) {
@@ -457,7 +477,6 @@ class Manager : public Utilities::SaveLoadData {
     }
     
     // TAMAM
-    // _UpdateTimeModulators ve UpdateStages kullaniyo
     bool _UpdateStagesInSource(std::vector<RE::TESObjectREFR*> refs, Source* src, const float curr_time) {
         if (!src) {
             RaiseMngrErr("_UpdateStages: Source is null.");
@@ -515,6 +534,8 @@ class Manager : public Utilities::SaveLoadData {
         return true;
     }
 
+    // a ref can have multiple sources
+    // _UpdateTimeModulators ve UpdateStages kullaniyo
     bool _UpdateStagesOfRef(RE::TESObjectREFR* ref, const float _time, bool is_inventory, bool cleanup = true) {
         if (!ref) {
 			RaiseMngrErr("_UpdateStagesOfRef: Ref is null.");
@@ -527,9 +548,9 @@ class Manager : public Utilities::SaveLoadData {
             if (src.data[refid].empty()) continue;
             auto* src_ptr = &src;
             const bool temp_update_took_place = _UpdateStagesInSource({ref}, src_ptr, _time);
-            if (temp_update_took_place && cleanup) src.CleanUpData();
             // consider merginf this with the regular stage update
             if (is_inventory) src_ptr->UpdateTimeModulationInInventory(ref, _time);
+            if (temp_update_took_place && cleanup) src.CleanUpData();
             if (!update_took_place) update_took_place = temp_update_took_place;
         }
         return update_took_place;
@@ -670,6 +691,11 @@ class Manager : public Utilities::SaveLoadData {
         listen_activate = value;
     }
 
+    void setListenEquip(const bool value) {
+		std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+		listen_equip = value;
+	}
+
     void setListenContainerChange(const bool value) {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         listen_container_change = value;
@@ -714,6 +740,11 @@ public:
     [[nodiscard]] bool getListenMenuOpenClose() {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         return listen_menuopenclose;
+    }
+
+    [[nodiscard]] bool getListenEquip() {
+        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        return listen_equip;
     }
 
     [[nodiscard]] bool getListenActivate() {
@@ -896,11 +927,18 @@ public:
 			return;
 		}
         
-        // count muhabbetleri... ay ay ay (bisey yapmiyorum bu ikisinde an itibariyle)
+        source->PrintData();
+        // print radius just for testing
+        logger::info("Radius: {}", Utilities::FunctionsSkyrim::WorldObject::GetDistanceFromPlayer(dropped_stage_ref));
+
+        // count ve hotkey consume muhabbetleri... ay ay ay (bisey yapmiyorum bu ikisinde an itibariyle)
         if (RefIsRegistered(dropped_stage_ref->GetFormID())){
             // eventsink bazen bugliyodu ayni refe gosteriyodu countlar split olunca
             // ama extrayi attiimdan beri olmuyodu
-            logger::warn("Ref is registered at HandleDrop!");
+            logger::warn("Ref is registered at HandleDrop! Deregistering...");
+            auto& st_inst = source->data[dropped_stage_ref->GetFormID()];
+            for (auto& inst : st_inst) inst.count = 0;
+            HandleConsume(dropped_formid);
             /*const auto curr_count = dropped_stage_ref->extraList.GetCount();
             Utilities::FunctionsSkyrim::WorldObject::SetObjectCount(dropped_stage_ref, count + curr_count);*/
             return;
@@ -921,7 +959,6 @@ public:
             return;
 		}
         
-        source->PrintData();
         // at the same stage but different start times
         std::vector<size_t> instances_candidates = {};
         if (source->data.contains(player_refid)){
@@ -1253,6 +1290,11 @@ public:
             for (auto& st_inst : src.data[player_refid]) {
                 if (!st_inst.xtra.crafting_allowed) continue;
                 const auto stage_formid = st_inst.xtra.form_id;
+                if (!stage_formid) {
+                	logger::error("HandleCraftingEnter: Stage formid is null!!!");
+					continue;
+                }
+                if (stage_formid == src.formid) continue;
                 const FormFormID temp = {src.formid, stage_formid}; // formid1: source formid, formid2: stage formid
                 if (!handle_crafting_instances.contains(temp)) {
                     const auto stage_bound = st_inst.GetBound();
@@ -1290,6 +1332,9 @@ public:
     void HandleCraftingExit() {
         ENABLE_IF_NOT_UNINSTALLED
         logger::trace("HandleCraftingExit");
+
+        //setListenMenuOpenClose(false);
+        //Utilities::FunctionsSkyrim::Menu::RefreshMenuReverse(RE::InventoryMenu::MENU_NAME);
 
         if (handle_crafting_instances.empty()) {
 			logger::warn("HandleCraftingExit: No instances found.");
@@ -1331,6 +1376,8 @@ public:
         handle_crafting_instances.clear();
         faves_list.clear();
         equipped_list.clear();
+
+        //setListenMenuOpenClose(true);
 
     }
 
@@ -1481,6 +1528,7 @@ public:
         // need to handle queued_time_modulator_updates
         // order them by GetRemainingTime method of QueuedTModUpdate
         const bool temp_update_took_place = _UpdateStagesOfRef(ref, curr_time, is_inventory);
+        logger::trace("UpdateStages: temp_update_took_place: {}", temp_update_took_place);
         if (!update_took_place) update_took_place = temp_update_took_place;
         if (!update_took_place) logger::trace("No update1");
 

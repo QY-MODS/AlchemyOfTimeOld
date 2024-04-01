@@ -291,6 +291,12 @@ namespace Utilities{
 
         bool isValidHexWithLength7or8(const char* input) {
             std::string inputStr(input);
+
+            if (inputStr.substr(0, 2) == "0x") {
+                // Remove "0x" from the beginning of the string
+                inputStr = inputStr.substr(2);
+            }
+
             std::regex hexRegex("^[0-9A-Fa-f]{7,8}$");  // Allow 7 to 8 characters
             bool isValid = std::regex_match(inputStr, hexRegex);
             return isValid;
@@ -607,48 +613,7 @@ namespace Utilities{
             
         }
 
-        RE::TESObjectREFR* TryToGetRefInCell(const FormID baseid, const Count count, unsigned int max_try=3) {
-            auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
-            auto cell_runtime_data = player_cell->GetRuntimeData();
-            for (auto& ref : cell_runtime_data.references) {
-                if (!ref) continue;
-                if (ref->GetBaseObject()->GetFormID() == baseid &&
-                    ref->extraList.GetCount() == count) {
-                    logger::info("Ref found in cell: {}", ref->GetBaseObject()->GetName());
-                    return ref.get();
-                }
-            }
-            if (max_try) return TryToGetRefInCell(baseid, count, --max_try);
-            return nullptr;
-        }
-
-        RE::TESObjectREFR* TryToGetRefFromHandle(RE::ObjectRefHandle& handle, unsigned int max_try = 3) {
-            if (auto handle_ref = RE::TESObjectREFR::LookupByHandle(handle.native_handle())) {
-                logger::trace("Handle ref found");
-                return handle_ref.get();
-                //if (!ref && handle.get()) ref = handle.get().get();
-            }
-            else if (handle.get()) {
-                logger::warn("Handle native handle is null");
-                return handle.get().get();
-            } 
-            else if (auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(handle.native_handle()))
-            {
-                logger::trace("Ref found");
-                return ref;
-            }
-            if (max_try && handle) return TryToGetRefFromHandle(handle, --max_try);
-            return nullptr;
-		}
-
-        const RefID TryToGetRefIDFromHandle(RE::ObjectRefHandle handle) {
-            if (handle.get() && handle.get()->GetFormID()) return handle.get()->GetFormID();
-            if (handle.native_handle()
-                //&& RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(handle.native_handle())
-                ) return handle.native_handle();
-            return 0;
-        }
-
+        
         const bool FormExists(const FormID formid, std::string editorid = "") {
 			if (GetFormByID(formid,editorid)) return true;
 			return false;
@@ -662,6 +627,14 @@ namespace Utilities{
                 if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
                     queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kHide, nullptr);
                     queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kShow, nullptr);
+                }
+            }
+
+            void RefreshMenuReverse(const std::string_view menuname) {
+                if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
+                    logger::trace("Refreshing menu in reverse");
+                    queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kShow, nullptr);
+                    queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kHide, nullptr);
                 }
             }
 
@@ -775,7 +748,7 @@ namespace Utilities{
                         logger::trace("asdasd");
                         if (no_extra_) {
                             logger::trace("No extraLists");
-                            inventory_changes->SetFavorite((*it), nullptr);
+                            //inventory_changes->SetFavorite((*it), nullptr);
                         } else {
                             logger::trace("ExtraLists found");
                             inventory_changes->SetFavorite((*it), xLists->front());
@@ -862,6 +835,10 @@ namespace Utilities{
                 for (auto it = entries->begin(); it != entries->end(); ++it) {
                     auto formid = (*it)->object->GetFormID();
                     if (formid == item->GetFormID()) {
+                        if (!(*it) || !(*it)->extraLists) {
+							logger::error("Item extraLists is null");
+							return;
+						}
                         if (unequip) {
                             if ((*it)->extraLists->empty()) {
                                 RE::ActorEquipManager::GetSingleton()->UnequipObject(
@@ -894,6 +871,85 @@ namespace Utilities{
         };
 
         namespace WorldObject {
+
+            RE::TESObjectREFR* TryToGetRefInCell(const FormID baseid, const Count count, float radius = 180,
+                                                 unsigned int max_try = 2) {
+                auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
+                auto cell_runtime_data = player_cell->GetRuntimeData();
+                for (auto& ref : cell_runtime_data.references) {
+                    if (!ref) continue;
+                    /*if (ref->IsDisabled()) continue;
+                    if (ref->IsMarkedForDeletion()) continue;
+                    if (ref->IsDeleted()) continue;*/
+                    if (ref->GetBaseObject()->GetFormID() == baseid && ref->extraList.GetCount() == count) {
+                        logger::info("Ref found in cell: {} with id {}", ref->GetBaseObject()->GetName(),
+                                     ref->GetFormID());
+                        // get radius and check if ref is in radius
+                        if (ref->GetFormID() < 4278190080) {
+                            logger::trace("Ref is a placed reference. Continuing search.");
+                            continue;
+                        }
+                        if (radius) {
+                            auto player_pos = RE::PlayerCharacter::GetSingleton()->GetPosition();
+                            auto ref_pos = ref->GetPosition();
+                            if (player_pos.GetDistance(ref_pos) < radius)
+                                return ref.get();
+                            else
+                                logger::trace("Ref is not in radius");
+                        } else
+                            return ref.get();
+                    }
+                }
+                if (max_try) return TryToGetRefInCell(baseid, count, radius, --max_try);
+                return nullptr;
+            }
+
+            RE::TESObjectREFR* TryToGetRefFromHandle(RE::ObjectRefHandle& handle, unsigned int max_try = 2) {
+                RE::TESObjectREFR* ref = nullptr;
+                if (auto handle_ref = RE::TESObjectREFR::LookupByHandle(handle.native_handle())) {
+                    logger::trace("Handle ref found");
+                    ref = handle_ref.get();
+                    return ref;
+                    /*if (!ref->IsDisabled() && !ref->IsMarkedForDeletion() && !ref->IsDeleted()) {
+                        return ref;
+                    }*/
+                }
+                if (handle.get()) {
+                    ref = handle.get().get();
+                    return ref;
+                    /*if (!ref->IsDisabled() && !ref->IsMarkedForDeletion() && !ref->IsDeleted()) {
+                        return ref;
+                    }*/
+                }
+                if (auto ref_ = RE::TESForm::LookupByID<RE::TESObjectREFR>(handle.native_handle())) {
+                    return ref_;
+                    /*if (!ref_->IsDisabled() && !ref_->IsMarkedForDeletion() && !ref_->IsDeleted()) {
+                        return ref_;
+                    }*/
+                }
+                if (max_try && handle) return TryToGetRefFromHandle(handle, --max_try);
+                return nullptr;
+            }
+
+            const RefID TryToGetRefIDFromHandle(RE::ObjectRefHandle handle) {
+                if (handle.get() && handle.get()->GetFormID()) return handle.get()->GetFormID();
+                if (handle.native_handle()
+                    //&& RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(handle.native_handle())
+                )
+                    return handle.native_handle();
+                return 0;
+            }
+
+            float GetDistanceFromPlayer(RE::TESObjectREFR* ref) {
+				if (!ref) {
+					logger::error("Ref is null.");
+					return 0;
+				}
+				auto player_pos = RE::PlayerCharacter::GetSingleton()->GetPosition();
+				auto ref_pos = ref->GetPosition();
+				return player_pos.GetDistance(ref_pos);
+			}
+
             void SetObjectCount(RE::TESObjectREFR* ref, Count count) {
                 if (!ref) {
                     logger::error("Ref is null.");
@@ -1632,8 +1688,6 @@ namespace Utilities{
             bool is_decayed = false;
             bool crafting_allowed = false;
 
-            bool is_favorited = false; // used only when loading and saving
-
             bool operator==(const FormEditorIDX& other) const {
 				return form_id == other.form_id;
 			}
@@ -1723,9 +1777,6 @@ namespace Utilities{
 
             bool is_fake = false;
             bool is_decayed = false;
-            bool crafting_allowed = false;
-
-            bool is_favorited = false; // used only when loading and saving
 		};
 
         struct StageInstance {
@@ -1762,8 +1813,6 @@ namespace Utilities{
             	
                 xtra.is_fake = plain.is_fake;
                 xtra.is_decayed = plain.is_decayed;
-                xtra.crafting_allowed = plain.crafting_allowed;
-                xtra.is_favorited = plain.is_favorited;
             }
 
 
@@ -1865,8 +1914,6 @@ namespace Utilities{
 
                 plain.is_fake = xtra.is_fake;
                 plain.is_decayed = xtra.is_decayed;
-                plain.crafting_allowed = xtra.crafting_allowed;
-				//plain.is_favorited = xtra.is_favorited;
 
                 plain._elapsed = _elapsed;
                 plain._delay_start = _delay_start;

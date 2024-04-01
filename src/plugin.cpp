@@ -7,7 +7,11 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
                      public RE::BSTEventSink<SKSE::CrosshairRefEvent>,
                      public RE::BSTEventSink<RE::MenuOpenCloseEvent>,
                      public RE::BSTEventSink<RE::TESFurnitureEvent>,
-                     public RE::BSTEventSink<RE::TESContainerChangedEvent> {
+                     public RE::BSTEventSink<RE::TESContainerChangedEvent>,
+                     public RE::BSTEventSink<RE::InputEvent*>,
+                     public RE::BSTEventSink<RE::TESSleepStopEvent>,
+                     public RE::BSTEventSink<RE::TESWaitStopEvent>
+{
 
     OurEventSink() = default;
     OurEventSink(const OurEventSink&) = delete;
@@ -20,7 +24,8 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
 
     bool listen_menu = true;
 
-    FormID fake_equipped_id;  // set in equip event only when equipped and used in container event (consume)
+    FormID consume_equipped_id;  // set in equip event only when equipped and used in container event (consume)
+    float consume_equipped_t;
     RefID picked_up_refid;
     float picked_up_time;
     bool activate_eat = false;
@@ -28,10 +33,22 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
 
     RE::NiPointer<RE::TESObjectREFR> furniture = nullptr;
 
+    std::mutex mutex;
+
+    void setListenMenu(bool val) { 
+        std::lock_guard<std::mutex> lock(mutex);
+        listen_menu = val; 
+    }
+
+    [[nodiscard]] bool getListenMenu() { 
+		std::lock_guard<std::mutex> lock(mutex);
+		return listen_menu; 
+	}
+
     void RefreshMenu(const char* menuname) { 
-        listen_menu = false;
+        setListenMenu(false);
         Utilities::FunctionsSkyrim::Menu::RefreshMenu(menuname);
-        listen_menu = true;
+        setListenMenu(true);
 	}
 
 public:
@@ -42,16 +59,29 @@ public:
 
 
     RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* event, RE::BSTEventSource<RE::TESEquipEvent>*) {
+         if (!M->getListenEquip()) return RE::BSEventNotifyControl::kContinue;
          if (!event) return RE::BSEventNotifyControl::kContinue;
          if (!event->actor->IsPlayerRef()) return RE::BSEventNotifyControl::kContinue;
          if (!Settings::IsItem(event->baseObject)) return RE::BSEventNotifyControl::kContinue;
-         // only for tracking consumed items
-         if (Settings::GetQFormType(event->baseObject) == "FOOD") {
-             fake_equipped_id = event->equipped ? event->baseObject : 0;
-             logger::trace("Fake equipped: {}", fake_equipped_id);
+         
+         if (!event->equipped) {
+            logger::trace("Item unequipped: {}", event->baseObject);
+			 return RE::BSEventNotifyControl::kContinue;
          }
 
-         M->UpdateStages(player_refid);
+         const auto q_formtype = Settings::GetQFormType(event->baseObject);
+         logger::trace("equipped QFormType: {}", q_formtype);
+         // only for tracking consumed items
+         if (Utilities::Functions::Vector::HasElement<std::string>(Settings::consumableQFORMS, q_formtype)) {
+             consume_equipped_id = event->baseObject;
+             logger::trace("consume equipped: {}", consume_equipped_id);
+             consume_equipped_t = RE::Calendar::GetSingleton()->GetHoursPassed();
+             logger::trace("consume equipped time: {}", consume_equipped_t);
+         }
+         if (Utilities::Functions::Vector::HasElement<std::string>(Settings::updateonequipQFORMS, q_formtype)) {
+            logger::trace("Item equipped: {}", event->baseObject);
+            M->UpdateStages(player_refid);
+         }
 
         
         // if (event->equipped) {
@@ -133,8 +163,13 @@ public:
         if (!M->RefIsRegistered(event->crosshairRef->GetFormID())) {
             logger::trace("Item not registered.");
             M->RegisterAndGo(event->crosshairRef.get());
+        } else {
+            logger::trace("Item registered.");
+            M->UpdateStages(event->crosshairRef.get());
+            /*logger::trace("Refreshing menu.");
+            Utilities::FunctionsSkyrim::Menu::RefreshMenu(RE::InventoryMenu::MENU_NAME);
+            logger::trace("Refreshed menu.");*/
         }
-        else M->UpdateStages(event->crosshairRef.get());
         
         return RE::BSEventNotifyControl::kContinue;
     }
@@ -245,7 +280,8 @@ public:
 
         if (Settings::IsItem(event->baseObj)){
             if (event->oldContainer != player_refid && event->newContainer != player_refid && event->reference &&
-                M->RefIsRegistered(Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(event->reference)) && event->newContainer) {
+                M->RefIsRegistered(Utilities::FunctionsSkyrim::WorldObject::TryToGetRefIDFromHandle(event->reference)) &&
+                event->newContainer) {
                 auto external_ref = RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->newContainer);
                 if (external_ref && external_ref->HasContainer()) {
                     M->HandlePickUp(event->baseObj, event->itemCount, event->reference.native_handle(),false,external_ref);
@@ -276,11 +312,11 @@ public:
                     else { // demek ki world object
                         auto reference_ = event->reference;
                         logger::trace("Reference: {}", reference_.native_handle());
-                        auto ref_id = Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(reference_);
+                        auto ref_id = Utilities::FunctionsSkyrim::WorldObject::TryToGetRefIDFromHandle(reference_);
                         if (!ref_id) {
                             logger::info("Could not find reference");
                             ref_id = picked_up_refid;
-                            if (std::abs(picked_up_time - RE::Calendar::GetSingleton()->GetHoursPassed())>0.01f) {
+                            if (std::abs(picked_up_time - RE::Calendar::GetSingleton()->GetHoursPassed())>0.001f) {
                                 logger::warn("Picked up time: {}, calendar time: {}", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
                             }
                             if (!ref_id) {
@@ -300,7 +336,7 @@ public:
                     M->UnLinkExternalContainer(event->baseObj,event->itemCount,event->oldContainer);
                 }
                 // NPC: you dropped this...
-                else if (auto ref_id__ = Utilities::FunctionsSkyrim::TryToGetRefIDFromHandle(event->reference)) {
+                else if (auto ref_id__ = Utilities::FunctionsSkyrim::WorldObject::TryToGetRefIDFromHandle(event->reference)) {
                     logger::info("NPC: you dropped this...Reference handle refid: {}", ref_id__);
                     // bi sekilde yukarda external olarak registerlanmadiysa... ya da genel:
                     M->HandlePickUp(event->baseObj, event->itemCount, ref_id__, false);
@@ -322,20 +358,29 @@ public:
                     M->setListenCrosshair(false);
                     auto reference_ = event->reference;
                     logger::trace("Reference: {}", reference_.native_handle());
-                    RE::TESObjectREFR* ref = Utilities::FunctionsSkyrim::TryToGetRefFromHandle(reference_);
+                    RE::TESObjectREFR* ref = Utilities::FunctionsSkyrim::WorldObject::TryToGetRefFromHandle(reference_);
                     if (ref) logger::trace("Dropped ref name: {}", ref->GetBaseObject()->GetName());
                     if (!ref) {
-                        // iterate through all objects in the cell................
-                        logger::info("Iterating through all references in the cell.");
-                        ref = Utilities::FunctionsSkyrim::TryToGetRefInCell(event->baseObj,event->itemCount);
+                        /*logger::info("Iterating through all references in the cell.");
+                        ref = Utilities::FunctionsSkyrim::WorldObject::TryToGetRefInCell(event->baseObj,
+                                                                                         event->itemCount);*/
+
+                        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+                        if (event->baseObj == consume_equipped_id && 
+                            event->itemCount==1 &&
+                            std::abs(curr_time - consume_equipped_t) < 0.001f) {
+                            M->HandleConsume(event->baseObj);
+                            consume_equipped_id = 0;
+                            consume_equipped_t = 0;
+                        } else {
+                            // iterate through all objects in the cell................
+                            logger::info("Iterating through all references in the cell.");
+                            ref = Utilities::FunctionsSkyrim::WorldObject::TryToGetRefInCell(event->baseObj,event->itemCount);
+                        }
                     } 
                     if (ref) {
                         M->HandleDrop(event->baseObj, event->itemCount, ref);
                     }
-                    else if (event->baseObj == fake_equipped_id) {
-                        M->HandleConsume(event->baseObj);
-                        fake_equipped_id = 0;
-                    } 
                     else if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)){
                         if (auto vendor_chest = Utilities::FunctionsSkyrim::Menu::GetVendorChestFromMenu()){
                             M->LinkExternalContainer(event->baseObj, event->itemCount, event->newContainer);
@@ -345,6 +390,11 @@ public:
 					
                         }
                     }
+                    else if (event->baseObj == consume_equipped_id) {
+                        M->HandleConsume(event->baseObj);
+                        consume_equipped_id = 0;
+                        consume_equipped_t = 0;
+                    } 
                     else logger::warn("Ref not found at HandleDrop! Hopefully due to consume.");
                     M->setListenCrosshair(true);
                 }
@@ -403,6 +453,70 @@ public:
         return RE::BSEventNotifyControl::kContinue;
     }
 
+    RE::BSEventNotifyControl ProcessEvent(RE::InputEvent* const* evns, RE::BSTEventSource<RE::InputEvent*>*) {
+        if (!*evns) return RE::BSEventNotifyControl::kContinue;
+
+        for (RE::InputEvent* e = *evns; e; e = e->next) {
+            if (e->eventType.get() == RE::INPUT_EVENT_TYPE::kButton) {
+                RE::ButtonEvent* a_event = e->AsButtonEvent();
+                RE::IDEvent* id_event = e->AsIDEvent();
+                auto userEvent = id_event->userEvent;
+
+                if (a_event->IsPressed()) {
+                    logger::trace("User event: {}", userEvent.c_str());
+                    //if (a_event->IsRepeating() && a_event->HeldDuration() > .3f && a_event->HeldDuration() < .32f) {
+                    //    logger::trace("User event: {}", userEvent.c_str());
+                    //    // we accept : "accept","RightEquip", "LeftEquip", "equip", "toggleFavorite"
+                    //    auto userevents = RE::UserEvents::GetSingleton();
+                    //    if (!(userEvent == userevents->accept || userEvent == userevents->rightEquip ||
+                    //          userEvent == userevents->leftEquip || userEvent == userevents->equip)) {
+                    //        logger::trace("User event not accepted.");
+                    //        continue;
+                    //    }
+                    //    if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
+                    //        auto ui = RE::UI::GetSingleton();
+                    //        RefID refHandle = 0;
+                    //        if (ui->IsMenuOpen(RE::InventoryMenu::MENU_NAME)) {
+                    //            ReShowMenu = RE::InventoryMenu::MENU_NAME;
+                    //            queue->AddMessage(RE::TweenMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kHide, nullptr);
+                    //        } else if (ui->IsMenuOpen(RE::FavoritesMenu::MENU_NAME))
+                    //            ReShowMenu = RE::FavoritesMenu::MENU_NAME;
+                    //        else if (ui->IsMenuOpen(RE::ContainerMenu::MENU_NAME)) {
+                    //            ReShowMenu = RE::ContainerMenu::MENU_NAME;
+                    //            const auto menu = ui ? ui->GetMenu<RE::ContainerMenu>() : nullptr;
+                    //            refHandle = menu ? menu->GetTargetRefHandle() : 0;
+                    //            RE::TESObjectREFRPtr ref;
+                    //            RE::LookupReferenceByHandle(refHandle, ref);
+                    //            if (ref)
+                    //                external_container_refid = ref->GetFormID();
+                    //            else
+                    //                logger::warn("Failed to get ref from handle.");
+                    //            logger::trace("External container refid: {}", external_container_refid);
+                    //        } else
+                    //            continue;
+                    //        queue->AddMessage(ReShowMenu, RE::UI_MESSAGE_TYPE::kHide, nullptr);
+                    //        return RE::BSEventNotifyControl::kContinue;
+                    //    }
+                    //}
+                }
+            }
+        }
+        return RE::BSEventNotifyControl::kContinue;
+    }
+    
+    RE::BSEventNotifyControl ProcessEvent(const RE::TESSleepStopEvent*,
+                                          RE::BSTEventSource<RE::TESSleepStopEvent>*) {
+        logger::trace("Sleep stop event.");
+        M->UpdateStages(player_refid);
+        return RE::BSEventNotifyControl::kContinue;
+    }
+
+    RE::BSEventNotifyControl ProcessEvent(const RE::TESWaitStopEvent*,
+                                          RE::BSTEventSource<RE::TESWaitStopEvent>*) {
+        logger::trace("Wait stop event.");
+        M->UpdateStages(player_refid);
+        return RE::BSEventNotifyControl::kContinue;
+    }
 };
 
 
@@ -436,7 +550,9 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         eventSourceHolder->AddEventSink<RE::TESContainerChangedEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESFurnitureEvent>(eventSink);
         RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(OurEventSink::GetSingleton());
-        // RE::BSInputDeviceManager::GetSingleton()->AddEventSink(eventSink);
+        //RE::BSInputDeviceManager::GetSingleton()->AddEventSink(eventSink);
+        eventSourceHolder->AddEventSink<RE::TESSleepStopEvent>(eventSink);
+        eventSourceHolder->AddEventSink<RE::TESWaitStopEvent>(eventSink);
         SKSE::GetCrosshairRefEventSource()->AddEventSink(eventSink);
     }
 }
