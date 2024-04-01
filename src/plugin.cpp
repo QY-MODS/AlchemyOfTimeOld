@@ -30,7 +30,7 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
 
     void RefreshMenu(const char* menuname) { 
         listen_menu = false;
-        Utilities::FunctionsSkyrim::RefreshMenu(menuname);
+        Utilities::FunctionsSkyrim::Menu::RefreshMenu(menuname);
         listen_menu = true;
 	}
 
@@ -44,12 +44,15 @@ public:
     RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* event, RE::BSTEventSource<RE::TESEquipEvent>*) {
          if (!event) return RE::BSEventNotifyControl::kContinue;
          if (!event->actor->IsPlayerRef()) return RE::BSEventNotifyControl::kContinue;
-        
+         if (!Settings::IsItem(event->baseObject)) return RE::BSEventNotifyControl::kContinue;
          // only for tracking consumed items
-         if (!Utilities::FunctionsSkyrim::IsFoodItem(event->baseObject)) return RE::BSEventNotifyControl::kContinue;
+         if (Settings::GetQFormType(event->baseObject) == "FOOD") {
+             fake_equipped_id = event->equipped ? event->baseObject : 0;
+             logger::trace("Fake equipped: {}", fake_equipped_id);
+         }
 
-         fake_equipped_id = event->equipped ? event->baseObject : 0;
-         logger::trace("Fake equipped: {}", fake_equipped_id);
+         M->UpdateStages(player_refid);
+
         
         // if (event->equipped) {
 	    //     logger::trace("Item {} was equipped. equipped: {}", event->baseObject);
@@ -80,7 +83,7 @@ public:
             if (auto base = event->objectActivated->GetBaseObject()) {
                 RE::BSString str;
                 base->GetActivateText(RE::PlayerCharacter::GetSingleton(), str);
-                if (Utilities::Functions::String::includesWord(str.c_str(), {"Eat"})) activate_eat = true;
+                if (Utilities::Functions::String::includesWord(str.c_str(), {"Eat","Drink"})) activate_eat = true;
             }
         }
             
@@ -100,8 +103,11 @@ public:
         if (!event->crosshairRef) return RE::BSEventNotifyControl::kContinue;
         if (!M->getListenCrosshair()) return RE::BSEventNotifyControl::kContinue;
 
+
         if (M->IsExternalContainer(event->crosshairRef.get())) M->UpdateStages(event->crosshairRef.get());
 
+
+        // rest is for World Objects
         if (!Settings::IsItem(event->crosshairRef.get())) return RE::BSEventNotifyControl::kContinue;
 
 
@@ -163,14 +169,14 @@ public:
             logger::trace("Barter menu is open.");
             const auto player_updated = M->UpdateStages(player_refid);
             bool vendor_updated = false;
-            if (const auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()) {
+            if (const auto vendor_chest = Utilities::FunctionsSkyrim::Menu::GetVendorChestFromMenu()) {
                 vendor_updated = M->UpdateStages(vendor_chest->GetFormID());
             } else logger ::error("Could not get vendor chest.");
             if (player_updated || vendor_updated) RefreshMenu(menuname);
             return RE::BSEventNotifyControl::kContinue;
         } else if (menuname == RE::ContainerMenu::MENU_NAME) {
             logger::trace("Container menu is open.");
-            if (auto container = Utilities::FunctionsSkyrim::GetContainerFromMenu()) {
+            if (auto container = Utilities::FunctionsSkyrim::Menu::GetContainerFromMenu()) {
                 if (M->UpdateStages(player_refid) || M->UpdateStages(container->GetFormID())) {
                     RefreshMenu(menuname);
                 }
@@ -203,17 +209,14 @@ public:
 
         //if (bench_type != 2 && bench_type != 3 && bench_type != 7) return RE::BSEventNotifyControl::kContinue;
 
-        std::string qformtype;
-        // POPULATE THIS
-        if (bench_type == 1) {
-            qformtype = "FOOD";
-        } else return RE::BSEventNotifyControl::kContinue;
+        
+        if (!Settings::qform_bench_map.contains(bench_type)) return RE::BSEventNotifyControl::kContinue;
 
         if (event->type == RE::TESFurnitureEvent::FurnitureEventType::kEnter) {
             logger::trace("Furniture event: Enter {}", event->targetFurniture->GetName());
             furniture_entered = true;
             furniture = event->targetFurniture;
-            M->HandleCraftingEnter(qformtype);
+            M->HandleCraftingEnter(static_cast<unsigned int>(bench_type));
         } else if (event->type == RE::TESFurnitureEvent::FurnitureEventType::kExit) {
             logger::trace("Furniture event: Exit {}", event->targetFurniture->GetName());
             if (event->targetFurniture == furniture) {
@@ -262,7 +265,7 @@ public:
                 if (!event->oldContainer) {
                     if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)) {
                         logger::trace("Bought from null old container.");
-                        if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()) {
+                        if (auto vendor_chest = Utilities::FunctionsSkyrim::Menu::GetVendorChestFromMenu()) {
                             M->HandleBuy(event->baseObj, event->itemCount, vendor_chest->GetFormID());
 					    }
 					    else {
@@ -334,7 +337,7 @@ public:
                         fake_equipped_id = 0;
                     } 
                     else if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)){
-                        if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()){
+                        if (auto vendor_chest = Utilities::FunctionsSkyrim::Menu::GetVendorChestFromMenu()){
                             M->LinkExternalContainer(event->baseObj, event->itemCount, event->newContainer);
                         } else {
                             logger::error("Could not get vendor chest");
@@ -365,23 +368,37 @@ public:
         
         if (M->IsTimeModulator(event->baseObj)) {
             if (event->oldContainer == player_refid || event->newContainer== player_refid) {
+                logger::trace("Time modulator entered or left player inventory.");
                 M->UpdateStages(player_refid);
             }
             if (M->IsExternalContainer(event->oldContainer)) {
+                logger::trace("Time modulator left external container.");
 				M->UpdateStages(event->oldContainer);
 			}
             if (M->IsExternalContainer(event->newContainer)) {
+                logger::trace("Time modulator entered external container.");
                 M->UpdateStages(event->newContainer);
             }
+            bool vendor_updated = false;
             if (!event->newContainer){
-                if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)) {
-                    if (auto vendor_chest = Utilities::FunctionsSkyrim::GetVendorChestFromMenu()) {
+                if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME) && !vendor_updated) {
+                    if (auto vendor_chest = Utilities::FunctionsSkyrim::Menu::GetVendorChestFromMenu()) {
+                        logger::trace("Time modulator vendor chest1.");
                         M->UpdateStages(vendor_chest);
+                        vendor_updated = true;
                     }
                 }
             }
+            if (!event->oldContainer) {
+                if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME) && !vendor_updated) {
+					if (auto vendor_chest = Utilities::FunctionsSkyrim::Menu::GetVendorChestFromMenu()) {
+						logger::trace("Time modulator vendor chest2.");
+						M->UpdateStages(vendor_chest);
+						vendor_updated = true;
+					}
+				}
+            }
         }
-
 
         return RE::BSEventNotifyControl::kContinue;
     }
@@ -393,6 +410,11 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
     if (message->type == SKSE::MessagingInterface::kDataLoaded) {
         logger::trace("Data loaded.");
         // Start
+        if (!Utilities::IsPo3Installed()) {
+            logger::error("Po3 is not installed.");
+            Utilities::MsgBoxesNotifs::Windows::Po3ErrMsg();
+            return;
+        }
         Settings::LoadSettings();
         auto sources = std::vector<Source>();
         M = Manager::GetSingleton(sources);

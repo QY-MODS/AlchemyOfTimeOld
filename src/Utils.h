@@ -175,6 +175,15 @@ namespace Utilities{
             return version;
         }
 
+        template <typename KeyType, typename ValueType>
+        std::vector<KeyType> getKeys(const std::map<KeyType, ValueType>& inputMap) {
+            std::vector<KeyType> keys;
+            for (const auto& pair : inputMap) {
+                keys.push_back(pair.first);
+            }
+            return keys;
+        }
+
         namespace Vector{
             
             template <typename T>
@@ -194,10 +203,22 @@ namespace Utilities{
             }
             
             template <typename T>
-            bool VectorHasElement(const std::vector<T>& vec, const T& element) {
+            bool HasElement(const std::vector<T>& vec, const T& element) {
 			    return std::find(vec.begin(), vec.end(), element) != vec.end();
 		    }
-        }
+            
+            std::vector<int> getComplementarySet(const std::vector<int>& reference,
+                                                       const std::vector<int>& subset) {
+                std::vector<int> complementarySet;
+                for (const auto& element : reference) {
+                    if (std::find(subset.begin(), subset.end(), element) == subset.end()) {
+                        complementarySet.push_back(element);
+                    }
+                }
+                return complementarySet;
+            }
+
+        };
 
         namespace String {
             
@@ -242,6 +263,7 @@ namespace Utilities{
                 return false;  // None of the strings in 'strings' were found in the input string
             }
 
+            // if it includes any of the words in the vector
             bool includesWord(const std::string& input, const std::vector<std::string>& strings) {
                 std::string lowerInput = toLowercase(input);
                 lowerInput = replaceLineBreaksWithSpace(lowerInput);
@@ -275,9 +297,44 @@ namespace Utilities{
         }
     };
 
+    namespace Math {
+        namespace LinAlg {
+            namespace R3 {
+                void rotateX(RE::NiPoint3& v, float angle) {
+                    float y = v.y * cos(angle) - v.z * sin(angle);
+                    float z = v.y * sin(angle) + v.z * cos(angle);
+                    v.y = y;
+                    v.z = z;
+                }
+
+                // Function to rotate a vector around the y-axis
+                void rotateY(RE::NiPoint3& v, float angle) {
+                    float x = v.x * cos(angle) + v.z * sin(angle);
+                    float z = -v.x * sin(angle) + v.z * cos(angle);
+                    v.x = x;
+                    v.z = z;
+                }
+
+                // Function to rotate a vector around the z-axis
+                void rotateZ(RE::NiPoint3& v, float angle) {
+                    float x = v.x * cos(angle) - v.y * sin(angle);
+                    float y = v.x * sin(angle) + v.y * cos(angle);
+                    v.x = x;
+                    v.y = y;
+                }
+
+                void rotate(RE::NiPoint3& v, float angleX, float angleY, float angleZ) {
+					rotateX(v, angleX);
+					rotateY(v, angleY);
+					rotateZ(v, angleZ);
+				}
+            };
+        };
+    };
+    
     namespace FunctionsSkyrim {
 
-        RE::TESForm* GetFormByID(const RE::FormID& id, const std::string& editor_id="") {
+        RE::TESForm* GetFormByID(const RE::FormID id, const std::string& editor_id="") {
             auto form = RE::TESForm::LookupByID(id);
             if (form)
                 return form;
@@ -289,7 +346,7 @@ namespace Utilities{
         };
 
         template <class T = RE::TESForm>
-        static T* GetFormByID(const RE::FormID& id, const std::string& editor_id="") {
+        static T* GetFormByID(const RE::FormID id, const std::string& editor_id="") {
             T* form = RE::TESForm::LookupByID<T>(id);
             if (form)
                 return form;
@@ -325,7 +382,7 @@ namespace Utilities{
             if (temp_form)
                 return temp_form->GetFormID();
             else {
-                logger::warn("Formid is null for editorid {}", formEditorId);
+                logger::info("Formid is null for editorid {}", formEditorId);
                 return -1;
             }
             return -1;
@@ -354,19 +411,16 @@ namespace Utilities{
             return length;
         }
 
-        void PrintObjectExtraData(RE::TESObjectREFR* ref) {
-            for (int i = 0; i < 191; i++) {
-                if (ref->extraList.HasType(static_cast<RE::ExtraDataType>(i))) {
-					logger::info("ExtraDataList type: {}", i);
-				}
-			}
-        }
-
+        
 
         bool FormIsOfType(RE::TESForm* form, RE::FormType type) {
             if (!form) return false;
 		    return form->GetFormType() == type;
 	    }
+
+        bool FormIsOfType(const FormID formid, RE::FormType type) {
+			return FormIsOfType(GetFormByID(formid), type);
+		}
 
         bool IsFoodItem(RE::TESForm* form) {
             if (FormIsOfType(form,RE::AlchemyItem::FORMTYPE)){
@@ -393,12 +447,34 @@ namespace Utilities{
 			return IsFoodItem(GetFormByID(formid));
 		}
 
+        bool IsPoisonItem(RE::TESForm* form) {
+            if (FormIsOfType(form, RE::AlchemyItem::FORMTYPE)) {
+                RE::AlchemyItem* form_as_ = form->As<RE::AlchemyItem>();
+                if (!form_as_) return false;
+                if (!form_as_->IsPoison()) return false;
+            }
+            else return false;
+            return true;
+        }
+
+        bool IsPoisonItem(const FormID formid) { return IsPoisonItem(GetFormByID(formid)); }
+
+        bool IsMedicineItem(RE::TESForm* form) {
+            if (FormIsOfType(form, RE::AlchemyItem::FORMTYPE)) {
+                RE::AlchemyItem* form_as_ = form->As<RE::AlchemyItem>();
+                if (!form_as_) return false;
+                if (!form_as_->IsMedicine()) return false;
+            } else
+                return false;
+            return true;
+        }
+
+        bool IsMedicineItem(const FormID formid) { return IsPoisonItem(GetFormByID(formid)); }
+
         bool IsCONT(RefID refid) {
             return RE::FormTypeToString(
                    RE::TESForm::LookupByID<RE::TESObjectREFR>(refid)->GetObjectReference()->GetFormType()) == "CONT";
         }
-
-
 
         template <typename T>
         struct FormTraits {
@@ -420,6 +496,11 @@ namespace Utilities{
             static void SetValue(T* form, int value) {
                 form->value = value;
             }
+
+            static RE::BSTArray<RE::Effect*> GetEffects(T*) { 
+                RE::BSTArray<RE::Effect*> effects;
+                return effects;
+			}
         };
 
         template <>
@@ -439,69 +520,58 @@ namespace Utilities{
                 logger::trace("CostOverride: {}", form->data.costOverride);
                 form->data.costOverride = value;
             }
+
+            static RE::BSTArray<RE::Effect*> GetEffects(RE::AlchemyItem* form) {
+				return form->effects;
+			}
         };
 
-        void RefreshMenu(const std::string_view menuname) {
-            if (auto ui = RE::UI::GetSingleton()) {
-                if (!ui->IsMenuOpen(menuname)) return;
-            }
-            if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
-                queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kHide, nullptr);
-                queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kShow, nullptr);
-            }
-		}
+        template <>
+        struct FormTraits<RE::IngredientItem> {
+			static float GetWeight(RE::IngredientItem* form) { 
+				return form->weight;
+			}
 
-	    // https:// github.com/Exit-9B/Dont-Eat-Spell-Tomes/blob/7b7f97353cc6e7ccfad813661f39710b46d82972/src/SpellTomeManager.cpp#L23-L32
-        template <typename T>
-        RE::TESObjectREFR* GetMenuOwner() {
-            RE::TESObjectREFR* reference = nullptr;
-            const auto ui = RE::UI::GetSingleton();
-            const auto menu = ui ? ui->GetMenu<T>() : nullptr;
-            const auto movie = menu ? menu->uiMovie : nullptr;
+			static void SetWeight(RE::IngredientItem* form, float weight) { 
+				form->weight = weight;
+			}
 
-            if (movie) {
-                // Parapets: "Menu_mc" is stored in the class, but it's different in VR and we haven't RE'd it yet
-                RE::GFxValue isViewingContainer;
-                movie->Invoke("Menu_mc.isViewingContainer", &isViewingContainer, nullptr, 0);
+			static int GetValue(RE::IngredientItem* form) {
+			    return form->GetGoldValue();
+			}
+			static void SetValue(RE::IngredientItem* form, int value) { 
+				form->value = value;
+			}
 
-                if (isViewingContainer.GetBool()) {
-                    auto refHandle = menu->GetTargetRefHandle();
-                    RE::TESObjectREFRPtr refr;
-                    RE::LookupReferenceByHandle(refHandle, refr);
-                    return refr.get();
-                }
+			static RE::BSTArray<RE::Effect*> GetEffects(RE::IngredientItem* form) {
+                return form->effects;
             }
-            return reference;
-	    }
-
-        RE::TESObjectREFR* GetContainerFromMenu() {
-            if (auto ui_refid = RE::UI::GetSingleton()->GetMenu<RE::ContainerMenu>()->GetTargetRefHandle()) {
-                logger::trace("UI Reference id {}", ui_refid);
-                if (auto ui_ref = RE::TESObjectREFR::LookupByHandle(ui_refid)) {
-                    logger::trace("UI Reference name {}", ui_ref->GetDisplayFullName());
-                    return ui_ref.get();
-                }
+        };
+        
+        template <>
+        struct FormTraits<RE::TESAmmo> {
+            static float GetWeight(RE::TESAmmo* form) {
+                // Default implementation, assuming T has a member variable 'weight'
+                return form->GetWeight();
             }
-            return nullptr;
-        }
 
-        RE::TESObjectREFR* GetVendorChestFromMenu(){
-            if (auto ui_refid = RE::UI::GetSingleton()->GetMenu<RE::BarterMenu>()->GetTargetRefHandle()) {
-                logger::trace("UI Reference id {}", ui_refid);
-                if (auto ui_ref = RE::TESObjectREFR::LookupByHandle(ui_refid)) {
-                    logger::trace("UI Reference name {}", ui_ref->GetDisplayFullName());
-                    if (auto barter_npc = ui_ref->GetBaseObject()->As<RE::TESNPC>()) {
-                        for (auto& faction_rank : barter_npc->factions) {
-                            if (auto merchant_chest = faction_rank.faction->vendorData.merchantContainer) {
-                                logger::trace("Found chest with refid {}", merchant_chest->GetFormID());
-                                return merchant_chest;
-                            }
-                        };
-                    }
-                }
+            static void SetWeight(RE::TESAmmo*, float) {
+                // Default implementation, set the weight if T has a member variable 'weight'
+                return;
             }
-            return nullptr;
-        }
+
+            static int GetValue(RE::TESAmmo* form) {
+                // Default implementation, assuming T has a member variable 'value'
+                return form->value;
+            }
+
+            static void SetValue(RE::TESAmmo* form, int value) { form->value = value; }
+
+            static RE::BSTArray<RE::Effect*> GetEffects(RE::TESAmmo*) {
+                RE::BSTArray<RE::Effect*> effects;
+                return effects;
+            }
+        };
 
         // credits to Qudix on xSE RE Discord for this
         void OpenContainer(RE::TESObjectREFR* a_this, std::uint32_t a_openType) {
@@ -509,112 +579,6 @@ namespace Utilities{
             using func_t = decltype(&OpenContainer);
             REL::Relocation<func_t> func{RELOCATION_ID(50211, 51140)};
             func(a_this, a_openType);
-        }
-
-        const bool HasItemEntry(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner, bool nonzero_entry_check=false) {
-            if (!item) {
-                logger::warn("Item is null");
-                return 0;
-            }
-            if (!inventory_owner) {
-                logger::warn("Inventory owner is null");
-                return 0;
-            }
-            auto inventory = inventory_owner->GetInventory();
-            auto it = inventory.find(item);
-            bool has_entry = it != inventory.end();
-            if (nonzero_entry_check) return has_entry && it->second.first > 0;
-            return has_entry;
-		}
-
-        const std::int32_t GetItemCount(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner) {
-            if (HasItemEntry(item, inventory_owner, true)) {
-				auto inventory = inventory_owner->GetInventory();
-				auto it = inventory.find(item);
-				return it->second.first;
-			}
-            return 0;
-        }
-
-        const bool HasItem(RE::TESBoundObject* item, RE::TESObjectREFR* item_owner) {
-            if (HasItemEntry(item, item_owner, true)) return true;
-            return false;
-        }
-
-        void FavoriteItem(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner) {
-            if (!item) return;
-            if (!inventory_owner) return;
-            auto inventory_changes = inventory_owner->GetInventoryChanges();
-            auto entries = inventory_changes->entryList;
-            for (auto it = entries->begin(); it != entries->end(); ++it) {
-                const auto object = (*it)->object;
-                if (!object) {
-					logger::error("Object is null");
-					continue;
-				}
-                auto formid = object->GetFormID();
-                if (!formid) logger::critical("Formid is null");
-                if (formid == item->GetFormID()) {
-                    logger::trace("Favoriting item: {}", item->GetName());
-                    const auto xLists = (*it)->extraLists;
-                    bool no_extra_ = false;
-                    if (!xLists || xLists->empty()) {
-						logger::trace("No extraLists");
-                        no_extra_ = true;
-					}
-                    logger::trace("asdasd");
-                    if (no_extra_) {
-                        logger::trace("No extraLists");
-                        inventory_changes->SetFavorite((*it), nullptr);
-                    } else {
-                        logger::trace("ExtraLists found");
-                        inventory_changes->SetFavorite((*it), xLists->front());
-                    }
-                    return;
-                }
-            }
-            logger::error("Item not found in inventory");
-        }
-
-        void FavoriteItem(const FormID formid, const FormID refid) {
-			FavoriteItem(GetFormByID<RE::TESBoundObject>(formid), GetFormByID<RE::TESObjectREFR>(refid));
-		}
-
-        [[nodiscard]] const bool HasItemPlusCleanUp(RE::TESBoundObject* item, RE::TESObjectREFR* item_owner,RE::ExtraDataList* xList=nullptr) {
-            logger::trace("HasItemPlusCleanUp");
-
-            if (HasItem(item, item_owner)) return true;
-            if (HasItemEntry(item, item_owner)) {
-                item_owner->RemoveItem(item, 1, RE::ITEM_REMOVE_REASON::kRemove, xList, nullptr);
-                logger::trace("Item with zero count removed from player.");
-            }
-            return false;
-        }
-        
-        [[nodiscard]] const bool IsFavorited(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner) {
-            if (!item) {
-                logger::warn("Item is null");
-                return false;
-            }
-            if (!inventory_owner) {
-                logger::warn("Inventory owner is null");
-                return false;
-            }
-            auto inventory = inventory_owner->GetInventory();
-            auto it = inventory.find(item);
-            if (it != inventory.end()) {
-                if (it->second.first <= 0) logger::warn("Item count is 0");
-                return it->second.second->IsFavorited();
-            }
-            return false;
-        }
-
-        [[nodiscard]] const bool IsFavorited(RE::FormID formid, RE::FormID refid) {
-            return IsFavorited(GetFormByID<RE::TESBoundObject>(formid),GetFormByID<RE::TESObjectREFR>(refid));
-        }
-
-        [[nodiscard]] const bool IsPlayerFavorited(RE::TESBoundObject* item) {
-            return IsFavorited(item, RE::PlayerCharacter::GetSingleton()->AsReference());
         }
 
         void OverrideMGEFFs(RE::BSTArray<RE::Effect*>& effect_array, std::vector<RE::EffectSetting*> new_effects,
@@ -642,106 +606,6 @@ namespace Utilities{
             }
             
         }
-
-        void SetObjectCount(RE::TESObjectREFR* ref, Count count) {
-            if (!ref) {
-                logger::error("Ref is null.");
-                return;
-            }
-            int max_try = 10;
-            while (ref->extraList.HasType(RE::ExtraDataType::kCount) && max_try) {
-                ref->extraList.RemoveByType(RE::ExtraDataType::kCount);
-                max_try--;
-            }
-            // ref->extraList.SetCount(static_cast<uint16_t>(count));
-            auto xCount = new RE::ExtraCount(static_cast<int16_t>(count));
-            ref->extraList.Add(xCount);
-        }
-
-        const int16_t GetObjectCount(RE::TESObjectREFR* ref) {
-            if (!ref) {
-                logger::error("Ref is null.");
-                return 0;
-            }
-            if (ref->extraList.HasType(RE::ExtraDataType::kCount)) {
-                RE::ExtraCount* xCount = ref->extraList.GetByType<RE::ExtraCount>();
-                return xCount->count;
-            }
-            return 0;
-        }
-
-
-        RE::TESObjectREFR* DropObjectIntoTheWorld(RE::TESBoundObject* obj, Count count, RE::ExtraDataList*,
-                                                  bool owned = true) {
-            auto player_ch = RE::PlayerCharacter::GetSingleton();
-            auto player_pos = player_ch->GetPosition();
-            // distance in the xy-plane
-            const auto multiplier = 100.0f;
-            player_pos += {multiplier, multiplier, 70};
-            auto player_cell = player_ch->GetParentCell();
-            auto player_ws = player_ch->GetWorldspace();
-            if (!player_cell && !player_ws) {
-                logger::critical("Player cell AND player world is null.");
-                return nullptr;
-            }
-            auto newPropRef =
-                RE::TESDataHandler::GetSingleton()
-                                  ->CreateReferenceAtLocation(obj, player_pos, {0.0f, 0.0f, 0.0f}, player_cell,
-                                                              player_ws, nullptr, nullptr, {}, false, false)
-                    .get()
-                    .get();
-            if (!newPropRef) {
-                logger::critical("New prop ref is null.");
-                return nullptr;
-            }
-            SetObjectCount(newPropRef, count);
-            if (owned) newPropRef->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
-            return newPropRef;
-        }
-
-        void SwapObjects(RE::TESObjectREFR* a_from, RE::TESBoundObject* a_to, const bool apply_havok=true) {
-            logger::trace("SwapObjects");
-            if (!a_from) {
-                logger::error("Ref is null.");
-                return;
-            }
-            auto ref_base = a_from->GetBaseObject();
-            if (!ref_base) {
-                logger::error("Ref base is null.");
-				return;
-            }
-            if (ref_base->GetFormID() == a_to->GetFormID()) {
-				logger::warn("Ref and base are the same.");
-				return;
-			}
-            a_from->SetObjectReference(a_to);
-            a_from->Disable();
-            a_from->Enable(false);
-            if (!apply_havok) return;
-
-            /*float afX = 100;
-            float afY = 100;
-            float afZ = 100;
-            float afMagnitude = 100;*/
-            /*auto args = RE::MakeFunctionArguments(std::move(afX), std::move(afY), std::move(afZ),
-            std::move(afMagnitude)); vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);*/
-            // Looked up here (wSkeever): https:  // www.nexusmods.com/skyrimspecialedition/mods/73607
-            SKSE::GetTaskInterface()->AddTask([a_from]() {
-                // auto player_ch = RE::PlayerCharacter::GetSingleton();
-                // player_ch->StartGrabObject();
-                auto vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
-                auto policy = vm->GetObjectHandlePolicy();
-                auto handle = policy->GetHandleForObject(a_from->GetFormType(), a_from);
-                RE::BSTSmartPointer<RE::BSScript::Object> object = nullptr;
-                vm->CreateObject2("ObjectReference", object);
-                vm->BindObject(object, handle, false);
-                if (!object) logger::warn("Object is null");
-                auto args = RE::MakeFunctionArguments(std::move(0.f), std::move(0.f), std::move(0.f), std::move(0.f));
-                RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
-                if (vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback)) logger::trace("FUSRODAH");
-            });
-        }
-
 
         RE::TESObjectREFR* TryToGetRefInCell(const FormID baseid, const Count count, unsigned int max_try=3) {
             auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
@@ -777,13 +641,861 @@ namespace Utilities{
             return nullptr;
 		}
 
-        RefID TryToGetRefIDFromHandle(RE::ObjectRefHandle handle) {
+        const RefID TryToGetRefIDFromHandle(RE::ObjectRefHandle handle) {
             if (handle.get() && handle.get()->GetFormID()) return handle.get()->GetFormID();
             if (handle.native_handle()
                 //&& RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(handle.native_handle())
                 ) return handle.native_handle();
             return 0;
         }
+
+        const bool FormExists(const FormID formid, std::string editorid = "") {
+			if (GetFormByID(formid,editorid)) return true;
+			return false;
+		}
+
+        namespace Menu {
+            void RefreshMenu(const std::string_view menuname) {
+                if (auto ui = RE::UI::GetSingleton()) {
+                    if (!ui->IsMenuOpen(menuname)) return;
+                }
+                if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
+                    queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kHide, nullptr);
+                    queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kShow, nullptr);
+                }
+            }
+
+            // https://
+            // github.com/Exit-9B/Dont-Eat-Spell-Tomes/blob/7b7f97353cc6e7ccfad813661f39710b46d82972/src/SpellTomeManager.cpp#L23-L32
+            template <typename T>
+            RE::TESObjectREFR* GetMenuOwner() {
+                RE::TESObjectREFR* reference = nullptr;
+                const auto ui = RE::UI::GetSingleton();
+                const auto menu = ui ? ui->GetMenu<T>() : nullptr;
+                const auto movie = menu ? menu->uiMovie : nullptr;
+
+                if (movie) {
+                    // Parapets: "Menu_mc" is stored in the class, but it's different in VR and we haven't RE'd it yet
+                    RE::GFxValue isViewingContainer;
+                    movie->Invoke("Menu_mc.isViewingContainer", &isViewingContainer, nullptr, 0);
+
+                    if (isViewingContainer.GetBool()) {
+                        auto refHandle = menu->GetTargetRefHandle();
+                        RE::TESObjectREFRPtr refr;
+                        RE::LookupReferenceByHandle(refHandle, refr);
+                        return refr.get();
+                    }
+                }
+                return reference;
+            }
+
+            RE::TESObjectREFR* GetContainerFromMenu() {
+                if (auto ui_refid = RE::UI::GetSingleton()->GetMenu<RE::ContainerMenu>()->GetTargetRefHandle()) {
+                    logger::trace("UI Reference id {}", ui_refid);
+                    if (auto ui_ref = RE::TESObjectREFR::LookupByHandle(ui_refid)) {
+                        logger::trace("UI Reference name {}", ui_ref->GetDisplayFullName());
+                        return ui_ref.get();
+                    }
+                }
+                return nullptr;
+            }
+
+            RE::TESObjectREFR* GetVendorChestFromMenu() {
+                if (auto ui_refid = RE::UI::GetSingleton()->GetMenu<RE::BarterMenu>()->GetTargetRefHandle()) {
+                    logger::trace("UI Reference id {}", ui_refid);
+                    if (auto ui_ref = RE::TESObjectREFR::LookupByHandle(ui_refid)) {
+                        logger::trace("UI Reference name {}", ui_ref->GetDisplayFullName());
+                        if (auto barter_npc = ui_ref->GetBaseObject()->As<RE::TESNPC>()) {
+                            for (auto& faction_rank : barter_npc->factions) {
+                                if (auto merchant_chest = faction_rank.faction->vendorData.merchantContainer) {
+                                    logger::trace("Found chest with refid {}", merchant_chest->GetFormID());
+                                    return merchant_chest;
+                                }
+                            };
+                        }
+                    }
+                }
+                return nullptr;
+            }
+        
+        };
+
+        namespace Inventory {
+            const bool HasItemEntry(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner, bool nonzero_entry_check=false) {
+                if (!item) {
+                    logger::warn("Item is null");
+                    return 0;
+                }
+                if (!inventory_owner) {
+                    logger::warn("Inventory owner is null");
+                    return 0;
+                }
+                auto inventory = inventory_owner->GetInventory();
+                auto it = inventory.find(item);
+                bool has_entry = it != inventory.end();
+                if (nonzero_entry_check) return has_entry && it->second.first > 0;
+                return has_entry;
+		    }
+
+            const std::int32_t GetItemCount(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner) {
+                if (HasItemEntry(item, inventory_owner, true)) {
+				    auto inventory = inventory_owner->GetInventory();
+				    auto it = inventory.find(item);
+				    return it->second.first;
+			    }
+                return 0;
+            }
+
+            const bool HasItem(RE::TESBoundObject* item, RE::TESObjectREFR* item_owner) {
+                if (HasItemEntry(item, item_owner, true)) return true;
+                return false;
+            }
+
+            void FavoriteItem(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner) {
+                if (!item) return;
+                if (!inventory_owner) return;
+                auto inventory_changes = inventory_owner->GetInventoryChanges();
+                auto entries = inventory_changes->entryList;
+                for (auto it = entries->begin(); it != entries->end(); ++it) {
+                    const auto object = (*it)->object;
+                    if (!object) {
+					    logger::error("Object is null");
+					    continue;
+				    }
+                    auto formid = object->GetFormID();
+                    if (!formid) logger::critical("Formid is null");
+                    if (formid == item->GetFormID()) {
+                        logger::trace("Favoriting item: {}", item->GetName());
+                        const auto xLists = (*it)->extraLists;
+                        bool no_extra_ = false;
+                        if (!xLists || xLists->empty()) {
+						    logger::trace("No extraLists");
+                            no_extra_ = true;
+					    }
+                        logger::trace("asdasd");
+                        if (no_extra_) {
+                            logger::trace("No extraLists");
+                            inventory_changes->SetFavorite((*it), nullptr);
+                        } else {
+                            logger::trace("ExtraLists found");
+                            inventory_changes->SetFavorite((*it), xLists->front());
+                        }
+                        return;
+                    }
+                }
+                logger::error("Item not found in inventory");
+            }
+
+            void FavoriteItem(const FormID formid, const FormID refid) {
+			    FavoriteItem(GetFormByID<RE::TESBoundObject>(formid), GetFormByID<RE::TESObjectREFR>(refid));
+		    }
+
+            [[nodiscard]] const bool HasItemPlusCleanUp(RE::TESBoundObject* item, RE::TESObjectREFR* item_owner,RE::ExtraDataList* xList=nullptr) {
+                logger::trace("HasItemPlusCleanUp");
+
+                if (HasItem(item, item_owner)) return true;
+                if (HasItemEntry(item, item_owner)) {
+                    item_owner->RemoveItem(item, 1, RE::ITEM_REMOVE_REASON::kRemove, xList, nullptr);
+                    logger::trace("Item with zero count removed from player.");
+                }
+                return false;
+            }
+        
+            [[nodiscard]] const bool IsFavorited(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner) {
+                if (!item) {
+                    logger::warn("Item is null");
+                    return false;
+                }
+                if (!inventory_owner) {
+                    logger::warn("Inventory owner is null");
+                    return false;
+                }
+                auto inventory = inventory_owner->GetInventory();
+                auto it = inventory.find(item);
+                if (it != inventory.end()) {
+                    if (it->second.first <= 0) logger::warn("Item count is 0");
+                    return it->second.second->IsFavorited();
+                }
+                return false;
+            }
+
+            [[nodiscard]] const bool IsFavorited(RE::FormID formid, RE::FormID refid) {
+                return IsFavorited(GetFormByID<RE::TESBoundObject>(formid),GetFormByID<RE::TESObjectREFR>(refid));
+            }
+
+            [[nodiscard]] const bool IsPlayerFavorited(RE::TESBoundObject* item) {
+                return IsFavorited(item, RE::PlayerCharacter::GetSingleton()->AsReference());
+            }
+        
+            [[nodiscard]] const bool IsEquipped(RE::TESBoundObject* item) {
+                logger::trace("IsEquipped");
+
+                if (!item) {
+                    logger::trace("Item is null");
+                    return false;
+                }
+
+                auto player_ref = RE::PlayerCharacter::GetSingleton();
+                auto inventory = player_ref->GetInventory();
+                auto it = inventory.find(item);
+                if (it != inventory.end()) {
+                    if (it->second.first <= 0) logger::warn("Item count is 0");
+                    return it->second.second->IsWorn();
+                }
+                return false;
+            }
+
+			[[nodiscard]] const bool IsEquipped(const FormID formid) {
+				return IsEquipped(GetFormByID<RE::TESBoundObject>(formid));
+			}
+
+            void EquipItem(RE::TESBoundObject* item, bool unequip = false) {
+                logger::trace("EquipItem");
+
+                if (!item) {
+                    logger::error("Item is null");
+                    return;
+                }
+                auto player_ref = RE::PlayerCharacter::GetSingleton();
+                auto inventory_changes = player_ref->GetInventoryChanges();
+                auto entries = inventory_changes->entryList;
+                for (auto it = entries->begin(); it != entries->end(); ++it) {
+                    auto formid = (*it)->object->GetFormID();
+                    if (formid == item->GetFormID()) {
+                        if (unequip) {
+                            if ((*it)->extraLists->empty()) {
+                                RE::ActorEquipManager::GetSingleton()->UnequipObject(
+                                    player_ref, (*it)->object, nullptr, 1,
+                                    (const RE::BGSEquipSlot*)nullptr, true, false, false);
+                            } else {
+                                RE::ActorEquipManager::GetSingleton()->UnequipObject(
+                                    player_ref, (*it)->object, (*it)->extraLists->front(), 1,
+                                    (const RE::BGSEquipSlot*)nullptr, true, false, false);
+                            }
+                        } else {
+                            if ((*it)->extraLists->empty()) {
+                                RE::ActorEquipManager::GetSingleton()->EquipObject(
+                                    player_ref, (*it)->object, nullptr, 1,
+                                    (const RE::BGSEquipSlot*)nullptr, true, false, false, false);
+                            } else {
+                                RE::ActorEquipManager::GetSingleton()->EquipObject(
+                                    player_ref, (*it)->object, (*it)->extraLists->front(), 1,
+                                    (const RE::BGSEquipSlot*)nullptr, true, false, false, false);
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
+
+            void EquipItem(const FormID formid, bool unequip = false) {
+				EquipItem(GetFormByID<RE::TESBoundObject>(formid), unequip);
+			}
+        };
+
+        namespace WorldObject {
+            void SetObjectCount(RE::TESObjectREFR* ref, Count count) {
+                if (!ref) {
+                    logger::error("Ref is null.");
+                    return;
+                }
+                int max_try = 10;
+                while (ref->extraList.HasType(RE::ExtraDataType::kCount) && max_try) {
+                    ref->extraList.RemoveByType(RE::ExtraDataType::kCount);
+                    max_try--;
+                }
+                // ref->extraList.SetCount(static_cast<uint16_t>(count));
+                auto xCount = new RE::ExtraCount(static_cast<int16_t>(count));
+                ref->extraList.Add(xCount);
+            }
+
+            const int16_t GetObjectCount(RE::TESObjectREFR* ref) {
+                if (!ref) {
+                    logger::error("Ref is null.");
+                    return 0;
+                }
+                if (ref->extraList.HasType(RE::ExtraDataType::kCount)) {
+                    RE::ExtraCount* xCount = ref->extraList.GetByType<RE::ExtraCount>();
+                    return xCount->count;
+                }
+                return 0;
+            }
+
+
+            RE::TESObjectREFR* DropObjectIntoTheWorld(RE::TESBoundObject* obj, Count count,
+                                                      bool owned = true) {
+                auto player_ch = RE::PlayerCharacter::GetSingleton();
+                // PRINT IT
+                const auto multiplier = 100.0f;
+                const float qPI = 3.14159265358979323846f;
+                auto orji_vec = RE::NiPoint3{multiplier, 0.f, player_ch->GetHeight()};
+                Math::LinAlg::R3::rotateZ(orji_vec, qPI / 4.f - player_ch->GetAngleZ());
+                auto drop_pos = player_ch->GetPosition() + orji_vec;
+                auto player_cell = player_ch->GetParentCell();
+                auto player_ws = player_ch->GetWorldspace();
+                if (!player_cell && !player_ws) {
+                    logger::critical("Player cell AND player world is null.");
+                    return nullptr;
+                }
+                auto newPropRef =
+                    RE::TESDataHandler::GetSingleton()
+                                      ->CreateReferenceAtLocation(obj, drop_pos, {0.0f, 0.0f, 0.0f}, player_cell,
+                                                                  player_ws, nullptr, nullptr, {}, false, false)
+                        .get()
+                        .get();
+                if (!newPropRef) {
+                    logger::critical("New prop ref is null.");
+                    return nullptr;
+                }
+                SetObjectCount(newPropRef, count);
+                if (owned) newPropRef->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
+                return newPropRef;
+            }
+
+            void SwapObjects(RE::TESObjectREFR* a_from, RE::TESBoundObject* a_to, const bool apply_havok=true) {
+                logger::trace("SwapObjects");
+                if (!a_from) {
+                    logger::error("Ref is null.");
+                    return;
+                }
+                auto ref_base = a_from->GetBaseObject();
+                if (!ref_base) {
+                    logger::error("Ref base is null.");
+				    return;
+                }
+                if (ref_base->GetFormID() == a_to->GetFormID()) {
+				    logger::info("Ref and base are the same.");
+				    return;
+			    }
+                a_from->SetObjectReference(a_to);
+                a_from->Disable();
+                a_from->Enable(false);
+                if (!apply_havok) return;
+
+                /*float afX = 100;
+                float afY = 100;
+                float afZ = 100;
+                float afMagnitude = 100;*/
+                /*auto args = RE::MakeFunctionArguments(std::move(afX), std::move(afY), std::move(afZ),
+                std::move(afMagnitude)); vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);*/
+                // Looked up here (wSkeever): https:  // www.nexusmods.com/skyrimspecialedition/mods/73607
+                SKSE::GetTaskInterface()->AddTask([a_from]() {
+                    // auto player_ch = RE::PlayerCharacter::GetSingleton();
+                    // player_ch->StartGrabObject();
+                    auto vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+                    auto policy = vm->GetObjectHandlePolicy();
+                    auto handle = policy->GetHandleForObject(a_from->GetFormType(), a_from);
+                    RE::BSTSmartPointer<RE::BSScript::Object> object = nullptr;
+                    vm->CreateObject2("ObjectReference", object);
+                    vm->BindObject(object, handle, false);
+                    if (!object) logger::warn("Object is null");
+                    auto args = RE::MakeFunctionArguments(std::move(0.f), std::move(0.f), std::move(0.f), std::move(0.f));
+                    RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
+                    if (vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback)) logger::trace("FUSRODAH");
+                });
+            }
+
+            [[nodiscard]] const bool PlayerPickUpObject(RE::TESObjectREFR* item, Count count, const unsigned int max_try = 3) {
+                logger::trace("PickUpItem");
+
+                // std::lock_guard<std::mutex> lock(mutex);
+                if (!item) {
+                    logger::warn("Item is null");
+                    return false;
+                }
+
+                auto actor = RE::PlayerCharacter::GetSingleton();
+                auto item_bound = item->GetBaseObject();
+                const auto item_count = Inventory::GetItemCount(item_bound, actor);
+                logger::trace("Item count: {}", item_count);
+                unsigned int i = 0;
+                if (!item_bound) {
+                    logger::warn("Item bound is null");
+                    return false;
+                }
+                while (i < max_try) {
+                    logger::trace("Critical: PickUpItem");
+                    actor->PickUpObject(item, count, false, false);
+                    logger::trace("Item picked up. Checking if it is in inventory...");
+                    if (Inventory::GetItemCount(item_bound, actor) > item_count) {
+                        logger::trace("Item picked up. Took {} extra tries.", i);
+                        return true;
+                    } else logger::trace("item count: {}", Inventory::GetItemCount(item_bound, actor));
+                    i++;
+                }
+
+                return false;
+            }
+        };
+
+        namespace xData {
+
+            namespace Copy {
+                void CopyEnchantment(RE::ExtraEnchantment* from, RE::ExtraEnchantment* to) {
+                    logger::trace("CopyEnchantment");
+				    to->enchantment = from->enchantment;
+				    to->charge = from->charge;
+				    to->removeOnUnequip = from->removeOnUnequip;
+			    }
+            
+                void CopyHealth(RE::ExtraHealth* from, RE::ExtraHealth* to) {
+                    logger::trace("CopyHealth");
+                    to->health = from->health;
+                }
+
+                void CopyRank(RE::ExtraRank* from, RE::ExtraRank* to) {
+                    logger::trace("CopyRank");
+				    to->rank = from->rank;
+			    }
+
+                void CopyTimeLeft(RE::ExtraTimeLeft* from, RE::ExtraTimeLeft* to) {
+                    logger::trace("CopyTimeLeft");
+                    to->time = from->time;
+                }
+
+                void CopyCharge(RE::ExtraCharge* from, RE::ExtraCharge* to) {
+                    logger::trace("CopyCharge");
+				    to->charge = from->charge;
+			    }
+
+                void CopyScale(RE::ExtraScale* from, RE::ExtraScale* to) {
+                    logger::trace("CopyScale");
+				    to->scale = from->scale;
+			    }
+
+                void CopyUniqueID(RE::ExtraUniqueID* from, RE::ExtraUniqueID* to) {
+                    logger::trace("CopyUniqueID");
+                    to->baseID = from->baseID;
+                    to->uniqueID = from->uniqueID;
+                }
+
+                void CopyPoison(RE::ExtraPoison* from, RE::ExtraPoison* to) {
+                    logger::trace("CopyPoison");
+				    to->poison = from->poison;
+				    to->count = from->count;
+			    }
+
+                void CopyObjectHealth(RE::ExtraObjectHealth* from, RE::ExtraObjectHealth* to) {
+                    logger::trace("CopyObjectHealth");
+				    to->health = from->health;
+			    }
+
+                void CopyLight(RE::ExtraLight* from, RE::ExtraLight* to) {
+                    logger::trace("CopyLight");
+                    to->lightData = from->lightData;
+                }
+
+                void CopyRadius(RE::ExtraRadius* from, RE::ExtraRadius* to) {
+                    logger::trace("CopyRadius");
+				    to->radius = from->radius;
+			    }
+
+                void CopyHorse(RE::ExtraHorse* from, RE::ExtraHorse* to) { 
+                    logger::trace("CopyHorse");
+                    to->horseRef = from->horseRef;
+			    }
+
+                void CopyHotkey(RE::ExtraHotkey* from, RE::ExtraHotkey* to) {
+                    logger::trace("CopyHotkey");
+				    to->hotkey = from->hotkey;
+			    }
+
+                void CopyTextDisplayData(RE::ExtraTextDisplayData* from, RE::ExtraTextDisplayData* to) {
+                to->displayName = from->displayName;
+                to->displayNameText = from->displayNameText;
+                to->ownerQuest = from->ownerQuest;
+                to->ownerInstance = from->ownerInstance;
+                to->temperFactor = from->temperFactor;
+                to->customNameLength = from->customNameLength;
+            }
+
+                void CopySoul(RE::ExtraSoul* from, RE::ExtraSoul* to) {
+                    logger::trace("CopySoul");
+                    to->soul = from->soul;
+                }
+
+                void CopyOwnership(RE::ExtraOwnership* from, RE::ExtraOwnership* to) {
+					logger::trace("CopyOwnership");
+					to->owner = from->owner;
+				}
+            };
+
+            template <typename T>
+            void CopyExtraData(T* from, T* to){
+                if (!from || !to) return;
+                switch (T->EXTRADATATYPE) {
+                    case RE::ExtraDataType::kEnchantment:
+                        CopyEnchantment(from, to);
+                        break;
+                    case RE::ExtraDataType::kHealth:
+                        CopyHealth(from, to);
+                        break;
+                    case RE::ExtraDataType::kRank:
+                        CopyRank(from, to);
+                        break;
+                    case RE::ExtraDataType::kTimeLeft:
+                        CopyTimeLeft(from, to);
+                        break;
+                    case RE::ExtraDataType::kCharge:
+                        CopyCharge(from, to);
+                        break;
+                    case RE::ExtraDataType::kScale:
+                        CopyScale(from, to);
+                        break;
+                    case RE::ExtraDataType::kUniqueID:
+                        CopyUniqueID(from, to);
+                        break;
+                    case RE::ExtraDataType::kPoison:
+                        CopyPoison(from, to);
+                        break;
+                    case RE::ExtraDataType::kObjectHealth:
+                        CopyObjectHealth(from, to);
+                        break;
+                    case RE::ExtraDataType::kLight:
+                        CopyLight(from, to);
+                        break;
+                    case RE::ExtraDataType::kRadius:
+                        CopyRadius(from, to);
+                        break;
+                    case RE::ExtraDataType::kHorse:
+                        CopyHorse(from, to);
+						break;
+                    case RE::ExtraDataType::kHotkey:
+                        CopyHotkey(from, to);
+						break;
+                    case RE::ExtraDataType::kTextDisplayData:
+						CopyTextDisplayData(from, to);
+						break;
+                    case RE::ExtraDataType::kSoul:
+						CopySoul(from, to);
+                        break;
+                    case RE::ExtraDataType::kOwnership:
+                        CopyOwnership(from, to);
+                        break;
+                    default:
+                        logger::warn("ExtraData type not found");
+                        break;
+                };
+            }
+
+            
+            [[nodiscard]] const bool UpdateExtras(RE::ExtraDataList* copy_from, RE::ExtraDataList* copy_to) {
+                logger::trace("UpdateExtras");
+                if (!copy_from || !copy_to) return false;
+                // Enchantment
+                if (copy_from->HasType(RE::ExtraDataType::kEnchantment)) {
+                    logger::trace("Enchantment found");
+                    auto enchantment =
+                        static_cast<RE::ExtraEnchantment*>(copy_from->GetByType(RE::ExtraDataType::kEnchantment));
+                    if (enchantment) {
+                        RE::ExtraEnchantment* enchantment_fake = RE::BSExtraData::Create<RE::ExtraEnchantment>();
+                        // log the associated actor value
+                        logger::trace("Associated actor value: {}", enchantment->enchantment->GetAssociatedSkill());
+                        Copy::CopyEnchantment(enchantment, enchantment_fake);
+                        copy_to->Add(enchantment_fake);
+                    } else return false;
+                }
+                // Health
+                if (copy_from->HasType(RE::ExtraDataType::kHealth)) {
+                    logger::trace("Health found");
+                    auto health = static_cast<RE::ExtraHealth*>(copy_from->GetByType(RE::ExtraDataType::kHealth));
+                    if (health) {
+                        RE::ExtraHealth* health_fake = RE::BSExtraData::Create<RE::ExtraHealth>();
+                        Copy::CopyHealth(health, health_fake);
+                        copy_to->Add(health_fake);
+                    } else return false;
+                }
+                // Rank
+                if (copy_from->HasType(RE::ExtraDataType::kRank)) {
+                    logger::trace("Rank found");
+                    auto rank = static_cast<RE::ExtraRank*>(copy_from->GetByType(RE::ExtraDataType::kRank));
+                    if (rank) {
+                        RE::ExtraRank* rank_fake = RE::BSExtraData::Create<RE::ExtraRank>();
+                        Copy::CopyRank(rank, rank_fake);
+                        copy_to->Add(rank_fake);
+                    } else return false;
+                }
+                // TimeLeft
+                if (copy_from->HasType(RE::ExtraDataType::kTimeLeft)) {
+                    logger::trace("TimeLeft found");
+                    auto timeleft = static_cast<RE::ExtraTimeLeft*>(copy_from->GetByType(RE::ExtraDataType::kTimeLeft));
+                    if (timeleft) {
+                        RE::ExtraTimeLeft* timeleft_fake = RE::BSExtraData::Create<RE::ExtraTimeLeft>();
+                        Copy::CopyTimeLeft(timeleft, timeleft_fake);
+                        copy_to->Add(timeleft_fake);
+                    } else return false;
+                }
+                // Charge
+                if (copy_from->HasType(RE::ExtraDataType::kCharge)) {
+                    logger::trace("Charge found");
+                    auto charge = static_cast<RE::ExtraCharge*>(copy_from->GetByType(RE::ExtraDataType::kCharge));
+                    if (charge) {
+                        RE::ExtraCharge* charge_fake = RE::BSExtraData::Create<RE::ExtraCharge>();
+                        Copy::CopyCharge(charge, charge_fake);
+                        copy_to->Add(charge_fake);
+                    } else return false;
+                }
+                // Scale
+                if (copy_from->HasType(RE::ExtraDataType::kScale)) {
+                    logger::trace("Scale found");
+                    auto scale = static_cast<RE::ExtraScale*>(copy_from->GetByType(RE::ExtraDataType::kScale));
+                    if (scale) {
+                        RE::ExtraScale* scale_fake = RE::BSExtraData::Create<RE::ExtraScale>();
+                        Copy::CopyScale(scale, scale_fake);
+                        copy_to->Add(scale_fake);
+                    } else return false;
+                }
+                // UniqueID
+                if (copy_from->HasType(RE::ExtraDataType::kUniqueID)) {
+                    logger::trace("UniqueID found");
+                    auto uniqueid = static_cast<RE::ExtraUniqueID*>(copy_from->GetByType(RE::ExtraDataType::kUniqueID));
+                    if (uniqueid) {
+                        RE::ExtraUniqueID* uniqueid_fake = RE::BSExtraData::Create<RE::ExtraUniqueID>();
+                        Copy::CopyUniqueID(uniqueid, uniqueid_fake);
+                        copy_to->Add(uniqueid_fake);
+                    } else return false;
+                }
+                // Poison
+                if (copy_from->HasType(RE::ExtraDataType::kPoison)) {
+                    logger::trace("Poison found");
+                    auto poison = static_cast<RE::ExtraPoison*>(copy_from->GetByType(RE::ExtraDataType::kPoison));
+                    if (poison) {
+                        RE::ExtraPoison* poison_fake = RE::BSExtraData::Create<RE::ExtraPoison>();
+                        Copy::CopyPoison(poison, poison_fake);
+                        copy_to->Add(poison_fake);
+                    } else return false;
+                }
+                // ObjectHealth
+                if (copy_from->HasType(RE::ExtraDataType::kObjectHealth)) {
+                    logger::trace("ObjectHealth found");
+                    auto objhealth =
+                        static_cast<RE::ExtraObjectHealth*>(copy_from->GetByType(RE::ExtraDataType::kObjectHealth));
+                    if (objhealth) {
+                        RE::ExtraObjectHealth* objhealth_fake = RE::BSExtraData::Create<RE::ExtraObjectHealth>();
+                        Copy::CopyObjectHealth(objhealth, objhealth_fake);
+                        copy_to->Add(objhealth_fake);
+                    } else return false;
+                }
+                // Light
+                if (copy_from->HasType(RE::ExtraDataType::kLight)) {
+                    logger::trace("Light found");
+                    auto light = static_cast<RE::ExtraLight*>(copy_from->GetByType(RE::ExtraDataType::kLight));
+                    if (light) {
+                        RE::ExtraLight* light_fake = RE::BSExtraData::Create<RE::ExtraLight>();
+                        Copy::CopyLight(light, light_fake);
+                        copy_to->Add(light_fake);
+                    } else return false;
+                }
+                // Radius
+                if (copy_from->HasType(RE::ExtraDataType::kRadius)) {
+                    logger::trace("Radius found");
+                    auto radius = static_cast<RE::ExtraRadius*>(copy_from->GetByType(RE::ExtraDataType::kRadius));
+                    if (radius) {
+                        RE::ExtraRadius* radius_fake = RE::BSExtraData::Create<RE::ExtraRadius>();
+                        Copy::CopyRadius(radius, radius_fake);
+                        copy_to->Add(radius_fake);
+                    } else return false;
+                }
+                // Sound (Disabled)
+                /*if (copy_from->HasType(RE::ExtraDataType::kSound)) {
+                    logger::trace("Sound found");
+                    auto sound = static_cast<RE::ExtraSound*>(copy_from->GetByType(RE::ExtraDataType::kSound));
+                    if (sound) {
+                        RE::ExtraSound* sound_fake = RE::BSExtraData::Create<RE::ExtraSound>();
+                        sound_fake->handle = sound->handle;
+                        copy_to->Add(sound_fake);
+                    } else
+                        RaiseMngrErr("Failed to get radius from copy_from");
+                }*/
+                // LinkedRef (Disabled)
+                /*if (copy_from->HasType(RE::ExtraDataType::kLinkedRef)) {
+                    logger::trace("LinkedRef found");
+                    auto linkedref =
+                        static_cast<RE::ExtraLinkedRef*>(copy_from->GetByType(RE::ExtraDataType::kLinkedRef));
+                    if (linkedref) {
+                        RE::ExtraLinkedRef* linkedref_fake = RE::BSExtraData::Create<RE::ExtraLinkedRef>();
+                        linkedref_fake->linkedRefs = linkedref->linkedRefs;
+                        copy_to->Add(linkedref_fake);
+                    } else
+                        RaiseMngrErr("Failed to get linkedref from copy_from");
+                }*/
+                // Horse
+                if (copy_from->HasType(RE::ExtraDataType::kHorse)) {
+                    logger::trace("Horse found");
+                    auto horse = static_cast<RE::ExtraHorse*>(copy_from->GetByType(RE::ExtraDataType::kHorse));
+                    if (horse) {
+                        RE::ExtraHorse* horse_fake = RE::BSExtraData::Create<RE::ExtraHorse>();
+                        Copy::CopyHorse(horse, horse_fake);
+                        copy_to->Add(horse_fake);
+                    } else return false;
+                }
+                // Hotkey
+                if (copy_from->HasType(RE::ExtraDataType::kHotkey)) {
+                    logger::trace("Hotkey found");
+                    auto hotkey = static_cast<RE::ExtraHotkey*>(copy_from->GetByType(RE::ExtraDataType::kHotkey));
+                    if (hotkey) {
+                        RE::ExtraHotkey* hotkey_fake = RE::BSExtraData::Create<RE::ExtraHotkey>();
+                        Copy::CopyHotkey(hotkey, hotkey_fake);
+                        copy_to->Add(hotkey_fake);
+                    } else return false;
+                }
+                // Weapon Attack Sound (Disabled)
+                /*if (copy_from->HasType(RE::ExtraDataType::kWeaponAttackSound)) {
+                    logger::trace("WeaponAttackSound found");
+                    auto weaponattacksound = static_cast<RE::ExtraWeaponAttackSound*>(
+                        copy_from->GetByType(RE::ExtraDataType::kWeaponAttackSound));
+                    if (weaponattacksound) {
+                        RE::ExtraWeaponAttackSound* weaponattacksound_fake =
+                            RE::BSExtraData::Create<RE::ExtraWeaponAttackSound>();
+                        weaponattacksound_fake->handle = weaponattacksound->handle;
+                        copy_to->Add(weaponattacksound_fake);
+                    } else
+                        RaiseMngrErr("Failed to get weaponattacksound from copy_from");
+                }*/
+                // Activate Ref (Disabled)
+                /*if (copy_from->HasType(RE::ExtraDataType::kActivateRef)) {
+                    logger::trace("ActivateRef found");
+                    auto activateref =
+                        static_cast<RE::ExtraActivateRef*>(copy_from->GetByType(RE::ExtraDataType::kActivateRef));
+                    if (activateref) {
+                        RE::ExtraActivateRef* activateref_fake = RE::BSExtraData::Create<RE::ExtraActivateRef>();
+                        activateref_fake->parents = activateref->parents;
+                        activateref_fake->activateFlags = activateref->activateFlags;
+                    } else
+                        RaiseMngrErr("Failed to get activateref from copy_from");
+                }*/
+                // TextDisplayData
+                if (copy_from->HasType(RE::ExtraDataType::kTextDisplayData)) {
+                    logger::trace("TextDisplayData found");
+                    auto textdisplaydata =
+                        static_cast<RE::ExtraTextDisplayData*>(copy_from->GetByType(RE::ExtraDataType::kTextDisplayData));
+                    if (textdisplaydata) {
+                        RE::ExtraTextDisplayData* textdisplaydata_fake =
+                            RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
+                        Copy::CopyTextDisplayData(textdisplaydata, textdisplaydata_fake);
+                        copy_to->Add(textdisplaydata_fake);
+                    } else return false;
+                }
+                // Soul
+                if (copy_from->HasType(RE::ExtraDataType::kSoul)) {
+                    logger::trace("Soul found");
+                    auto soul = static_cast<RE::ExtraSoul*>(copy_from->GetByType(RE::ExtraDataType::kSoul));
+                    if (soul) {
+                        RE::ExtraSoul* soul_fake = RE::BSExtraData::Create<RE::ExtraSoul>();
+                        Copy::CopySoul(soul, soul_fake);
+                        copy_to->Add(soul_fake);
+                    } else return false;
+                }
+                // Flags (OK)
+                if (copy_from->HasType(RE::ExtraDataType::kFlags)) {
+                    logger::trace("Flags found");
+                    auto flags = static_cast<RE::ExtraFlags*>(copy_from->GetByType(RE::ExtraDataType::kFlags));
+                    if (flags) {
+                        SKSE::stl::enumeration<RE::ExtraFlags::Flag, std::uint32_t> flags_fake;
+                        if (flags->flags.all(RE::ExtraFlags::Flag::kBlockActivate))
+                            flags_fake.set(RE::ExtraFlags::Flag::kBlockActivate);
+                        if (flags->flags.all(RE::ExtraFlags::Flag::kBlockPlayerActivate))
+                            flags_fake.set(RE::ExtraFlags::Flag::kBlockPlayerActivate);
+                        if (flags->flags.all(RE::ExtraFlags::Flag::kBlockLoadEvents))
+                            flags_fake.set(RE::ExtraFlags::Flag::kBlockLoadEvents);
+                        if (flags->flags.all(RE::ExtraFlags::Flag::kBlockActivateText))
+                            flags_fake.set(RE::ExtraFlags::Flag::kBlockActivateText);
+                        if (flags->flags.all(RE::ExtraFlags::Flag::kPlayerHasTaken))
+                            flags_fake.set(RE::ExtraFlags::Flag::kPlayerHasTaken);
+                        // RE::ExtraFlags* flags_fake = RE::BSExtraData::Create<RE::ExtraFlags>();
+                        // flags_fake->flags = flags->flags;
+                        // copy_to->Add(flags_fake);
+                    } else return false;
+                }
+                // Lock (Disabled)
+                /*if (copy_from->HasType(RE::ExtraDataType::kLock)) {
+                    logger::trace("Lock found");
+                    auto lock = static_cast<RE::ExtraLock*>(copy_from->GetByType(RE::ExtraDataType::kLock));
+                    if (lock) {
+                        RE::ExtraLock* lock_fake = RE::BSExtraData::Create<RE::ExtraLock>();
+                        lock_fake->lock = lock->lock;
+                        copy_to->Add(lock_fake);
+                    } else
+                        RaiseMngrErr("Failed to get lock from copy_from");
+                }*/
+                // Teleport (Disabled)
+                /*if (copy_from->HasType(RE::ExtraDataType::kTeleport)) {
+                    logger::trace("Teleport found");
+                    auto teleport =
+                        static_cast<RE::ExtraTeleport*>(copy_from->GetByType(RE::ExtraDataType::kTeleport));
+                    if (teleport) {
+                        RE::ExtraTeleport* teleport_fake = RE::BSExtraData::Create<RE::ExtraTeleport>();
+                        teleport_fake->teleportData = teleport->teleportData;
+                        copy_to->Add(teleport_fake);
+                    } else
+                        RaiseMngrErr("Failed to get teleport from copy_from");
+                }*/
+                // LockList (Disabled)
+                /*if (copy_from->HasType(RE::ExtraDataType::kLockList)) {
+                    logger::trace("LockList found");
+                    auto locklist =
+                        static_cast<RE::ExtraLockList*>(copy_from->GetByType(RE::ExtraDataType::kLockList));
+                    if (locklist) {
+                        RE::ExtraLockList* locklist_fake = RE::BSExtraData::Create<RE::ExtraLockList>();
+                        locklist_fake->list = locklist->list;
+                        copy_to->Add(locklist_fake);
+                    } else
+                        RaiseMngrErr("Failed to get locklist from copy_from");
+                }*/
+                // OutfitItem (Disabled)
+                /*if (copy_from->HasType(RE::ExtraDataType::kOutfitItem)) {
+                    logger::trace("OutfitItem found");
+                    auto outfititem =
+                        static_cast<RE::ExtraOutfitItem*>(copy_from->GetByType(RE::ExtraDataType::kOutfitItem));
+                    if (outfititem) {
+                        RE::ExtraOutfitItem* outfititem_fake = RE::BSExtraData::Create<RE::ExtraOutfitItem>();
+                        outfititem_fake->id = outfititem->id;
+                        copy_to->Add(outfititem_fake);
+                    } else
+                        RaiseMngrErr("Failed to get outfititem from copy_from");
+                }*/
+                // CannotWear (Disabled)
+                /*if (copy_from->HasType(RE::ExtraDataType::kCannotWear)) {
+                    logger::trace("CannotWear found");
+                    auto cannotwear =
+                        static_cast<RE::ExtraCannotWear*>(copy_from->GetByType(RE::ExtraDataType::kCannotWear));
+                    if (cannotwear) {
+                        RE::ExtraCannotWear* cannotwear_fake = RE::BSExtraData::Create<RE::ExtraCannotWear>();
+                        copy_to->Add(cannotwear_fake);
+                    } else
+                        RaiseMngrErr("Failed to get cannotwear from copy_from");
+                }*/
+                // Ownership (OK)
+                if (copy_from->HasType(RE::ExtraDataType::kOwnership)) {
+                    logger::trace("Ownership found");
+                    auto ownership = static_cast<RE::ExtraOwnership*>(copy_from->GetByType(RE::ExtraDataType::kOwnership));
+                    if (ownership) {
+                        logger::trace("length of fake extradatalist: {}", copy_to->GetCount());
+                        RE::ExtraOwnership* ownership_fake = RE::BSExtraData::Create<RE::ExtraOwnership>();
+                        Copy::CopyOwnership(ownership, ownership_fake);
+                        copy_to->Add(ownership_fake);
+                        logger::trace("length of fake extradatalist: {}", copy_to->GetCount());
+                    } else return false;
+                }
+
+                return true;
+
+            }
+            
+            void PrintObjectExtraData(RE::TESObjectREFR* ref) {
+                if (!ref) {
+					logger::error("Ref is null.");
+					return;
+				}
+                logger::info("printing ExtraDataList");
+                for (int i = 0; i < 191; i++) {
+                    if (ref->extraList.HasType(static_cast<RE::ExtraDataType>(i))) {
+                        logger::info("ExtraDataList type: {}", i);
+                    }
+                }
+            }
+
+        };
     };
     
     namespace FunctionsPapyrus {
@@ -834,6 +1546,7 @@ namespace Utilities{
      //   const _ApplyHavokImpulse ApplyHavokImpulse = (_ApplyHavokImpulse)0x00908260;
      //   RE::SkyrimVM*& g_skyrimVM = *(RE::SkyrimVM**)0x012E568C;
     };
+    
     namespace FunctionsJSON {
         
         int GetFormEditorID(const rapidjson::Value& section, const char* memberName) {
@@ -1015,7 +1728,6 @@ namespace Utilities{
             bool is_favorited = false; // used only when loading and saving
 		};
 
-
         struct StageInstance {
             float start_time; // start time of the stage
             StageNo no;
@@ -1039,6 +1751,22 @@ namespace Utilities{
                 _delay_formid = 0;
             }
         
+            StageInstance(const StageInstancePlain& plain)
+                : start_time(plain.start_time),
+                  no(plain.no),
+                  count(plain.count),
+                  _elapsed(plain._elapsed),
+                  _delay_start(plain._delay_start),
+                  _delay_mag(plain._delay_mag),
+                  _delay_formid(plain._delay_formid) {
+            	
+                xtra.is_fake = plain.is_fake;
+                xtra.is_decayed = plain.is_decayed;
+                xtra.crafting_allowed = plain.crafting_allowed;
+                xtra.is_favorited = plain.is_favorited;
+            }
+
+
             //define ==
             // assumes that they are in the same inventory
 			[[nodiscard]] bool operator==(const StageInstance& other) const {
@@ -1089,7 +1817,7 @@ namespace Utilities{
             }
 
             const float GetDelaySlope() const {
-                const auto delay_magnitude = std::min(std::max(-10.f, _delay_mag), 10.f);
+                const auto delay_magnitude = std::min(std::max(-1000.f, _delay_mag), 1000.f);
                 //return 1 - delay_magnitude;
                 return delay_magnitude;
             }
@@ -1101,20 +1829,19 @@ namespace Utilities{
                 _elapsed = 0;
 			}
 
-            void SetDelay(const float curr_time,const float delay,const FormID formid) {
+            void SetDelay(const float time,const float delay,const FormID formid) {
                 // yeni steigungla yeni ausgangspunkt yapiyoruz
                 // call only from UpdateTimeModulationInInventory
                 
                 if (_delay_formid == formid) return;
 
-                _elapsed = GetElapsed(curr_time);
-                _delay_start = curr_time;
+                _elapsed = GetElapsed(time);
+                _delay_start = time;
 				_delay_mag = delay;
                 _delay_formid = formid;
 			}
 
-            void RemoveTimeMod(const float curr_time) {
-				SetDelay(curr_time, 1, 0);
+            void RemoveTimeMod(const float time) { SetDelay(time, 1, 0);
 			}
 
             const float GetDelayMagnitude() const {
@@ -1172,11 +1899,9 @@ namespace Utilities{
                 new_is_fake(fake) {}
         };
 
-
-
         using SourceData = std::map<RefID,std::vector<StageInstance>>;
-        using SaveDataLHS = FormEditorID;
-        using SaveDataRHS = SourceData;
+        using SaveDataLHS = std::pair<FormEditorID,RefID>;
+        using SaveDataRHS = std::vector<StageInstancePlain>;
     }
 
 
@@ -1219,7 +1944,6 @@ namespace Utilities{
          using Locker = std::lock_guard<Lock>;
          mutable Lock m_Lock;
      };
-
 
      class SaveLoadData : public BaseData<Types::SaveDataLHS,Types::SaveDataRHS> {
      public:
@@ -1277,15 +2001,16 @@ namespace Utilities{
              for (auto i = 0; i < recordDataSize; i++) {
                  logger::trace("Loading data from serialization interface.");
                  logger::trace("ReadRecordData:{}", serializationInterface->ReadRecordData(lhs));
-                 auto formid = lhs.form_id;
-                 if (!serializationInterface->ResolveFormID(formid, lhs.form_id)) {
+                 /*auto formid_editorid = lhs.first;
+                 auto refid = lhs.second;*/
+                 /*if (!serializationInterface->ResolveFormID(formid, lhs.form_id)) {
                      logger::error("Failed to resolve form ID, 0x{:X}.", formid);
                      continue;
-                 }
+                 }*/
                  logger::trace("Reading value...");
                  logger::trace("ReadRecordData: {}", serializationInterface->ReadRecordData(rhs));
                  m_Data[lhs] = rhs;
-                 logger::trace("Loaded data for FormEditorID: {} {}", lhs.form_id, lhs.editor_id);
+                 logger::trace("Loaded data for FormEditorID: {} {} and refid", lhs.first.form_id, lhs.first.editor_id,lhs.second);
              }
              return true;
          }

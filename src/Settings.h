@@ -4,17 +4,56 @@
 
 using namespace Utilities::Types;
 
-namespace Settings {
+namespace Settings
+{
 
     bool failed_to_load = false;
 
     constexpr std::uint32_t kSerializationVersion = 626;
     constexpr std::uint32_t kDataKey = 'QAOT';
 
-    constexpr auto exclude_path_ = "Data/SKSE/Plugins/AoT_exclude"; //txt
-    constexpr auto defaults_path_ = "Data/SKSE/Plugins/AoT_default";  // yml
-    constexpr auto customs_path_ = "Data/SKSE/Plugins/AoT_custom";  // yml
+    
+    // INI
+    constexpr auto INI_path = L"Data/SKSE/Plugins/AlchemyOfTime.ini";
+    const std::map<const char*, bool> moduleskeyvals = {{"FOOD",false},
+														{"INGR",false},
+                                                        {"MEDC",false},
+                                                        {"POSN",false},
+                                                        {"ARMO",false},
+														{"WEAP",false},
+														{"AMMO",false},
+														{"SCRL",false},
+														{"BOOK",false},
+														{"SLGM",false},
+														{"MISC",false}
+                                                        };
+    const std::map<const char*, bool> otherkeysvals = {{"WorldObjectsEvolve", false}};
+    const std::map<const char*, std::map<const char*, bool>> InISections = 
+                   {{"Modules", moduleskeyvals}, {"Other Settings", otherkeysvals}};
+    std::map<std::string,std::map<std::string, bool>> INI_settings;
 
+    int nMaxInstances = 200000;
+
+    /* std::vector<RE::ExtraDataType> xTrack = {
+        RE::ExtraDataType::kEnchantment,
+        RE::ExtraDataType::kWorn,
+        RE::ExtraDataType::kHealth,
+        RE::ExtraDataType::kRank ,
+        RE::ExtraDataType::kTimeLeft ,
+        RE::ExtraDataType::kCharge,
+        RE::ExtraDataType::kScale ,
+        RE::ExtraDataType::kUniqueID ,
+        RE::ExtraDataType::kPoison,
+        RE::ExtraDataType::kObjectHealth ,
+        RE::ExtraDataType::kLight ,
+        RE::ExtraDataType::kRadius,
+        RE::ExtraDataType::kHorse,
+        RE::ExtraDataType::kHotkey,
+        RE::ExtraDataType::kTextDisplayData,
+        RE::ExtraDataType::kSoul,
+        RE::ExtraDataType::kFlags,
+        RE::ExtraDataType::kOwnership
+    };*/
 
     struct DefaultSettings {
         std::map<StageNo, FormID> items = {};
@@ -29,7 +68,13 @@ namespace Settings {
 
         std::map<FormID,float> delayers;
 
+        bool init_failed = false;
+
         [[nodiscard]] const bool CheckIntegrity() {
+            if (init_failed) {
+				logger::error("Initialisation failed.");
+				return false;
+			}
             if (items.empty() || durations.empty() || stage_names.empty() || effects.empty() || numbers.empty()) {
                 logger::error("One of the maps is empty.");
                 // list sizes of each
@@ -38,33 +83,54 @@ namespace Settings {
                 logger::info("Stage names size: {}", stage_names.size());
                 logger::info("Effects size: {}", effects.size());
                 logger::info("Numbers size: {}", numbers.size());
-
+                init_failed = true;
                 return false;
             }
             if (items.size() != durations.size() || items.size() != stage_names.size() || items.size() != numbers.size()) {
 				logger::error("Sizes do not match.");
+                init_failed = true;
 				return false;
 			}
             for (auto i = 0; i < numbers.size(); i++) {
-                if (!Utilities::Functions::Vector::VectorHasElement<StageNo>(numbers, i)) {
+                if (!Utilities::Functions::Vector::HasElement<StageNo>(numbers, i)) {
                     logger::error("Key {} not found in numbers.", i);
                     return false;
                 }
                 if (!items.count(i) || !crafting_allowed.count(i) || !durations.count(i) || !stage_names.count(i) ||
                     !effects.count(i)) {
 					logger::error("Key {} not found in all maps.", i);
+                    init_failed = true;
 					return false;
 				}
+				
+                if (durations[i] <= 0) {
+					logger::error("Duration is less than or equal 0.");
+					init_failed = true;
+					return false;
+				}
+                
+                if (costoverrides.count(i) == 0) costoverrides[i] = -1;
+				if (weightoverrides.count(i) == 0) weightoverrides[i] = -1.0f;
+
 			}
             if (!decayed_id) {
                 logger::error("Decayed id is 0.");
+                init_failed = true;
                 return false;
             }
 			return true;
         }
     };
 
-    std::vector <std::string> QFORMS = {"FOOD"};
+    std::vector<std::string> QFORMS;
+    const std::vector<std::string> xQFORMS = {"ARMO", "WEAP", "SLGM", "MEDC", "POSN"};  // xdata is carried over in item transitions
+    
+    const std::vector<std::string> fakes_allowedQFORMS = {"FOOD", "MISC"};
+    const std::vector<std::string> mgeffs_allowedQFORMS = {"FOOD"};
+
+    const std::map<unsigned int, std::vector<std::string>> qform_bench_map = {
+        {1, {"FOOD"}}
+    };
     // key: qfromtype ->
     using CustomSettings = std::map<std::vector<std::string>, DefaultSettings>;
     std::map<std::string,DefaultSettings> defaultsettings;
@@ -72,7 +138,7 @@ namespace Settings {
     std::map <std::string,std::vector<std::string>> exclude_list;
 
     std::vector<std::string> LoadExcludeList(const std::string postfix) {
-        const auto exclude_path = std::string(exclude_path_) + postfix + ".txt";
+        const auto exclude_path = "Data/SKSE/Plugins/AlchemyOfTime/" +postfix +"/AoT_exclude" + postfix + ".txt ";
         logger::trace("Exclude path: {}", exclude_path);
         std::ifstream file(exclude_path);
         std::vector<std::string> strings;
@@ -83,9 +149,64 @@ namespace Settings {
         return strings;
     }
 
+    void LoadINISettings() {
+        logger::info("Loading ini settings: OtherStuff");
+
+
+        CSimpleIniA ini;
+
+        ini.SetUnicode();
+        ini.LoadFile(INI_path);
+
+        // if the section does not exist populate with default values
+        for (const auto& [section, defaults] : InISections) {
+            if (!ini.GetSection(section)) {
+				for (const auto& [key, val] : defaults) {
+					ini.SetBoolValue(section, key, val);
+                    INI_settings[section][key] = val;
+				}
+			}
+            // it exist now check if we have values for all keys
+            else {
+				for (const auto& [key, val] : defaults) {
+					if (!ini.GetBoolValue(section, key, val)) {
+						ini.SetBoolValue(section, key, val);
+						INI_settings[section][key] = val;
+					} else INI_settings[section][key] = ini.GetBoolValue(section, key, val);
+				}
+            }
+		}
+
+        if (!ini.GetLongValue("Other Settings", "nMaxInstancesInThousands", 200)) {
+			ini.SetLongValue("Other Settings", "nMaxInstancesInThousands", 200);
+            nMaxInstances = 200000;
+        } else
+            nMaxInstances = 1000 * ini.GetLongValue("Other Settings", "nMaxInstancesInThousands", 200);
+
+		ini.SaveFile(INI_path);
+    }
+
     [[nodiscard]] const bool IsQFormType(const FormID formid, const std::string& qformtype) {
         // POPULATE THIS
         if (qformtype == "FOOD") return Utilities::FunctionsSkyrim::IsFoodItem(formid);
+        else if (qformtype == "INGR")
+            return Utilities::FunctionsSkyrim::FormIsOfType(formid, RE::IngredientItem::FORMTYPE);
+        else if (qformtype == "MEDC") return Utilities::FunctionsSkyrim::IsMedicineItem(formid);
+        else if (qformtype == "POSN") return Utilities::FunctionsSkyrim::IsPoisonItem(formid);
+        else if (qformtype == "ARMO")
+            return Utilities::FunctionsSkyrim::FormIsOfType(formid,RE::TESObjectARMO::FORMTYPE);
+        else if (qformtype == "WEAP")
+			return Utilities::FunctionsSkyrim::FormIsOfType(formid,RE::TESObjectWEAP::FORMTYPE);
+        else if (qformtype == "AMMO")
+            return Utilities::FunctionsSkyrim::FormIsOfType(formid, RE::TESAmmo::FORMTYPE);
+        else if (qformtype == "SCRL")
+            return Utilities::FunctionsSkyrim::FormIsOfType(formid, RE::ScrollItem::FORMTYPE);
+		else if (qformtype == "BOOK")
+			return Utilities::FunctionsSkyrim::FormIsOfType(formid,RE::TESObjectBOOK::FORMTYPE);
+        else if (qformtype == "SLGM")
+            return Utilities::FunctionsSkyrim::FormIsOfType(formid, RE::TESSoulGem::FORMTYPE);
+		else if (qformtype == "MISC")
+			return Utilities::FunctionsSkyrim::FormIsOfType(formid,RE::TESObjectMISC::FORMTYPE);
         else return false;
     }
 
@@ -123,13 +244,11 @@ namespace Settings {
         return false;
     }
 
-    [[nodiscard]] const bool IsItem(const FormID formid, std::string type = "") {
+    [[nodiscard]] const bool IsItem(const FormID formid, std::string type = "", bool check_exclude=false) {
         if (!formid) return false;
-        if (Settings::IsInExclude(formid)) return false;
-        if (type.empty()) {
-            return !GetQFormType(formid).empty();
-		} else return IsQFormType(formid, type);
-            
+        if (check_exclude && Settings::IsInExclude(formid, type)) return false;
+        if (type.empty()) return !GetQFormType(formid).empty();
+		else return IsQFormType(formid, type);
     }
 
     [[nodiscard]] const bool IsItem(const RE::TESObjectREFR* ref, std::string type = "") {
@@ -147,12 +266,14 @@ namespace Settings {
          //we have:stages, decayedFormEditorID and delayers
         if (!config["stages"] || config["stages"].size() == 0) {
             logger::error("Stages are empty.");
+            settings.init_failed = true;
             return settings;
         }
         for (const auto& stageNode : config["stages"]) {
             if (!stageNode["no"] || stageNode["no"].IsNull()) {
 				logger::error("No is missing for stage.");
-				return DefaultSettings();
+                settings.init_failed = true;
+                return settings;
 			}
             const auto temp_no = stageNode["no"].as<StageNo>();
             // add to numbers
@@ -164,7 +285,8 @@ namespace Settings {
                                          : Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
             if (temp_formid < 0) {
                 logger::error("Formid is less than 0.");
-                return DefaultSettings();
+                settings.init_failed = true;
+                return settings;
             }
             // add to items
             logger::info("Formid");
@@ -211,7 +333,8 @@ namespace Settings {
                             : Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_effect_formeditorid);
                     if (temp_effect_formid < 0) {
                         logger::error("Effect Formid is less than 0.");
-                        return DefaultSettings();
+                        settings.init_failed = true;
+                        return settings;
                     }
                     if (temp_effect_formid>0){
                         const auto temp_magnitude = effectNode["magnitude"].as<float>();
@@ -227,7 +350,8 @@ namespace Settings {
             Utilities::FunctionsSkyrim::GetFormEditorIDFromString(config["finalFormEditorID"].as<std::string>());
         if (temp_decayed_id < 0) {
             logger::error("Decayed Formid is less than 0.");
-            return DefaultSettings();
+            settings.init_failed = true;
+            return settings;
         }
         settings.decayed_id = temp_decayed_id;
         // delayers
@@ -241,24 +365,25 @@ namespace Settings {
             }
             settings.delayers[temp_formid] = modulator["magnitude"].as<float>();
         }
+        
         if (!settings.CheckIntegrity()) {
-            logger::critical("Settings integrity check failed.");
-            return DefaultSettings();
-        }
+			logger::critical("Settings integrity check failed.");
+		}
+
         return settings;
     }
 
     DefaultSettings parseDefaults(std::string _type){ 
-        const auto filename = std::string(defaults_path_) + _type + ".yml";
+        const auto filename = "Data/SKSE/Plugins/AlchemyOfTime/" + _type + "/AoT_default" + _type + ".yml";
         logger::info("Filename: {}", filename);
 		YAML::Node config = YAML::LoadFile(filename);
-        logger::info("asldkjfösadjn");
-		return _parseDefaults(config);
+        logger::info("File loaded.");
+        return _parseDefaults(config);
     }
 
     CustomSettings parseCustoms(std::string _type){
         CustomSettings _custom_settings;
-		const auto filename = std::string(customs_path_) + _type + ".yml";
+        const auto filename = "Data/SKSE/Plugins/AlchemyOfTime/" + _type + "/AoT_custom" + _type + ".yml";
         YAML::Node config = YAML::LoadFile(filename);
 
         for (const auto& _Node : config["ownerLists"]){
@@ -278,35 +403,52 @@ namespace Settings {
         return _custom_settings;
     }
 
+    
     void LoadSettings() {
-            for (const auto& _qftype: Settings::QFORMS) {
-                try {
-                    logger::info("Loading defaultsettings for {}", _qftype);
-			        defaultsettings[_qftype] = parseDefaults(_qftype);
-                } catch (const std::exception& ex) {
-                    logger::critical("Failed to load default settings for {}: {}", _qftype, ex.what());
-                    failed_to_load = true;
-                    return;
-                }
-                try {
-                    logger::info("Loading custom settings for {}", _qftype);
-			        custom_settings[_qftype] = parseCustoms(_qftype);
-                } catch (const std::exception&) {
-                    logger::critical("Failed to load custom settings for {}", _qftype);
-					failed_to_load = true;
-                    return;
-                }
-                for (const auto& [key,_] : custom_settings[_qftype]) {
-                    logger::trace("Key: {}", key.front());
-                }
-                try {
-                    exclude_list[_qftype] = LoadExcludeList(_qftype);
-                } catch (const std::exception&) {
-                    logger::critical("Failed to load exclude list for {}", _qftype);
-                    failed_to_load = true;
-                    return;
-                }
-		    }
+        logger::info("Loading settings.");
+        try {
+            LoadINISettings();
+        } catch (const std::exception& ex) {
+			logger::critical("Failed to load ini settings: {}", ex.what());
+			failed_to_load = true;
+			return;
+		}
+        if (!INI_settings.contains("Modules")) {
+            logger::critical("Modules section not found in ini settings.");
+			failed_to_load = true;
+			return;
+		}
+        for (const auto& [key,val]: INI_settings["Modules"]) {
+            if (val) QFORMS.push_back(key);
+		}
+        for (const auto& _qftype: QFORMS) {
+            try {
+                logger::info("Loading defaultsettings for {}", _qftype);
+			    defaultsettings[_qftype] = parseDefaults(_qftype);
+            } catch (const std::exception& ex) {
+                logger::critical("Failed to load default settings for {}: {}", _qftype, ex.what());
+                failed_to_load = true;
+                return;
+            }
+            try {
+                logger::info("Loading custom settings for {}", _qftype);
+			    custom_settings[_qftype] = parseCustoms(_qftype);
+            } catch (const std::exception&) {
+                logger::critical("Failed to load custom settings for {}", _qftype);
+				failed_to_load = true;
+                return;
+            }
+            for (const auto& [key,_] : custom_settings[_qftype]) {
+                logger::trace("Key: {}", key.front());
+            }
+            try {
+                exclude_list[_qftype] = LoadExcludeList(_qftype);
+            } catch (const std::exception&) {
+                logger::critical("Failed to load exclude list for {}", _qftype);
+                failed_to_load = true;
+                return;
+            }
+	    }
     }
 
     // 0x99 - ExtraTextDisplayData 
@@ -322,9 +464,15 @@ namespace Settings {
     // 0x7E - ExtraReservedMarkers 126
     // 0x88 - ExtraAliasInstanceArray 136
     // 0x8C - ExtraPromotedRef 140 NOT OK
-    std::vector<int> xRemove = {0x99, 0x3C, 0x0B, 0x48, 0x21, 0x24,
+    // 0x1C - ExtraReferenceHandle 28 NOT OK (npc muhabbeti)
+    std::vector<int> xRemove = {
+        0x99, 
+        0x3C, 0x0B, 0x48,
+         //0x21, 
+         // 
+        //0x24,
                                 0x70, 0x7E, 0x88, 
-        0x8C
+        0x8C, 0x1C
     };
 
 
@@ -368,7 +516,7 @@ struct Source {
 			return;
 		}
 
-        if (!Settings::IsItem(formid)) {
+        if (!Settings::IsItem(formid, "",true)) {
             InitFailed();
             return;
         }
@@ -399,7 +547,18 @@ struct Source {
                 if (formtype == RE::FormType::AlchemyItem) GatherStages<RE::AlchemyItem>();
 			    else if (formtype == RE::FormType::Ingredient) GatherStages<RE::IngredientItem>();
             }
-            else {
+            else if (qFormType == "INGR") GatherStages<RE::IngredientItem>();
+            else if (qFormType == "MEDC") GatherStages<RE::AlchemyItem>();
+			else if (qFormType == "POSN") GatherStages<RE::AlchemyItem>();
+			else if (qFormType == "ARMO") GatherStages<RE::TESObjectARMO>();
+			else if (qFormType == "WEAP") GatherStages<RE::TESObjectWEAP>();
+			else if (qFormType == "AMMO") GatherStages<RE::TESAmmo>();
+			else if (qFormType == "SCRL") GatherStages<RE::ScrollItem>();
+			else if (qFormType == "BOOK") GatherStages<RE::TESObjectBOOK>();
+			else if (qFormType == "SLGM") GatherStages<RE::TESSoulGem>();
+			else if (qFormType == "MISC") GatherStages<RE::TESObjectMISC>();
+			else {
+				logger::error("QFormType is not one of the predefined types.");
 				InitFailed();
 				return;
 			}
@@ -408,6 +567,11 @@ struct Source {
             // check if formids exist in the game
             for (auto& [key, value] : stages) {
                 if (!Utilities::FunctionsSkyrim::GetFormByID(value.formid, "")) {
+                    if (!Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType)) {
+                        logger::warn("Formid {} for stage {} does not exist.", value.formid, key);
+                        InitFailed();
+                        return;
+                    }
                     // make one and replace formid
 					logger::warn("Formid {} for stage {} does not exist.", value.formid, key);
                     if (formtype == RE::FormType::AlchemyItem) value.formid = CreateFake<RE::AlchemyItem>(form->As<RE::AlchemyItem>());
@@ -483,12 +647,12 @@ struct Source {
                 }
             }
         }
-        CleanUpData();
+        //CleanUpData();
         return updated_instances;
     }
 
     [[nodiscard]] const bool IsFakeStage(const StageNo no) const {
-        return Utilities::Functions::Vector::VectorHasElement<StageNo>(fake_stages, no);
+        return Utilities::Functions::Vector::HasElement<StageNo>(fake_stages, no);
     }
 
     [[nodiscard]] const StageNo* GetStageNo(const FormID formid_) {
@@ -555,7 +719,7 @@ struct Source {
         return true;
     }
 
-    [[nodiscard]] const bool InitInsertInstance(StageNo n, Count c, RefID l) {
+    [[nodiscard]] const bool InitInsertInstanceWO(StageNo n, Count c, RefID l) {
         if (init_failed) {
             logger::critical("InitInsertInstance: Initialisation failed.");
             return false;
@@ -571,7 +735,7 @@ struct Source {
     }
 
     // applies time modulation to all instances in the inventory
-    [[nodiscard]] const bool InitInsertInstance(StageNo n, Count c, RE::TESObjectREFR* inventory_owner){
+    [[nodiscard]] const bool InitInsertInstanceInventory(StageNo n, Count c, RE::TESObjectREFR* inventory_owner){
         if (!inventory_owner) {
             logger::error("Inventory owner is null.");
             return false;
@@ -582,7 +746,8 @@ struct Source {
 			return false;
         }
         
-        if (!InitInsertInstance(n, c, inventory_owner_refid)) {
+        // isme takilma
+        if (!InitInsertInstanceWO(n, c, inventory_owner_refid)) {
 			logger::error("InitInsertInstance failed.");
 			return false;
 		}
@@ -620,8 +785,8 @@ struct Source {
         return true;
     }
 
-    Count MoveInstances(const RefID from_ref, const RefID to_ref, const FormID instance_formid, Count count, const bool bias_direction) {
-        // bias_direction: true to move older instances first
+    Count MoveInstances(const RefID from_ref, const RefID to_ref, const FormID instance_formid, Count count, const bool older_first) {
+        // older_first: true to move older instances first
         if (data.empty()) {
 			logger::warn("No data found for source {}", editorid);
 			return 0;
@@ -662,7 +827,7 @@ struct Source {
         }
 
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
-        if (bias_direction) {
+        if (older_first) {
             std::sort(instances_candidates.begin(), instances_candidates.end(),
                       [this, from_ref, curr_time](size_t a, size_t b) {
                           return this->data[from_ref][a].GetElapsed(curr_time) >
@@ -712,15 +877,17 @@ struct Source {
                 count = 0;
                 //break;
             } else {
+                const auto count_temp = count;
+                count -= instance->count;
                 if (!MoveInstance(from_ref, to_ref, instance)) {
 					logger::error("MoveInstance failed.");
-                    return count;
+                    return count_temp;
 				}
-                count -= instance->count;
                 removed_indices.push_back(index);
             }
         }
-
+        logger::trace("MoveInstances: Printing data...");
+        PrintData();
         return count;
 
     }
@@ -753,8 +920,21 @@ struct Source {
         return false;
     }
 
+    [[nodiscard]] const bool IsDecayedItem(const FormID _form_id) const { return decayed_stage.formid == _form_id; }
+
+    const FormID GetModulatorInInventory(RE::TESObjectREFR* inventory_owner) {
+        const auto inventory = inventory_owner->GetInventory();
+        for (const auto& [dlyr_fid, dlyr_mgntd] : defaultsettings->delayers) {
+            if (const auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(dlyr_fid));
+                entry != inventory.end() && entry->second.first > 0) {
+                return dlyr_fid;
+            }
+        }
+        return 0;
+    }
+
     // always update before doing this
-    void UpdateTimeModulationInInventory(RE::TESObjectREFR* inventory_owner, const float curr_time) {
+    void UpdateTimeModulationInInventory(RE::TESObjectREFR* inventory_owner, const float _time) {
         if (!inventory_owner) {
             logger::error("Inventory owner is null.");
             return;
@@ -781,8 +961,24 @@ struct Source {
             return;
         }
 
-        SetDelayOfInstances(inventory_owner_refid, curr_time, inventory_owner);
+        SetDelayOfInstances(_time, inventory_owner);
     }
+
+  //  const StageUpdate GetUpdate(StageInstance instance,const float _time) {
+  //      
+  //      Stage* old_stage = &stages[instance.no];
+  //      Stage* new_stage = nullptr;
+  //      if (_UpdateStageInstance(instance, _time)) {
+  //          if (instance.xtra.is_decayed || !stages.contains(instance.no)) new_stage = &decayed_stage;
+  //          else new_stage = &stages[instance.no];
+  //          auto is_fake__ = IsFakeStage(instance.no);
+  //          StageUpdate stage_update(old_stage, new_stage, instance.count, is_fake__);
+  //          return stage_update;
+  //      } else {
+  //          StageUpdate stage_update(nullptr, nullptr, 0, false);
+  //          return stage_update;
+		//}
+  //  }
 
     void CleanUpData() {
         if (init_failed) {
@@ -928,7 +1124,60 @@ private:
     }
 
     template <typename T>
-    void GatherStages() {
+    void ApplyMGEFFSettings(T* stage_form, std::vector<StageEffect>& settings_effs) {
+        RE::BSTArray<RE::Effect*> _effects = Utilities::FunctionsSkyrim::FormTraits<T>::GetEffects(stage_form);
+        std::vector<RE::EffectSetting*> MGEFFs;
+        std::vector<uint32_t*> pMGEFFdurations;
+        std::vector<float*> pMGEFFmagnitudes;
+
+        // i need this many empty effects
+        int n_empties = static_cast<int>(_effects.size()) - static_cast<int>(settings_effs.size());
+        if (n_empties < 0) n_empties = 0;
+
+        for (int j = 0; j < settings_effs.size(); j++) {
+            auto fake_mgeff_id = settings_effs[j].beffect;
+            if (!fake_mgeff_id) {
+                MGEFFs.push_back(empty_mgeff);
+                pMGEFFdurations.push_back(nullptr);
+                pMGEFFmagnitudes.push_back(nullptr);
+            } else {
+                RE::EffectSetting* fake_mgeffect =
+                    Utilities::FunctionsSkyrim::GetFormByID<RE::EffectSetting>(fake_mgeff_id);
+                if (settings_effs[j].duration &&
+                    !Utilities::Functions::String::includesString(
+                        std::string(fake_mgeffect->magicItemDescription.c_str()), {"<dur>"}) &&
+                    !fake_mgeffect->data.flags.any(RE::EffectSetting::EffectSettingData::Flag::kNoDuration)) {
+                    auto descr_str = std::string(fake_mgeffect->magicItemDescription.c_str());
+                    descr_str = descr_str.substr(0, descr_str.length() - 1);
+                    RE::EffectSetting* new_form = nullptr;
+                    new_form = fake_mgeffect->CreateDuplicateForm(true, (void*)new_form)->As<RE::EffectSetting>();
+
+                    if (!new_form) {
+                        logger::error("Failed to create new form.");
+                        return;
+                    }
+                    new_form->Copy(fake_mgeffect);
+                    new_form->fullName = fake_mgeffect->GetFullName();
+                    new_form->magicItemDescription = (descr_str + " for <dur> second(s).").c_str();
+                    fake_mgeffect = new_form;
+                }
+                MGEFFs.push_back(fake_mgeffect);
+                pMGEFFdurations.push_back(&settings_effs.at(j).duration);
+                pMGEFFmagnitudes.push_back(&settings_effs.at(j).magnitude);
+            }
+        }
+
+        for (int j = 0; j < n_empties; j++) {
+            MGEFFs.push_back(empty_mgeff);
+            pMGEFFdurations.push_back(nullptr);
+            pMGEFFmagnitudes.push_back(nullptr);
+        }
+        Utilities::FunctionsSkyrim::OverrideMGEFFs(_effects, MGEFFs, pMGEFFdurations, pMGEFFmagnitudes);
+        
+    }
+
+    template <typename T>
+    void GatherStages()  {
         // for now use default stages
         if (!empty_mgeff) {
             logger::error("Empty mgeff is null.");
@@ -937,116 +1186,82 @@ private:
 
         for (auto i = 0; i < defaultsettings->numbers.size(); i++) {
             // create fake form
-            auto alch_item = GetBoundObject()->As<T>();
-            FormID fake_formid;
+            auto source_item = GetBoundObject()->As<T>();
+            FormID stage_formid; // not really always fake?
             if (!defaultsettings->items[i]) {
-                fake_formid = CreateFake(alch_item);
-                fake_stages.push_back(defaultsettings->numbers[i]);
-            } else {
-                auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<T>(defaultsettings->items[i], "");
-                fake_formid = fake_form ? fake_form->GetFormID() : 0;
+                if (i==0) stage_formid = formid;
+                else if (Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType))
+                {
+                    logger::info("No ID given. creating copy item for this type {}", qFormType);
+                    stage_formid = CreateFake(source_item);
+                    fake_stages.push_back(defaultsettings->numbers[i]);
+                }
+                else {
+                    logger::critical("No ID given and copy items not allowed for this type {}", qFormType);
+					return;
+                }
+            } 
+            else {
+                auto temp_form = Utilities::FunctionsSkyrim::GetFormByID<T>(defaultsettings->items[i], "");
+                stage_formid = temp_form ? temp_form->GetFormID() : 0;
             }
-            if (!fake_formid) {
-                logger::error("Could not create fake form for stage {}", i);
+            if (!stage_formid) {
+                logger::error("Could not create copy form for stage {}", i);
                 return;
             }
-            // or if this fake_formid is already in the stages return error
+            // or if this stage_formid is already in the stages return error
             for (auto& [key, value] : stages) {
-                if (fake_formid == value.formid) {
-                    logger::error("Fake formid is already in the stages.");
+                if (stage_formid == value.formid) {
+                    logger::error("stage_formid is already in the stages.");
                     return;
                 }
             }
-            if (fake_formid == formid) {
-                logger::warn("Fake formid is the same as the real formid.");
-                fake_formid = CreateFake(alch_item);
-                fake_stages.push_back(defaultsettings->numbers[i]);
+            if (stage_formid == formid && i!=0) {
+                // not allowed. if you want to go back to beginning use decayed stage
+                logger::error("Formid of non initial stage is equal to source formid.");
+                /*stage_formid = CreateFake(source_item);
+                fake_stages.push_back(defaultsettings->numbers[i]);*/
             }
             const auto duration = defaultsettings->durations[i];
             const StageName& name = defaultsettings->stage_names[i];
 
-            Stage stage(fake_formid, duration, i, name, defaultsettings->crafting_allowed[i], defaultsettings->effects[i]);
+            Stage stage(stage_formid, duration, i, name, defaultsettings->crafting_allowed[i],
+                        defaultsettings->effects[i]);
             if (!stages.insert({i, stage}).second) {
                 logger::error("Could not insert stage");
                 return;
             }
 
-            auto fake_form = Utilities::FunctionsSkyrim::GetFormByID<T>(fake_formid);
-            if (!fake_form) {
+            auto stage_form = Utilities::FunctionsSkyrim::GetFormByID<T>(stage_formid);
+            if (!stage_form) {
                 logger::error("Fake form is null.");
                 return;
             }
-            if (Utilities::Functions::Vector::VectorHasElement<StageNo>(fake_stages, i)) {
+            if (Utilities::Functions::Vector::HasElement<StageNo>(fake_stages, i)) {
                 // Update name of the fake form
                 if (!name.empty()) {
-                    fake_form->fullName = std::string(fake_form->fullName.c_str()) + " (" + name + ")";
+                    stage_form->fullName = std::string(stage_form->fullName.c_str()) + " (" + name + ")";
                     logger::info("Updated name of fake form to {}", name);
                 }
                 // Update value of the fake form
                 const auto temp_value = defaultsettings->costoverrides[i];
-                if (temp_value >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(fake_form, temp_value);
+                if (temp_value >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(stage_form, temp_value);
                 // Update weight of the fake form
                 const auto temp_weight = defaultsettings->weightoverrides[i];
-                if (temp_weight >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetWeight(fake_form, temp_weight);
+                if (temp_weight >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetWeight(stage_form, temp_weight);
             }
 
             if (defaultsettings->effects[i].empty()) continue;
 
             // change mgeff of fake form
-            // POPULATE THIS
-            if (!Utilities::Functions::Vector::VectorHasElement<std::string>({"FOOD"}, qFormType)) {
+
+            if (!Utilities::Functions::Vector::HasElement<std::string>(Settings::mgeffs_allowedQFORMS, qFormType)) {
                 logger::trace("MGEFF not available for this form type {}", qFormType);
                 return;
             }
 
-            std::vector<RE::EffectSetting*> MGEFFs;
-            std::vector<uint32_t*> pMGEFFdurations;
-            std::vector<float*> pMGEFFmagnitudes;
+            ApplyMGEFFSettings(stage_form, defaultsettings->effects[i]);
 
-            // i need this many empty effects
-            int n_empties =
-                static_cast<int>(fake_form->effects.size()) - static_cast<int>(defaultsettings->effects[i].size());
-            if (n_empties < 0) n_empties = 0;
-
-            for (int j = 0; j < defaultsettings->effects[i].size(); j++) {
-                auto fake_mgeff_id = defaultsettings->effects[i][j].beffect;
-                if (!fake_mgeff_id) {
-                    MGEFFs.push_back(empty_mgeff);
-                    pMGEFFdurations.push_back(nullptr);
-                    pMGEFFmagnitudes.push_back(nullptr);
-                } else {
-                    RE::EffectSetting* fake_mgeffect =
-                        Utilities::FunctionsSkyrim::GetFormByID<RE::EffectSetting>(fake_mgeff_id);
-                    if (defaultsettings->effects[i][j].duration &&
-                        !Utilities::Functions::String::includesString(std::string(fake_mgeffect->magicItemDescription.c_str()),
-                                                              {"<dur>"}) &&
-                        !fake_mgeffect->data.flags.any(RE::EffectSetting::EffectSettingData::Flag::kNoDuration)) {
-                        auto descr_str = std::string(fake_mgeffect->magicItemDescription.c_str());
-                        descr_str = descr_str.substr(0, descr_str.length() - 1);
-                        RE::EffectSetting* new_form = nullptr;
-                        new_form = fake_mgeffect->CreateDuplicateForm(true, (void*)new_form)->As<RE::EffectSetting>();
-
-                        if (!new_form) {
-                            logger::error("Failed to create new form.");
-                            return;
-                        }
-                        new_form->Copy(fake_mgeffect);
-                        new_form->fullName = fake_mgeffect->GetFullName();
-                        new_form->magicItemDescription = (descr_str + " for <dur> second(s).").c_str();
-                        fake_mgeffect = new_form;
-                    }
-                    MGEFFs.push_back(fake_mgeffect);
-                    pMGEFFdurations.push_back(&defaultsettings->effects[i][j].duration);
-                    pMGEFFmagnitudes.push_back(&defaultsettings->effects[i][j].magnitude);
-                }
-            }
-
-            for (int j = 0; j < n_empties; j++) {
-                MGEFFs.push_back(empty_mgeff);
-                pMGEFFdurations.push_back(nullptr);
-                pMGEFFmagnitudes.push_back(nullptr);
-            }
-            Utilities::FunctionsSkyrim::OverrideMGEFFs(fake_form->effects, MGEFFs, pMGEFFdurations, pMGEFFmagnitudes);
         }
     }
     
@@ -1056,31 +1271,22 @@ private:
         return dcyd_st;
     }
 
-    const FormID GetModulatorInInventory(RE::TESObjectREFR* inventory_owner) {
-        const auto inventory = inventory_owner->GetInventory();
-        for (const auto& [dlyr_fid, dlyr_mgntd] : defaultsettings->delayers) {
-            if (const auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(dlyr_fid));
-                entry != inventory.end() && entry->second.first > 0) {
-                return dlyr_fid;
-            }
-        }
-        return 0;
-    }
+    
 
-    void SetDelayOfInstances(const RefID loc, const float curr_time,
-                             RE::TESObjectREFR* inventory_owner) {
+    void SetDelayOfInstances(const float some_time, RE::TESObjectREFR* inventory_owner) {
         if (!inventory_owner) {
 			logger::error("Inventory owner is null.");
 			return;
 		}
+        const RefID loc = inventory_owner->GetFormID();
         if (!data.count(loc)) {
             logger::error("Location {} does not exist.", loc);
             return;
         }
-        const auto delayer_best = GetModulatorInInventory(inventory_owner);
+        const auto delayer_best = GetModulatorInInventory(inventory_owner); // basically the first on the list
         const float __delay = delayer_best == 0 ? 1 : defaultsettings->delayers[delayer_best];
         for (auto& instance : data[loc]) {
-            instance.SetDelay(curr_time, __delay, delayer_best);
+            instance.SetDelay(some_time, __delay, delayer_best);
         }
 	}
 
@@ -1128,7 +1334,7 @@ private:
 			return false;
 		}
 
-        if (formid == 0 || stages.empty()) {
+        if (formid == 0 || stages.empty() || qFormType.empty()) {
 			logger::error("One of the members is empty.");
 			return false;
 		}
@@ -1145,6 +1351,13 @@ private:
             }*/
             if (!stages[i].CheckIntegrity()) {
 				logger::error("Stage {} integrity check failed.", i);
+				return false;
+			}
+            // also need to check if qformtype is the same as source's qformtype
+            const auto stage_formid = stages[i].formid;
+            const auto stage_qformtype = Settings::GetQFormType(stage_formid);
+            if (stage_qformtype != qFormType) {
+				logger::error("Stage {} qformtype is not the same as the source qformtype.", i);
 				return false;
 			}
         }
