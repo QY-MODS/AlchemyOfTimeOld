@@ -1,6 +1,7 @@
 #include "Manager.h"
 
 Manager* M = nullptr;
+bool block_eventsinks = false;
 
 class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
                      public RE::BSTEventSink<RE::TESActivateEvent>,
@@ -59,29 +60,31 @@ public:
 
 
     RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* event, RE::BSTEventSource<RE::TESEquipEvent>*) {
-         if (!M->getListenEquip()) return RE::BSEventNotifyControl::kContinue;
-         if (!event) return RE::BSEventNotifyControl::kContinue;
-         if (!event->actor->IsPlayerRef()) return RE::BSEventNotifyControl::kContinue;
-         if (!Settings::IsItem(event->baseObject)) return RE::BSEventNotifyControl::kContinue;
          
-         if (!event->equipped) {
-            logger::trace("Item unequipped: {}", event->baseObject);
-			 return RE::BSEventNotifyControl::kContinue;
-         }
+        if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
+        if (!M->getListenEquip()) return RE::BSEventNotifyControl::kContinue;
+        if (!event) return RE::BSEventNotifyControl::kContinue;
+        if (!event->actor->IsPlayerRef()) return RE::BSEventNotifyControl::kContinue;
+        if (!Settings::IsItem(event->baseObject)) return RE::BSEventNotifyControl::kContinue;
+         
+        if (!event->equipped) {
+        logger::trace("Item unequipped: {}", event->baseObject);
+		    return RE::BSEventNotifyControl::kContinue;
+        }
 
-         const auto q_formtype = Settings::GetQFormType(event->baseObject);
-         logger::trace("equipped QFormType: {}", q_formtype);
-         // only for tracking consumed items
-         if (Utilities::Functions::Vector::HasElement<std::string>(Settings::consumableQFORMS, q_formtype)) {
-             consume_equipped_id = event->baseObject;
-             logger::trace("consume equipped: {}", consume_equipped_id);
-             consume_equipped_t = RE::Calendar::GetSingleton()->GetHoursPassed();
-             logger::trace("consume equipped time: {}", consume_equipped_t);
-         }
-         if (Utilities::Functions::Vector::HasElement<std::string>(Settings::updateonequipQFORMS, q_formtype)) {
+        const auto q_formtype = Settings::GetQFormType(event->baseObject);
+        logger::trace("equipped QFormType: {}", q_formtype);
+        // only for tracking consumed items
+        if (Utilities::Functions::Vector::HasElement<std::string>(Settings::consumableQFORMS, q_formtype)) {
+            consume_equipped_id = event->baseObject;
+            logger::trace("consume equipped: {}", consume_equipped_id);
+            consume_equipped_t = RE::Calendar::GetSingleton()->GetHoursPassed();
+            logger::trace("consume equipped time: {}", consume_equipped_t);
+        }
+        if (Utilities::Functions::Vector::HasElement<std::string>(Settings::updateonequipQFORMS, q_formtype)) {
             logger::trace("Item equipped: {}", event->baseObject);
             M->UpdateStages(player_refid);
-         }
+        }
 
         
         // if (event->equipped) {
@@ -95,6 +98,7 @@ public:
     RE::BSEventNotifyControl ProcessEvent(const RE::TESActivateEvent* event,
                                           RE::BSTEventSource<RE::TESActivateEvent>*) {
         
+        if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->objectActivated) return RE::BSEventNotifyControl::kContinue;
         if (event->objectActivated == RE::PlayerCharacter::GetSingleton()->GetGrabbedRef()) return RE::BSEventNotifyControl::kContinue;
@@ -129,6 +133,7 @@ public:
     RE::BSEventNotifyControl ProcessEvent(const SKSE::CrosshairRefEvent* event,
                                           RE::BSTEventSource<SKSE::CrosshairRefEvent>*) {
 
+        if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->crosshairRef) return RE::BSEventNotifyControl::kContinue;
         if (!M->getListenCrosshair()) return RE::BSEventNotifyControl::kContinue;
@@ -177,6 +182,7 @@ public:
     RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent* event,
                                           RE::BSTEventSource<RE::MenuOpenCloseEvent>*) {
         
+        if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->opening) return RE::BSEventNotifyControl::kContinue;
         if (!listen_menu) return RE::BSEventNotifyControl::kContinue;
@@ -226,7 +232,7 @@ public:
     RE::BSEventNotifyControl ProcessEvent(const RE::TESFurnitureEvent* event,
                                           RE::BSTEventSource<RE::TESFurnitureEvent>*) {
         
-        
+        if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->actor->IsPlayerRef()) return RE::BSEventNotifyControl::kContinue;
         if (furniture_entered && event->type == RE::TESFurnitureEvent::FurnitureEventType::kEnter)
@@ -268,6 +274,7 @@ public:
     RE::BSEventNotifyControl ProcessEvent(const RE::TESContainerChangedEvent* event,
                                                                    RE::BSTEventSource<RE::TESContainerChangedEvent>*) {
         
+        if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
         logger::trace("ListenContainerChange: {}",
                       M->getListenContainerChange());
         if (!M->getListenContainerChange()) return RE::BSEventNotifyControl::kContinue;
@@ -454,6 +461,8 @@ public:
     }
 
     RE::BSEventNotifyControl ProcessEvent(RE::InputEvent* const* evns, RE::BSTEventSource<RE::InputEvent*>*) {
+        
+        if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
         if (!*evns) return RE::BSEventNotifyControl::kContinue;
 
         for (RE::InputEvent* e = *evns; e; e = e->next) {
@@ -506,6 +515,8 @@ public:
     
     RE::BSEventNotifyControl ProcessEvent(const RE::TESSleepStopEvent*,
                                           RE::BSTEventSource<RE::TESSleepStopEvent>*) {
+        
+        if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
         logger::trace("Sleep stop event.");
         M->UpdateStages(player_refid);
         return RE::BSEventNotifyControl::kContinue;
@@ -513,6 +524,8 @@ public:
 
     RE::BSEventNotifyControl ProcessEvent(const RE::TESWaitStopEvent*,
                                           RE::BSTEventSource<RE::TESWaitStopEvent>*) {
+        
+        if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
         logger::trace("Wait stop event.");
         M->UpdateStages(player_refid);
         return RE::BSEventNotifyControl::kContinue;
@@ -522,7 +535,7 @@ public:
 
 void OnMessage(SKSE::MessagingInterface::Message* message) {
     if (message->type == SKSE::MessagingInterface::kDataLoaded) {
-        logger::trace("Data loaded.");
+        logger::info("Data loaded.");
         // Start
         if (!Utilities::IsPo3Installed()) {
             logger::error("Po3 is not installed.");
@@ -534,7 +547,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         M = Manager::GetSingleton(sources);
     }
     if (message->type == SKSE::MessagingInterface::kPostLoadGame) {
-        logger::trace("Post-load game.");
+        logger::info("Post-load game.");
         if (Settings::failed_to_load) {
             Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Failed to load settings. Check log for details.");
             M->Uninstall();
@@ -557,12 +570,80 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
     }
 }
 
+
+#define DISABLE_IF_UNINSTALLED if (!M || M->getUninstalled()) return;
+void SaveCallback(SKSE::SerializationInterface* serializationInterface) {
+    DISABLE_IF_UNINSTALLED
+    M->SendData();
+    if (!M->Save(serializationInterface, Settings::kDataKey, Settings::kSerializationVersion)) {
+        logger::critical("Failed to save Data");
+    }
+}
+
+void LoadCallback(SKSE::SerializationInterface* serializationInterface) {
+    DISABLE_IF_UNINSTALLED
+
+    block_eventsinks = true;
+    logger::info("Loading Data from skse co-save.");
+
+
+    M->Reset();
+
+    std::uint32_t type;
+    std::uint32_t version;
+    std::uint32_t length;
+
+    bool cosave_found = false;
+    while (serializationInterface->GetNextRecordInfo(type, version, length)) {
+        auto temp = Utilities::DecodeTypeCode(type);
+
+        if (version != Settings::kSerializationVersion) {
+            logger::critical("Loaded data has incorrect version. Recieved ({}) - Expected ({}) for Data Key ({})",
+                             version, Settings::kSerializationVersion, temp);
+            continue;
+        }
+        switch (type) {
+            case Settings::kDataKey: {
+                logger::trace("Loading Record: {} - Version: {} - Length: {}", temp, version, length);
+                if (!M->Load(serializationInterface)) {
+                    logger::critical("Failed to Load Data");
+                }
+                else {
+					cosave_found = true;
+				}
+            } break;
+            default:
+                logger::critical("Unrecognized Record Type: {}", temp);
+                break;
+        }
+    }
+
+    if (cosave_found) {
+        logger::info("Receiving Data.");
+        M->ReceiveData();
+        logger::info("Data loaded from skse co-save.");
+	} else logger::info("No cosave data found.");
+
+    block_eventsinks = false;
+
+}
+#undef DISABLE_IF_UNINSTALLED
+
+void InitializeSerialization() {
+    auto* serialization = SKSE::GetSerializationInterface();
+    serialization->SetUniqueID(Settings::kDataKey);
+    serialization->SetSaveCallback(SaveCallback);
+    serialization->SetLoadCallback(LoadCallback);
+    SKSE::log::trace("Cosave serialization initialized.");
+}
+
+
 SKSEPluginLoad(const SKSE::LoadInterface *skse) {
 
     SetupLog();
     logger::info("Plugin loaded");
     SKSE::Init(skse);
-    // InitializeSerialization();
+    InitializeSerialization();
     SKSE::GetMessagingInterface()->RegisterListener(OnMessage);
     return true;
 }

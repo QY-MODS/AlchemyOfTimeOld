@@ -288,13 +288,13 @@ namespace Settings
                 return settings;
             }
             // add to items
-            logger::info("Formid");
+            logger::trace("Formid");
             settings.items[temp_no] = temp_formid;
             // add to durations
-            logger::info("Duration");
+            logger::trace("Duration");
             settings.durations[temp_no] = stageNode["duration"].as<Duration>();
             // add to stage_names
-            logger::info("Name");
+            logger::trace("Name");
             if (!stageNode["name"].IsNull()) {
                 const auto temp_name = stageNode["name"].as<StageName>();
                 // if it is empty, or just whitespace, set it to empty
@@ -303,23 +303,23 @@ namespace Settings
 				else settings.stage_names[temp_no] = stageNode["name"].as<StageName>();
             } else settings.stage_names[temp_no] = "";
             // add to costoverrides
-            logger::info("Cost");
+            logger::trace("Cost");
             if (stageNode["value"] && !stageNode["value"].IsNull()) {
                 settings.costoverrides[temp_no] = stageNode["value"].as<int>();
             } else settings.costoverrides[temp_no] = -1;  // Or whatever default value you prefer
             // add to weightoverrides
-            logger::info("Weight");
+            logger::trace("Weight");
             if (stageNode["weight"] && !stageNode["weight"].IsNull()) {
                 settings.weightoverrides[temp_no] = stageNode["weight"].as<float>();
             } else settings.weightoverrides[temp_no] = -1.0f;  // Or whatever default value you prefer
             
             // add to crafting_allowed
-            logger::info("Crafting");
+            logger::trace("Crafting");
             settings.crafting_allowed[temp_no] = stageNode["crafting_allowed"].as<bool>();
 
 
             // add to effects
-            logger::info("Effects");
+            logger::trace("Effects");
             std::vector<StageEffect> effects;
             if (!stageNode["mgeffect"] || stageNode["mgeffect"].size() == 0) {
 				logger::info("Effects are empty.");
@@ -337,7 +337,7 @@ namespace Settings
                     }
                     if (temp_effect_formid>0){
                         const auto temp_magnitude = effectNode["magnitude"].as<float>();
-                        const auto temp_duration = effectNode["duration"].as<Duration>();
+                        const auto temp_duration = effectNode["duration"].as<DurationMGEFF>();
                         effects.push_back(StageEffect(temp_effect_formid, temp_magnitude, temp_duration));
                     } else effects.push_back(StageEffect(temp_effect_formid, 0, 0));
                 }
@@ -1267,6 +1267,7 @@ private:
     [[nodiscard]] const Stage GetFinalStage() const {
         Stage dcyd_st;
         dcyd_st.formid = defaultsettings->decayed_id;
+        dcyd_st.duration = 0.1f; // just to avoid error in checkintegrity
         return dcyd_st;
     }
 

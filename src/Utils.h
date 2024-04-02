@@ -48,6 +48,15 @@ namespace Utilities{
 		    return hexString;
     };
 
+    std::string DecodeTypeCode(std::uint32_t typeCode) {
+        char buf[4];
+        buf[3] = char(typeCode);
+        buf[2] = char(typeCode >> 8);
+        buf[1] = char(typeCode >> 16);
+        buf[0] = char(typeCode >> 24);
+        return std::string(buf, buf + 4);
+    }
+
     namespace MsgBoxesNotifs {
 
         // https://github.com/SkyrimScripting/MessageBox/blob/ac0ea32af02766582209e784689eb0dd7d731d57/include/SkyrimScripting/MessageBox.h#L9
@@ -285,7 +294,34 @@ namespace Utilities{
                 }
                 return false;  // None of the strings in 'strings' were found in the input string
             }
-        }
+
+            std::vector<std::pair<int, bool>> encodeString(const std::string& inputString) {
+                std::vector<std::pair<int, bool>> encodedValues;
+                for (char ch : inputString) {
+                    if (std::isalnum(ch)) {  // Check if the character is alphanumeric
+                        encodedValues.push_back(std::make_pair(
+                            std::toupper(ch), std::isupper(ch)));  // Store ASCII value and capitalization information
+                    }
+                }
+                return encodedValues;
+            }
+
+            std::string decodeString(const std::vector<std::pair<int, bool>>& encodedValues) {
+                std::string decodedString;
+                for (const auto& pair : encodedValues) {
+                    char ch = static_cast<char>(pair.first);
+                    if (std::isalnum(ch)) {       // Check if the character is alphanumeric
+                        if (pair.second) {        // Check if the character was originally capitalized
+                            decodedString += ch;  // Append the character as is
+                        } else {
+                            decodedString += static_cast<char>(std::tolower(ch));  // Convert to lowercase and append
+                        }
+                    }
+                }
+                return decodedString;
+            }
+
+        };
 
 
 
@@ -722,6 +758,16 @@ namespace Utilities{
             const bool HasItem(RE::TESBoundObject* item, RE::TESObjectREFR* item_owner) {
                 if (HasItemEntry(item, item_owner, true)) return true;
                 return false;
+            }
+
+            void RemoveAll(RE::TESBoundObject* item, RE::TESObjectREFR* item_owner) { 
+                if (!item) return; 
+                if (!item_owner) return;
+                auto inventory = item_owner->GetInventory();
+                auto it = inventory.find(item);
+                bool has_entry = it != inventory.end();
+                if (!has_entry) return;
+                item_owner->RemoveItem(item, std::min(it->second.first,1), RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
             }
 
             void FavoriteItem(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner) {
@@ -1543,10 +1589,10 @@ namespace Utilities{
 					logger::error("Ref is null.");
 					return;
 				}
-                logger::info("printing ExtraDataList");
+                logger::trace("printing ExtraDataList");
                 for (int i = 0; i < 191; i++) {
                     if (ref->extraList.HasType(static_cast<RE::ExtraDataType>(i))) {
-                        logger::info("ExtraDataList type: {}", i);
+                        logger::trace("ExtraDataList type: {}", i);
                     }
                 }
             }
@@ -1695,21 +1741,22 @@ namespace Utilities{
 
         // using EditorID = std::string;
         using NameID = std::string;
-        using Duration = std::uint32_t;
+        using Duration = float;
+        using DurationMGEFF = std::uint32_t;
         using StageNo = unsigned int;
         using StageName = std::string;
 
         struct StageEffect {
             FormID beffect;          // base effect
             float magnitude;         // in effectitem
-            std::uint32_t duration;  // in effectitem
+            std::uint32_t duration;  // in effectitem (not Duration, this is in seconds)
 
             StageEffect() : beffect(0), magnitude(0), duration(0) {}
-            StageEffect(FormID be, float mag, Duration dur) : beffect(be), magnitude(mag), duration(dur) {}
+            StageEffect(FormID be, float mag, DurationMGEFF dur) : beffect(be), magnitude(mag), duration(dur) {}
 
-            [[nodiscard]] const bool IsNull() { return beffect == 0; }
-            [[nodiscard]] const bool HasMagnitude() { return magnitude != 0; }
-            [[nodiscard]] const bool HasDuration() { return duration != 0; }
+            [[nodiscard]] const bool IsNull() const { return beffect == 0; }
+            [[nodiscard]] const bool HasMagnitude() const { return magnitude != 0; }
+            [[nodiscard]] const bool HasDuration() const { return duration != 0; }
         };
 
         struct Stage {
@@ -1756,7 +1803,7 @@ namespace Utilities{
 				return true;
             }
 
-            const char* GetExtraText() {
+            const char* GetExtraText() const {
                 return GetBound()->GetName();
             }
 
@@ -1777,6 +1824,11 @@ namespace Utilities{
 
             bool is_fake = false;
             bool is_decayed = false;
+
+            bool is_faved = false;
+            bool is_equipped = false;
+
+            FormID form_id=0; // for fake stuff
 		};
 
         struct StageInstance {
@@ -1802,18 +1854,18 @@ namespace Utilities{
                 _delay_formid = 0;
             }
         
-            StageInstance(const StageInstancePlain& plain)
-                : start_time(plain.start_time),
-                  no(plain.no),
-                  count(plain.count),
-                  _elapsed(plain._elapsed),
-                  _delay_start(plain._delay_start),
-                  _delay_mag(plain._delay_mag),
-                  _delay_formid(plain._delay_formid) {
-            	
-                xtra.is_fake = plain.is_fake;
-                xtra.is_decayed = plain.is_decayed;
-            }
+            //StageInstance(const StageInstancePlain& plain)
+            //    : start_time(plain.start_time),
+            //      no(plain.no),
+            //      count(plain.count),
+            //      _elapsed(plain._elapsed),
+            //      _delay_start(plain._delay_start),
+            //      _delay_mag(plain._delay_mag),
+            //      _delay_formid(plain._delay_formid) {
+            //	
+            //    xtra.is_fake = plain.is_fake;
+            //    xtra.is_decayed = plain.is_decayed;
+            //}
 
 
             //define ==
@@ -1882,7 +1934,7 @@ namespace Utilities{
                 // yeni steigungla yeni ausgangspunkt yapiyoruz
                 // call only from UpdateTimeModulationInInventory
                 
-                if (_delay_formid == formid) return;
+                if (_delay_mag == delay) return;
 
                 _elapsed = GetElapsed(time);
                 _delay_start = time;
@@ -1901,7 +1953,7 @@ namespace Utilities{
                 return _delay_formid;
             }
 
-            const float GetHittingTime(float schranke) {
+            const float GetHittingTime(float schranke) const {
 				// _elapsed + dt*_delay_mag = schranke
                 return (schranke - _elapsed) / (GetDelaySlope() + std::numeric_limits<float>::epsilon());
 			}
@@ -1919,9 +1971,18 @@ namespace Utilities{
                 plain._delay_start = _delay_start;
                 plain._delay_mag = _delay_mag;
                 plain._delay_formid = _delay_formid;
+
+                if (xtra.is_fake) plain.form_id = xtra.form_id;
                 
                 return plain;
             }
+
+            void SetDelay(const StageInstancePlain& plain) {
+				_elapsed = plain._elapsed;
+				_delay_start = plain._delay_start;
+				_delay_mag = plain._delay_mag;
+				_delay_formid = plain._delay_formid;
+			}
 
         private:
             float _elapsed; // y coord of the ausgangspunkt/elapsed time since the stage started
@@ -1952,6 +2013,40 @@ namespace Utilities{
     }
 
 
+    bool read_string(SKSE::SerializationInterface* a_intfc, std::string& a_str) {
+		std::vector<std::pair<int, bool>> encodedStr;
+		std::size_t size;
+        if (!a_intfc->ReadRecordData(size)) {
+            return false;
+        }
+        for (std::size_t i = 0; i < size; i++) {
+            std::pair<int, bool> temp_pair;
+            if (!a_intfc->ReadRecordData(temp_pair)) {
+				return false;
+			}
+            encodedStr.push_back(temp_pair);
+		}
+        a_str = Functions::String::decodeString(encodedStr);
+		return true;
+        
+    }
+
+    bool write_string(SKSE::SerializationInterface* a_intfc, const std::string& a_str) {
+        auto encodedStr = Functions::String::encodeString(a_str);
+        // i first need the size to know no of iterations
+        const auto size = encodedStr.size();
+        if (!a_intfc->WriteRecordData(size)) {
+			return false;
+		}
+        for (const auto& temp_pair : encodedStr) {
+            if (!a_intfc->WriteRecordData(temp_pair)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+
      // github.com/ozooma10/OSLAroused/blob/29ac62f220fadc63c829f6933e04be429d4f96b0/src/PersistedData.cpp
      template <typename T,typename U>
      // BaseData is based off how powerof3's did it in Afterlife
@@ -1964,7 +2059,7 @@ namespace Utilities{
              }
              return missing;
          }
-
+          
          void SetData(T formId, U value) {
              Locker locker(m_Lock);
              m_Data[formId] = value;
@@ -2009,15 +2104,39 @@ namespace Utilities{
              }
 
              for (const auto& [lhs, rhs] : m_Data) {
-                 if (!serializationInterface->WriteRecordData(lhs)) {
-                     logger::error("Failed to save data");
+                 // we serialize formid, editorid, and refid separately
+                 std::uint32_t formid = lhs.first.form_id;
+                 logger::trace("Formid:{}", formid);
+                 if (!serializationInterface->WriteRecordData(formid)) {
+					 logger::error("Failed to save formid");
+					 return false;
+				 }
+
+                 const std::string editorid = lhs.first.editor_id;
+                 logger::trace("Editorid:{}", editorid);
+                 write_string(serializationInterface, editorid);
+
+                 std::uint32_t refid = lhs.second;
+                 logger::trace("Refid:{}", refid);
+                 if (!serializationInterface->WriteRecordData(refid)) {
+					 logger::error("Failed to save refid");
+					 return false;
+				 }
+
+                 // save the number of rhs records
+                 const auto numRhsRecords = rhs.size();
+                 if (!serializationInterface->WriteRecordData(numRhsRecords)) {
+                     logger::error("Failed to save the size {} of rhs records", numRhsRecords);
                      return false;
                  }
 
-                 if (!serializationInterface->WriteRecordData(rhs)) {
-                     logger::error("Failed to save value data");
-                     return false;
-                 }
+                 for (const auto& rhs_ : rhs) {
+                     logger::trace("size of rhs_: {}", sizeof(rhs_));
+                     if (!serializationInterface->WriteRecordData(rhs_)) {
+						 logger::error("Failed to save data");
+						 return false;
+					 }
+				 }
              }
              return true;
          }
@@ -2037,27 +2156,59 @@ namespace Utilities{
 
              std::size_t recordDataSize;
              serializationInterface->ReadRecordData(recordDataSize);
-             logger::trace("Loading data from serialization interface with size: {}", recordDataSize);
+             logger::info("Loading data from serialization interface with size: {}", recordDataSize);
 
              Locker locker(m_Lock);
              m_Data.clear();
 
-             Types::SaveDataLHS lhs;
-             Types::SaveDataRHS rhs;
 
+            logger::trace("Loading data from serialization interface.");
              for (auto i = 0; i < recordDataSize; i++) {
-                 logger::trace("Loading data from serialization interface.");
-                 logger::trace("ReadRecordData:{}", serializationInterface->ReadRecordData(lhs));
-                 /*auto formid_editorid = lhs.first;
-                 auto refid = lhs.second;*/
-                 /*if (!serializationInterface->ResolveFormID(formid, lhs.form_id)) {
+                
+                Types::SaveDataRHS rhs;
+                 
+                 std::uint32_t formid = 0;
+                 logger::trace("ReadRecordData:{}", serializationInterface->ReadRecordData(formid));
+                 if (!serializationInterface->ResolveFormID(formid, formid)) {
                      logger::error("Failed to resolve form ID, 0x{:X}.", formid);
                      continue;
-                 }*/
+                 }
+                 
+                 std::string editorid;
+                 if (!read_string(serializationInterface, editorid)) {
+					 logger::error("Failed to read editorid");
+					 return false;
+				 }
+
+                 std::uint32_t refid = 0;
+                 logger::trace("ReadRecordData:{}", serializationInterface->ReadRecordData(refid));
+
+                 logger::trace("Formid:{}", formid);
+                 logger::trace("Refid:{}", refid);
+                 logger::trace("Editorid:{}", editorid);
+
+                Types::SaveDataLHS lhs({formid,editorid},refid);
                  logger::trace("Reading value...");
-                 logger::trace("ReadRecordData: {}", serializationInterface->ReadRecordData(rhs));
+
+                 std::size_t rhsSize = 0;
+                 logger::trace("ReadRecordData: {}", serializationInterface->ReadRecordData(rhsSize));
+                 logger::trace("rhsSize: {}", rhsSize);
+
+                 for (auto j = 0; j < rhsSize; j++) {
+					 Types::StageInstancePlain rhs_;
+					 logger::trace("ReadRecordData: {}", serializationInterface->ReadRecordData(rhs_));
+                     //print the content of rhs_ which is StageInstancePlain
+                     logger::trace(
+                         "rhs_ content: start_time: {}, no: {},"
+                         "count: {}, is_fake: {}, is_decayed: {}, _elapsed: {}, _delay_start: {}, _delay_mag: {}, "
+                         "_delay_formid: {}",
+                         rhs_.start_time, rhs_.no, rhs_.count, rhs_.is_fake, rhs_.is_decayed, rhs_._elapsed,
+                         rhs_._delay_start, rhs_._delay_mag, rhs_._delay_formid);
+					 rhs.push_back(rhs_);
+				 }
+
                  m_Data[lhs] = rhs;
-                 logger::trace("Loaded data for FormEditorID: {} {} and refid", lhs.first.form_id, lhs.first.editor_id,lhs.second);
+                 logger::info("Loaded data for formid {}, editorid {}, and refid {}", formid, editorid,refid);
              }
              return true;
          }
