@@ -641,7 +641,7 @@ struct Source {
 				    }
                     else new_stage = &stages[instance.no];
                     auto is_fake__ = IsFakeStage(instance.no);
-                    updated_instances[reffid].emplace_back(old_stage, new_stage, instance.count, is_fake__);
+                    updated_instances[reffid].emplace_back(old_stage, new_stage, instance.count, instance.start_time ,is_fake__);
                 }
             }
         }
@@ -717,13 +717,12 @@ struct Source {
         return true;
     }
 
-    [[nodiscard]] const bool InitInsertInstanceWO(StageNo n, Count c, RefID l) {
+    [[nodiscard]] const bool InitInsertInstanceWO(StageNo n, Count c, RefID l, Duration t_0) {
         if (init_failed) {
             logger::critical("InitInsertInstance: Initialisation failed.");
             return false;
         }
-        const float curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
-        StageInstance new_instance(curr_time, n, c);
+        StageInstance new_instance(t_0, n, c);
         new_instance.xtra.form_id = stages[n].formid;
         new_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages[n].GetBound());
         new_instance.xtra.crafting_allowed = stages[n].crafting_allowed;
@@ -733,7 +732,8 @@ struct Source {
     }
 
     // applies time modulation to all instances in the inventory
-    [[nodiscard]] const bool InitInsertInstanceInventory(StageNo n, Count c, RE::TESObjectREFR* inventory_owner){
+    [[nodiscard]] const bool InitInsertInstanceInventory(StageNo n, Count c, RE::TESObjectREFR* inventory_owner,
+                                                         Duration t_0) {
         if (!inventory_owner) {
             logger::error("Inventory owner is null.");
             return false;
@@ -745,12 +745,12 @@ struct Source {
         }
         
         // isme takilma
-        if (!InitInsertInstanceWO(n, c, inventory_owner_refid)) {
+        if (!InitInsertInstanceWO(n, c, inventory_owner_refid, t_0)) {
 			logger::error("InitInsertInstance failed.");
 			return false;
 		}
         
-        SetDelayOfInstance(data[inventory_owner_refid].back(), RE::Calendar::GetSingleton()->GetHoursPassed(),
+        SetDelayOfInstance(data[inventory_owner_refid].back(), t_0,
                             inventory_owner);
         return true;
     }
@@ -1070,6 +1070,14 @@ private:
             return false;
         }
         if (st_inst.xtra.is_decayed) return false;  // decayed
+        if (!stages.count(st_inst.no)) {
+            logger::trace("Stage {} does not exist.", st_inst.no);
+			return false;
+		}
+        if (st_inst.count <= 0) {
+            logger::trace("Count is less than or equal 0.");
+            return false;
+        }
         
         float diff = st_inst.GetElapsed(curr_time);
         bool updated = false;
@@ -1286,13 +1294,14 @@ private:
         const auto delayer_best = GetModulatorInInventory(inventory_owner); // basically the first on the list
         const float __delay = delayer_best == 0 ? 1 : defaultsettings->delayers[delayer_best];
         for (auto& instance : data[loc]) {
+            if (instance.count <= 0) continue;
             instance.SetDelay(some_time, __delay, delayer_best);
         }
 	}
 
     void SetDelayOfInstance(StageInstance& instance, const float curr_time,
                              RE::TESObjectREFR* inventory_owner) {
-
+        if (instance.count <= 0) return;
         const auto delayer_best = GetModulatorInInventory(inventory_owner);
         const float __delay = delayer_best == 0 ? 1 : defaultsettings->delayers[delayer_best];
         instance.SetDelay(curr_time, __delay, delayer_best);
