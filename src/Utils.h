@@ -34,18 +34,12 @@ namespace Utilities{
     const auto general_err_msgbox = std::format("{}: Something went wrong. Please contact the mod author.", mod_name);
     
     const auto init_err_msgbox = std::format("{}: The mod failed to initialize and will be terminated.", mod_name);
-        std::string dec2hex(int dec) {
-        std::stringstream stream;
-        stream << std::hex << dec;
-        std::string hexString = stream.str();
-        return hexString;
-    };
-
+    
     std::string dec2hex(unsigned int dec) {
-		    std::stringstream stream;
-		    stream << std::hex << dec;
-		    std::string hexString = stream.str();
-		    return hexString;
+		std::stringstream stream;
+		stream << std::hex << dec;
+		std::string hexString = stream.str();
+		return hexString;
     };
 
     std::string DecodeTypeCode(std::uint32_t typeCode) {
@@ -297,11 +291,17 @@ namespace Utilities{
 
             std::vector<std::pair<int, bool>> encodeString(const std::string& inputString) {
                 std::vector<std::pair<int, bool>> encodedValues;
-                for (char ch : inputString) {
-                    if (std::isalnum(ch)) {  // Check if the character is alphanumeric
-                        encodedValues.push_back(std::make_pair(
-                            std::toupper(ch), std::isupper(ch)));  // Store ASCII value and capitalization information
+                try {
+                    for (int i = 0; i < 100 && inputString[i] != '\0'; i++) {
+                        char ch = inputString[i];
+                        if (std::isprint(ch) && (std::isalnum(ch) || std::isspace(ch) || std::ispunct(ch)) && ch >= 0 &&
+                            ch <= 255) {
+                            encodedValues.push_back(std::make_pair(static_cast<int>(ch), std::isupper(ch)));
+                        }
                     }
+                } catch (const std::exception& e) {
+                    logger::error("Error encoding string: {}", e.what());
+                    return encodeString("ERROR");
                 }
                 return encodedValues;
             }
@@ -310,11 +310,11 @@ namespace Utilities{
                 std::string decodedString;
                 for (const auto& pair : encodedValues) {
                     char ch = static_cast<char>(pair.first);
-                    if (std::isalnum(ch)) {       // Check if the character is alphanumeric
-                        if (pair.second) {        // Check if the character was originally capitalized
-                            decodedString += ch;  // Append the character as is
+                    if (std::isalnum(ch) || std::isspace(ch) || std::ispunct(ch)) {
+                        if (pair.second) {
+                            decodedString += ch;
                         } else {
-                            decodedString += static_cast<char>(std::tolower(ch));  // Convert to lowercase and append
+                            decodedString += static_cast<char>(std::tolower(ch));
                         }
                     }
                 }
@@ -656,22 +656,22 @@ namespace Utilities{
 		}
 
         namespace Menu {
-            void RefreshMenu(const std::string_view menuname) {
-                if (auto ui = RE::UI::GetSingleton()) {
-                    if (!ui->IsMenuOpen(menuname)) return;
-                }
-                if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
-                    queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kHide, nullptr);
-                    queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kShow, nullptr);
-                }
-            }
 
-            void RefreshMenuReverse(const std::string_view menuname) {
-                if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
-                    logger::trace("Refreshing menu in reverse");
-                    queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kShow, nullptr);
-                    queue->AddMessage(menuname, RE::UI_MESSAGE_TYPE::kHide, nullptr);
-                }
+            void CloseMenu(const std::string_view menuname) {
+				if (auto ui = RE::UI::GetSingleton()) {
+					if (!ui->IsMenuOpen(menuname)) return;
+				}
+				RE::BSFixedString menuName(menuname);
+				if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
+					queue->AddMessage(menuName, RE::UI_MESSAGE_TYPE::kHide, nullptr);
+				}
+			}
+
+            // po3
+            void SendInventoryUpdateMessage(RE::TESObjectREFR* a_inventoryRef, const RE::TESBoundObject* a_updateObj) {
+                using func_t = decltype(&SendInventoryUpdateMessage);
+                static REL::Relocation<func_t> func{RELOCATION_ID(51911, 52849)};
+                return func(a_inventoryRef, a_updateObj);
             }
 
             // https://
@@ -726,10 +726,94 @@ namespace Utilities{
                 }
                 return nullptr;
             }
-        
+
+            // not tested!
+            template <typename T>
+            void RefreshItemList(RE::TESObjectREFR* inventory_owner) {
+                if (!inventory_owner) {
+                    logger::error("Inventory owner is null.");
+                    return;
+                }
+                if (T::MENU_NAME != RE::ContainerMenu::MENU_NAME && T::MENU_NAME != RE::InventoryMenu::MENU_NAME) {
+					logger::error("Menu type not supported.");
+					return;
+				}
+                auto ui = RE::UI::GetSingleton();
+                if (!ui->IsMenuOpen(T::MENU_NAME)){
+                    logger::error("Menu is not open.");
+					return;
+                }
+                
+                std::map<FormID, Count> item_map;
+                auto inventory = inventory_owner->GetInventory();
+                for (auto& [item, entry] : inventory) {
+					item_map[item->GetFormID()] = entry.first;
+				}
+                auto inventory_menu = ui->GetMenu<T>();
+                if (inventory_menu) {
+                    if (auto itemlist = inventory_menu->GetRuntimeData().itemList) {
+                        logger::trace("Updating itemlist.");
+                        for (auto* item : itemlist->items) {
+                            auto temp_entry = item->data.objDesc;
+                            if (!temp_entry) {
+                                logger::error("Item entry is null.");
+                                continue;
+                            }
+                            auto temp_obj = temp_entry->object;
+                            if (!temp_obj) {
+								logger::error("Item object is null.");
+								continue;
+							}
+                            item_map[temp_obj->GetFormID()] -= item->data.GetCount();
+                        }
+                    } else logger::info("Itemlist is null.");
+                } else logger::info("Inventory menu is null.");
+
+                for (auto& [formid, count] : item_map) {
+					if (count > 0) {
+						auto item = GetFormByID<RE::TESBoundObject>(formid);
+						if (!item) {
+							logger::error("Item is null.");
+							continue;
+						}
+                        logger::trace("Sending inventory update message: {}", item->GetName());
+						SendInventoryUpdateMessage(inventory_owner, item);
+					}
+				}
+            }
+
+            template <typename T>
+            void RefreshItemList(RE::TESObjectREFR* inventory_owner, const std::vector<FormID> formids) {
+                for (auto& formid : formids) {
+                    auto item = GetFormByID<RE::TESBoundObject>(formid);
+                    if (!item) {
+                        logger::error("Item is null.");
+                        continue;
+                    }
+                    SendInventoryUpdateMessage(inventory_owner, item);
+                }
+            }
+
+            template <typename T>
+            void UpdateItemList() {
+                if (auto ui = RE::UI::GetSingleton(); ui->IsMenuOpen(T::MENU_NAME)) {
+                    if (auto inventory_menu = ui->GetMenu<T>()) {
+                        if (auto itemlist = inventory_menu->GetRuntimeData().itemList) {
+                            logger::trace("Updating itemlist.");
+                            itemlist->Update();
+                        } else logger::info("Itemlist is null.");
+                    } else logger::info("Inventory menu is null.");
+                } else logger::info("Inventory menu is not open.");
+            }
         };
 
         namespace Inventory {
+
+            const bool EntryHasXData(RE::InventoryEntryData* entry) {
+                if (entry && entry->extraLists && !entry->extraLists->empty()) return true;
+                return false;
+            }
+
             const bool HasItemEntry(RE::TESBoundObject* item, RE::TESObjectREFR* inventory_owner, bool nonzero_entry_check=false) {
                 if (!item) {
                     logger::warn("Item is null");
@@ -760,6 +844,21 @@ namespace Utilities{
                 return false;
             }
 
+            void AddItem(RE::TESObjectREFR* addTo, RE::TESObjectREFR* addFrom, FormID item_id, Count count,
+                         RE::ExtraDataList* xList = nullptr) {
+                logger::trace("AddItem");
+                // xList = nullptr;
+                if (!addTo && !addFrom) {
+                    logger::error("addTo and addFrom are both null!");
+                    return;
+                }
+
+                logger::trace("Adding item.");
+
+                auto bound = RE::TESForm::LookupByID<RE::TESBoundObject>(item_id);
+                addTo->AddObjectToContainer(bound, xList, count, addFrom);
+            }
+
             void RemoveAll(RE::TESBoundObject* item, RE::TESObjectREFR* item_owner) { 
                 if (!item) return; 
                 if (!item_owner) return;
@@ -776,6 +875,10 @@ namespace Utilities{
                 auto inventory_changes = inventory_owner->GetInventoryChanges();
                 auto entries = inventory_changes->entryList;
                 for (auto it = entries->begin(); it != entries->end(); ++it) {
+                    if (!(*it)) {
+						logger::error("Item entry is null");
+						continue;
+					}
                     const auto object = (*it)->object;
                     if (!object) {
 					    logger::error("Object is null");
@@ -795,7 +898,7 @@ namespace Utilities{
                         if (no_extra_) {
                             logger::trace("No extraLists");
                             //inventory_changes->SetFavorite((*it), nullptr);
-                        } else {
+                        } else if (xLists->front()) {
                             logger::trace("ExtraLists found");
                             inventory_changes->SetFavorite((*it), xLists->front());
                         }
@@ -890,7 +993,7 @@ namespace Utilities{
                                 RE::ActorEquipManager::GetSingleton()->UnequipObject(
                                     player_ref, (*it)->object, nullptr, 1,
                                     (const RE::BGSEquipSlot*)nullptr, true, false, false);
-                            } else {
+                            } else if ((*it)->extraLists->front()) {
                                 RE::ActorEquipManager::GetSingleton()->UnequipObject(
                                     player_ref, (*it)->object, (*it)->extraLists->front(), 1,
                                     (const RE::BGSEquipSlot*)nullptr, true, false, false);
@@ -900,7 +1003,7 @@ namespace Utilities{
                                 RE::ActorEquipManager::GetSingleton()->EquipObject(
                                     player_ref, (*it)->object, nullptr, 1,
                                     (const RE::BGSEquipSlot*)nullptr, true, false, false, false);
-                            } else {
+                            } else if ((*it)->extraLists->front()) {
                                 RE::ActorEquipManager::GetSingleton()->EquipObject(
                                     player_ref, (*it)->object, (*it)->extraLists->front(), 1,
                                     (const RE::BGSEquipSlot*)nullptr, true, false, false, false);
@@ -1027,6 +1130,10 @@ namespace Utilities{
             RE::TESObjectREFR* DropObjectIntoTheWorld(RE::TESBoundObject* obj, Count count,
                                                       bool owned = true) {
                 auto player_ch = RE::PlayerCharacter::GetSingleton();
+                if (!player_ch) {
+                    logger::critical("Player character is null.");
+                    return nullptr;
+                }
                 // PRINT IT
                 const auto multiplier = 100.0f;
                 const float qPI = 3.14159265358979323846f;
@@ -1049,7 +1156,7 @@ namespace Utilities{
                     logger::critical("New prop ref is null.");
                     return nullptr;
                 }
-                SetObjectCount(newPropRef, count);
+                if (count > 1) SetObjectCount(newPropRef, count);
                 if (owned) newPropRef->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
                 return newPropRef;
             }
@@ -1066,7 +1173,7 @@ namespace Utilities{
 				    return;
                 }
                 if (ref_base->GetFormID() == a_to->GetFormID()) {
-				    logger::info("Ref and base are the same.");
+				    logger::trace("Ref and base are the same.");
 				    return;
 			    }
                 a_from->SetObjectReference(a_to);
@@ -1107,7 +1214,7 @@ namespace Utilities{
                 }
 
                 auto actor = RE::PlayerCharacter::GetSingleton();
-                auto item_bound = item->GetBaseObject();
+                auto item_bound = item->GetObjectReference();
                 const auto item_count = Inventory::GetItemCount(item_bound, actor);
                 logger::trace("Item count: {}", item_count);
                 unsigned int i = 0;
@@ -1920,6 +2027,11 @@ namespace Utilities{
             const float GetDelaySlope() const {
                 const auto delay_magnitude = std::min(std::max(-1000.f, _delay_mag), 1000.f);
                 //return 1 - delay_magnitude;
+                if (std::abs(delay_magnitude) < 0.0001f) {
+                    // If the delay slope is too close to 0, return a small non-zero value
+                    return delay_magnitude < 0 ? -0.0001f : 0.0001f;
+                }
+
                 return delay_magnitude;
             }
 
@@ -1996,21 +2108,21 @@ namespace Utilities{
             Stage* oldstage=nullptr;
             Stage* newstage=nullptr;
             Count count=0;
-            //RefID location=0;
+            Duration update_time=0;
             bool new_is_fake=false;
 
             StageUpdate(Stage* old, Stage* new_, Count c, 
-                //RefID l,
+                Duration u_t,
                 bool fake)
 				: oldstage(old), newstage(new_), count(c), 
-                //location(l), 
+                update_time(u_t), 
                 new_is_fake(fake) {}
         };
 
         using SourceData = std::map<RefID,std::vector<StageInstance>>;
         using SaveDataLHS = std::pair<FormEditorID,RefID>;
         using SaveDataRHS = std::vector<StageInstancePlain>;
-    }
+    };
 
 
     bool read_string(SKSE::SerializationInterface* a_intfc, std::string& a_str) {
@@ -2028,7 +2140,6 @@ namespace Utilities{
 		}
         a_str = Functions::String::decodeString(encodedStr);
 		return true;
-        
     }
 
     bool write_string(SKSE::SerializationInterface* a_intfc, const std::string& a_str) {
