@@ -52,15 +52,15 @@ class Manager : public Utilities::SaveLoadData {
         return false;
     }
 
-	[[nodiscard]] const unsigned int GetNInstances() {
+    [[nodiscard]] const unsigned int GetNInstances() {
         unsigned int n = 0;
         for (auto& src : sources) {
             for (const auto& [loc, _] : src.data) {
                 n += static_cast<unsigned int>(src.data[loc].size());
             }
         }
-		return n;
-	}
+        return n;
+    }
 
     [[nodiscard]] Source* _MakeSource(const FormID source_formid, Settings::DefaultSettings* settings) {
         if (!source_formid) return nullptr;
@@ -74,7 +74,10 @@ class Manager : public Utilities::SaveLoadData {
     [[nodiscard]] Source* GetSource(const FormID some_formid) {
         if (!some_formid) return nullptr;
         const auto some_form = Utilities::FunctionsSkyrim::GetFormByID(some_formid);
-        if (!some_form) return nullptr;
+        if (!some_form) {
+            logger::warn("Form not found.");
+            return nullptr;
+        }
         // maybe it already exists
         for (auto& src : sources) {
             if (src.init_failed) continue;
@@ -91,12 +94,17 @@ class Manager : public Utilities::SaveLoadData {
         // registered stageler arasinda deil. yani fake de deil
         // custom stage mi deil mi onu anlamam lazim
         auto _qformtype = Settings::GetQFormType(some_formid);
+        logger::trace("GetSource: QFormType: {}", _qformtype);
+        if (Settings::custom_settings.empty()) {
+            logger::trace("GetSource: custom settings is empty.");
+        }
         if (!_qformtype.empty() && Settings::custom_settings.contains(_qformtype)) {
             auto& custom_settings = Settings::custom_settings[_qformtype];
             for (auto& [names,sttng]: custom_settings){
                 if (sttng.init_failed) continue;
+                logger::trace("GetSource: custom settings owner names {}",Utilities::Functions::String::join(names,", "));
                 for (auto& name : names) {
-                    const auto temp_cstm_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(name);
+                    const FormID temp_cstm_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(name);
                     if (temp_cstm_formid<=0) continue;
                     if (const auto temp_cstm_form = Utilities::FunctionsSkyrim::GetFormByID(temp_cstm_formid, name)) {
                         if (temp_cstm_form->GetFormID() == some_formid) return _MakeSource(some_formid, &sttng);
@@ -109,7 +117,7 @@ class Manager : public Utilities::SaveLoadData {
             }
         }
 
-        logger::info("Source not found");
+        logger::info("Source not found for {}", some_form->GetName());
         return nullptr;
     };
 
@@ -122,12 +130,12 @@ class Manager : public Utilities::SaveLoadData {
         if (auto p_stage_no = src->GetStageNo(stage_id)) stage_no = *p_stage_no;
         else RaiseMngrErr("Stage not found.");
         return stage_no;
-	}
+    }
 
     [[nodiscard]] StageInstance* GetWOStageInstance(RefID wo_refid) {
         if (!wo_refid) {
             RaiseMngrErr("Ref is null.");
-			return nullptr;
+            return nullptr;
         }
         if (sources.empty()) return nullptr;
         for (auto& src : sources) {
@@ -138,8 +146,8 @@ class Manager : public Utilities::SaveLoadData {
                 logger::error("Stage instance found but empty.");
             } 
             else if (instances.size() > 1) {
-				logger::error("Multiple stage instances found.");
-			}
+                logger::error("Multiple stage instances found.");
+            }
         }
         logger::error("Stage instance not found.");
         return nullptr;
@@ -151,7 +159,7 @@ class Manager : public Utilities::SaveLoadData {
             return nullptr;
         }
         return GetWOStageInstance(wo_ref->GetFormID());
-	}
+    }
 
     [[nodiscard]] Source* GetWOSource(RefID wo_refid) {
         if (!wo_refid) return nullptr;
@@ -193,13 +201,13 @@ class Manager : public Utilities::SaveLoadData {
         /*bool is_hotkeyed = false;
         std::uint8_t hotkey;
         if (entry->second.second && entry->second.second->extraLists && !entry->second.second->extraLists->empty()) {
-			if (entry->second.second->extraLists->front()) {
+            if (entry->second.second->extraLists->front()) {
                 if (entry->second.second->extraLists->front()->HasType<RE::ExtraHotkey>()) {
-					is_hotkeyed = true;
+                    is_hotkeyed = true;
                     hotkey = entry->second.second->extraLists->front()->GetByType<RE::ExtraHotkey>()->hotkey.underlying();
-				}
-			}
-		}*/
+                }
+            }
+        }*/
         else {
             RemoveItemReverse(inventory_owner, nullptr, old_item, std::min(update_count, entry->second.first),
                               RE::ITEM_REMOVE_REASON::kRemove);
@@ -231,9 +239,9 @@ class Manager : public Utilities::SaveLoadData {
 
         setListenContainerChange(false);
         if (!Utilities::FunctionsSkyrim::WorldObject::PlayerPickUpObject(ref_handle, __count)) {
-			logger::error("Item not picked up.");
-			return;
-		}
+            logger::error("Item not picked up.");
+            return;
+        }
         setListenContainerChange(true);
         
         //AddItem(inventory_owner, nullptr, new_item, update_count, {});
@@ -255,19 +263,19 @@ class Manager : public Utilities::SaveLoadData {
         }
         if (old_item == new_item) {
             logger::trace("ApplyEvolutionInInventory: New item is the same as the old item.");
-			return;
-		}
+            return;
+        }
         
         bool is_faved = false;
         bool is_equipped = false;
         if (inventory_owner->IsPlayerRef()) {
-			is_faved = Utilities::FunctionsSkyrim::Inventory::IsPlayerFavorited(
-				RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
-			is_equipped = Utilities::FunctionsSkyrim::Inventory::IsEquipped(
-				RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
-		}
+            is_faved = Utilities::FunctionsSkyrim::Inventory::IsPlayerFavorited(
+                RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
+            is_equipped = Utilities::FunctionsSkyrim::Inventory::IsEquipped(
+                RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
+        }
         if (Utilities::Functions::Vector::HasElement<std::string>(Settings::xQFORMS, _qformtype_)) {
-			_ApplyEvolutionInInventoryX(inventory_owner, update_count, old_item, new_item);
+            _ApplyEvolutionInInventoryX(inventory_owner, update_count, old_item, new_item);
         } 
         else if (is_faved || is_equipped) {
             _ApplyEvolutionInInventoryX(inventory_owner, update_count, old_item, new_item);
@@ -275,11 +283,11 @@ class Manager : public Utilities::SaveLoadData {
         else _ApplyEvolutionInInventory(inventory_owner, update_count, old_item, new_item);
 
         if (is_faved) Utilities::FunctionsSkyrim::Inventory::FavoriteItem(
-			RE::TESForm::LookupByID<RE::TESBoundObject>(new_item), inventory_owner);
+            RE::TESForm::LookupByID<RE::TESBoundObject>(new_item), inventory_owner);
         if (is_equipped) {
             setListenEquip(false);
             Utilities::FunctionsSkyrim::Inventory::EquipItem(
-			    RE::TESForm::LookupByID<RE::TESBoundObject>(new_item));
+                RE::TESForm::LookupByID<RE::TESBoundObject>(new_item));
             setListenEquip(true);
         }
     }
@@ -314,20 +322,25 @@ class Manager : public Utilities::SaveLoadData {
   //  [[maybe_unused]] void AlignRegistries(std::vector<RefID> locs) {
   //      ENABLE_IF_NOT_UNINSTALLED
   //      logger::trace("Aligning registries.");
-		//for (auto& src : sources) {
-		//	for (auto& st_inst : src.data) {
+        //for (auto& src : sources) {
+        //	for (auto& st_inst : src.data) {
   //              if (!Utilities::Functions::Vector::HasElement(locs,st_inst.location)) continue;
   //              // POPULATE THIS
   //              if (st_inst.location == player_refid) HandleConsume(st_inst.xtra.form_id);
-		//	}
-		//}
+        //	}
+        //}
   //  }
 
     const RE::ObjectRefHandle RemoveItemReverse(RE::TESObjectREFR* moveFrom, RE::TESObjectREFR* moveTo, FormID item_id, Count count,
                                                 RE::ITEM_REMOVE_REASON reason) {
-        logger::trace("RemoveItemReverse");
+        logger::trace("Removing item reverse");
 
         auto ref_handle = RE::ObjectRefHandle();
+
+        if (count <= 0) {
+            logger::warn("Count is 0 or less.");
+            return ref_handle;
+        }
 
         if (!moveFrom && !moveTo) {
             RaiseMngrErr("moveFrom and moveTo are both null!");
@@ -335,11 +348,10 @@ class Manager : public Utilities::SaveLoadData {
         }
         if (moveFrom && moveTo && moveFrom->GetFormID() == moveTo->GetFormID()) {
             logger::info("moveFrom and moveTo are the same!");
-
             return ref_handle;
         }
-        logger::trace("Removing item reverse");
 
+        logger::trace("RemoveItemReverse {} from {}", item_id, moveFrom->GetFormID());
         setListenContainerChange(false);
 
         auto inventory = moveFrom->GetInventory();
@@ -356,19 +368,19 @@ class Manager : public Utilities::SaveLoadData {
                 } else {
                     /*logger::trace("Removing item reverse with extra data.");
                     for (auto& extra : *asd) {
-						if (extra->HasType(RE::ExtraDataType::kOwnership)) {
+                        if (extra->HasType(RE::ExtraDataType::kOwnership)) {
                             logger::trace("Removing item reverse with ownership.");
-						} else {
-							logger::trace("Removing item reverse without ownership.");
-						}
-					}*/
+                        } else {
+                            logger::trace("Removing item reverse without ownership.");
+                        }
+                    }*/
                     ref_handle = moveFrom->RemoveItem(item_obj, count, reason, asd->front(), moveTo);
                 }
                 //Utilities::FunctionsSkyrim::Menu::SendInventoryUpdateMessage(moveFrom, item_obj);
-                setListenContainerChange(true);
-                return ref_handle;
+                break;
             }
         }
+
         setListenContainerChange(true);
         return ref_handle;
     }
@@ -388,7 +400,7 @@ class Manager : public Utilities::SaveLoadData {
             return;
         }
         addTo->AddObjectToContainer(bound, xList, count, addFrom);
-        logger::trace("Refreshing inventory for newly added item.");
+        //logger::trace("Refreshing inventory for newly added item.");
         //Utilities::FunctionsSkyrim::Menu::SendInventoryUpdateMessage(addTo, bound);
         setListenContainerChange(true);
     }
@@ -455,6 +467,7 @@ class Manager : public Utilities::SaveLoadData {
             return false;
         }
 
+        logger::trace ("_UpdateStagesInSource");
         std::map<RefID, RE::TESObjectREFR*> ids_refs;
         std::vector<RefID> refids;
         for (auto& ref : refs) {
@@ -471,7 +484,7 @@ class Manager : public Utilities::SaveLoadData {
             return false;
         }
 
-        bool decayed_was_registered = false;
+        //std::set<RefID> decayed_was_registered;
         for (auto& [loc,updates] : updated_stages) {
             for (auto& update : updates) {
                 if (!update.oldstage || !update.newstage || !update.count) {
@@ -482,8 +495,9 @@ class Manager : public Utilities::SaveLoadData {
                 if (ref->HasContainer() || ref->IsPlayerRef()) {
                     ApplyEvolutionInInventory(src->qFormType,ref, update.count, update.oldstage->formid, update.newstage->formid);
                     if (src->IsDecayedItem(update.newstage->formid)) {
-                        const auto temp_reg = RegisterAndGo(update.newstage->formid, update.count, loc, update.update_time);
-                        if (!decayed_was_registered && temp_reg) decayed_was_registered = true;
+                        if (RegisterAndGo(update.newstage->formid, update.count, loc, update.update_time)) {
+                            //decayed_was_registered.insert(loc);
+                        }
                     }
                 }
                 // WO
@@ -492,8 +506,9 @@ class Manager : public Utilities::SaveLoadData {
                     auto bound = src->IsFakeStage(update.newstage->no) ? src->GetBoundObject() : nullptr;
                     ApplyStageInWorld(ref, *update.newstage, bound);
                     if (src->IsDecayedItem(update.newstage->formid)) {
-                        const auto temp_reg = RegisterAndGo(update.newstage->formid, update.count, loc, update.update_time);
-                        if (!decayed_was_registered && temp_reg) decayed_was_registered = true;
+                        if (RegisterAndGo(update.newstage->formid, update.count, loc, update.update_time)){
+                            //decayed_was_registered.insert(loc);
+                        }
                     }
                 } else {
                     logger::critical("_UpdateStages: Unknown ref type.");
@@ -501,11 +516,6 @@ class Manager : public Utilities::SaveLoadData {
                 }
             }
         }
-
-        if (decayed_was_registered) {
-			logger::trace("Decayed item was registered. Updating again...");
-			return _UpdateStagesInSource(refs, src, curr_time);
-		}
 
         //src->CleanUpData();
         return true;
@@ -515,9 +525,9 @@ class Manager : public Utilities::SaveLoadData {
     // _UpdateTimeModulators ve UpdateStages kullaniyo
     bool _UpdateStagesOfRef(RE::TESObjectREFR* ref, const float _time, bool is_inventory, bool cleanup = true) {
         if (!ref) {
-			RaiseMngrErr("_UpdateStagesOfRef: Ref is null.");
-			return false;
-		}
+            RaiseMngrErr("_UpdateStagesOfRef: Ref is null.");
+            return false;
+        }
         const RefID refid = ref->GetFormID();
         bool update_took_place = false;
         for (auto& src : sources) {
@@ -525,10 +535,13 @@ class Manager : public Utilities::SaveLoadData {
             if (src.data[refid].empty()) continue;
             auto* src_ptr = &src;
             const bool temp_update_took_place = _UpdateStagesInSource({ref}, src_ptr, _time);
-            // consider merginf this with the regular stage update
-            if (is_inventory) src_ptr->UpdateTimeModulationInInventory(ref, _time);
             if (temp_update_took_place && cleanup) src.CleanUpData();
             if (!update_took_place) update_took_place = temp_update_took_place;
+        }
+        for (auto& src : sources) {
+            if (!src.data.contains(refid)) continue;
+            auto* src_ptr = &src;
+            if (is_inventory) src_ptr->UpdateTimeModulationInInventory(ref, _time);
         }
         return update_took_place;
     }
@@ -536,10 +549,12 @@ class Manager : public Utilities::SaveLoadData {
     // only for time modulators which are also stages.
     bool _UpdateTimeModulators(RE::TESObjectREFR* inventory_owner, const float curr_time) {
 
+        logger::trace("_UpdateTimeModulators");
+
         if (!inventory_owner) {
-			RaiseMngrErr("_UpdateTimeModulators: Inventory owner is null.");
-			return false;
-		}
+            RaiseMngrErr("_UpdateTimeModulators: Inventory owner is null.");
+            return false;
+        }
 
         const RefID inventory_owner_refid = inventory_owner->GetFormID();
 
@@ -548,33 +563,41 @@ class Manager : public Utilities::SaveLoadData {
         std::vector<std::pair<std::pair<size_t,size_t>, float>> queued_updates;  // pair: source owner index , hitting time
         // since these instances are in the same inventory, they are affected by the same time modulator
 
+        std::set<FormID> all_time_modulators;
+        for (auto& src : sources) {
+            if (!src.data.contains(inventory_owner_refid)) continue;
+            auto& temp_delayers = src.defaultsettings->delayers;
+            for (auto& temp_dlyr: temp_delayers) {
+                logger::trace("Time modulator: {}", temp_dlyr.first);
+                all_time_modulators.insert(temp_dlyr.first);
+            }
+        }
         size_t index_src = 0;
         for (auto& src : sources) {
-			if (!src.data.contains(inventory_owner_refid)) continue;
-            const auto temp_time_modulators = Utilities::Functions::getKeys<FormID,float>(src.defaultsettings->delayers);
+            if (!src.data.contains(inventory_owner_refid)) continue;
             size_t index_inst = 0;
-			for (auto& st_inst : src.data[inventory_owner_refid]) {
-				if (st_inst.xtra.is_decayed || !src.stages.contains(st_inst.no)) continue;
-                if (Utilities::Functions::Vector::HasElement<FormID>(temp_time_modulators,st_inst.xtra.form_id)) {
+            for (auto& st_inst : src.data[inventory_owner_refid]) {
+                if (st_inst.xtra.is_decayed || !src.stages.contains(st_inst.no)) continue;
+                if (all_time_modulators.contains(st_inst.xtra.form_id)) {
                     const auto delay_slope = st_inst.GetDelaySlope();
                     if (delay_slope == 0) continue;
                     const auto schranke = delay_slope > 0 ? src.stages[st_inst.no].duration : 0.f;
                     const auto hitting_time = st_inst.GetHittingTime(schranke);
                     if (hitting_time<=0) {
-						logger::warn("Hitting time is 0 or less!");
-						continue;
-					}
+                        logger::warn("Hitting time is 0 or less!");
+                        continue;
+                    }
                     else if (hitting_time <= curr_time) queued_updates.push_back({{index_src, index_inst}, hitting_time});
                 }
                 index_inst++;
-			}
-			index_src++;
-		}
+            }
+            index_src++;
+        }
         
         if (queued_updates.empty()) {
             logger::trace("No queued updates.");
             return false;
-        }
+        } else logger::trace("Queued updates: {}", queued_updates.size());
 
         size_t max_try = queued_updates.size()+100;
         bool update_happened = false;
@@ -597,7 +620,7 @@ class Manager : public Utilities::SaveLoadData {
             const auto _t_ = hitting_time + std::numeric_limits<float>::epsilon();
             const auto formid_before = st_inst.xtra.form_id;
             if (_UpdateStagesOfRef(inventory_owner, _t_, true, false)) {
-				logger::trace("Time modulator updated.");
+                logger::trace("Time modulator updated.");
                 update_happened = true;
                 if (formid_before != st_inst.xtra.form_id && !st_inst.xtra.is_decayed) {
                     const auto temp_time_modulators =
@@ -615,8 +638,8 @@ class Manager : public Utilities::SaveLoadData {
                             }
                         }
                     }
-				}
-			}
+                }
+            }
 
         }
 
@@ -643,8 +666,8 @@ class Manager : public Utilities::SaveLoadData {
 
         empty_mgeff = RE::IFormFactory::GetConcreteFormFactoryByType<RE::EffectSetting>()->Create();
         if (!empty_mgeff) {
-			logger::critical("Failed to create empty mgeff.");
-			init_failed = true;
+            logger::critical("Failed to create empty mgeff.");
+            init_failed = true;
         } else {
             empty_mgeff->magicItemDescription = std::string(" ");
             empty_mgeff->data.flags.set(RE::EffectSetting::EffectSettingData::Flag::kNoDuration);
@@ -655,8 +678,8 @@ class Manager : public Utilities::SaveLoadData {
 
         if (Settings::INI_settings.contains("Other Settings")){
             if (Settings::INI_settings["Other Settings"].contains("WorldObjectsEvolve")) {
-				worldobjectsevolve = Settings::INI_settings["Other Settings"]["WorldObjectsEvolve"];
-			} else logger::warn("WorldObjectsEvolve not found.");
+                worldobjectsevolve = Settings::INI_settings["Other Settings"]["WorldObjectsEvolve"];
+            } else logger::warn("WorldObjectsEvolve not found.");
         } 
         else logger::critical("Other Settings not found.");
         
@@ -674,9 +697,9 @@ class Manager : public Utilities::SaveLoadData {
     }
 
     void setListenEquip(const bool value) {
-		std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
-		listen_equip = value;
-	}
+        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        listen_equip = value;
+    }
 
     void setListenContainerChange(const bool value) {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
@@ -710,14 +733,14 @@ public:
     const char* GetType() override { return "Manager"; }
 
     void setListenCrosshair(const bool value) {
-		std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
-		listen_crosshair = value;
-	}
+        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        listen_crosshair = value;
+    }
 
     [[nodiscard]] bool getListenCrosshair() {
-		std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
-		return listen_crosshair;
-	}
+        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        return listen_crosshair;
+    }
 
     [[nodiscard]] bool getListenMenuOpenClose() {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
@@ -756,9 +779,9 @@ public:
             return false;
         }
         if (sources.empty()) {
-			logger::warn("Sources is empty.");
-			return false;
-		}
+            logger::warn("Sources is empty.");
+            return false;
+        }
         for (auto& src : sources) {
             if (src.data.contains(refid)) return true;
         }
@@ -783,33 +806,33 @@ public:
         }
 
         if (GetNInstances() > _instance_limit) {
-			logger::warn("Instance limit reached.");
+            logger::warn("Instance limit reached.");
             Utilities::MsgBoxesNotifs::InGame::CustomErrMsg(
                 std::format("The mod is tracking over {} instances. Maybe it is not bad to check your memory usage and "
                             "skse co-save sizes.",
                             _instance_limit));
-		}
+        }
+        if (some_formid >= 0xFF000000){
+            logger::trace("Skipping fake form at source creation.");
+            return false;
+        }
 
         logger::trace("Registering new instance.Formid {} , Count {} , Location refid {}", some_formid, count, location_refid);
         // make new registry
         auto src = GetSource(some_formid);  // also saves it to sources if it was created new
         // can be null if it is not a custom stage and not registered before
-        if (some_formid >= 0xFF000000){
-            logger::trace("Skipping fake form at source creation.");
-            return false;
-        }
         if (!src) {
             logger::trace("No existing source and no custom settings found for the formid {}", some_formid);
             const auto qform_type = Settings::GetQFormType(some_formid);
             if (!Settings::IsItem(some_formid, qform_type, true)) {
-                logger::trace("Not an item.");
+                logger::trace("Cannot register bcs Not an item.");
                 return false;
             }
             else if (!Settings::defaultsettings.contains(qform_type)){
-                logger::trace("No default settings found for the qform_type {}", qform_type);
+                logger::trace("Cannot register bcs No default settings found for the qform_type {}", qform_type);
                 return false;
             } else if (Settings::defaultsettings[qform_type].init_failed) {
-				logger::trace("Default settings not loaded for the qform_type {}", qform_type);
+                logger::trace("Cannot register bcs Default settings not loaded for the qform_type {}", qform_type);
                 return false;
             } else {
                 logger::trace("Creating new source for the formid {}", some_formid);
@@ -865,24 +888,24 @@ public:
         }
         const auto wo_refid = wo_ref->GetFormID();
         if (!wo_refid) {
-			logger::warn("Refid is null.");
+            logger::warn("Refid is null.");
             return false;
-		}
+        }
         const auto wo_bound = wo_ref->GetBaseObject();
         if (!wo_bound) {
             logger::warn("Bound is null.");
             return false;
         }
         if (RefIsRegistered(wo_refid)) {
-			logger::warn("Ref is already registered.");
+            logger::warn("Ref is already registered.");
             return false;
-		}
+        }
         return RegisterAndGo(wo_bound->GetFormID(), wo_ref->extraList.GetCount(), wo_refid);
     }
 
     // pffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
     [[maybe_unused]] void _HandleDrop2(Source*, RefID, Count) {
-		/*ENABLE_IF_NOT_UNINSTALLED
+        /*ENABLE_IF_NOT_UNINSTALLED
         if (!refid) return RaiseMngrErr("Ref is null.");
         if (!count) {
             logger::warn("Count is 0.");
@@ -894,8 +917,8 @@ public:
         a_obj->Activate(wo_ref, player_ref, 0, a_obj, 0);
         setListenContainerChange(true);*/
         /*if (!PickUpItem(wo_ref, 1)) {
-			logger::error("HandleDrop: Item could not be picked up.");
-			return;
+            logger::error("HandleDrop: Item could not be picked up.");
+            return;
         }*/
         /* else {
             logger::trace("HandleDrop: Item picked up.");
@@ -913,9 +936,9 @@ public:
         if (!dropped_formid) return RaiseMngrErr("Formid is null.");
         if (!dropped_stage_ref) return RaiseMngrErr("Ref is null.");
         if (!count) {
-			logger::warn("Count is 0.");
-			return;
-		}
+            logger::warn("Count is 0.");
+            return;
+        }
 
         //mutex.lock();
 
@@ -928,9 +951,9 @@ public:
             return;
         } 
         else if (source->formid == dropped_formid && !IsStage(dropped_formid, source)) {
-			logger::warn("HandleDrop: Source same formid as dropped one! Can be bcs the item's evolution did not start yet or the stage item is the same as source item.");
-			return;
-		}
+            logger::warn("HandleDrop: Source same formid as dropped one! Can be bcs the item's evolution did not start yet or the stage item is the same as source item.");
+            return;
+        }
         
         source->PrintData();
         // print radius just for testing
@@ -949,20 +972,20 @@ public:
             return;
         }
         else if (dropped_stage_ref->extraList.GetCount() != count) {
-			logger::warn("HandleDrop: Count mismatch: {} , {}", dropped_stage_ref->extraList.GetCount(), count);
+            logger::warn("HandleDrop: Count mismatch: {} , {}", dropped_stage_ref->extraList.GetCount(), count);
             // try to assign stage instances to the dropped item
             const auto refid = dropped_stage_ref->GetFormID();
             source->MoveInstances(player_refid, refid, dropped_formid, count, true);
-            // remove all instances except the last one
+            // remove all instances except the first one
             auto& vec = source->data[refid];
             for (size_t i = 0; i < vec.size(); ++i) {
                 if (i == 0) vec[i].count = count;
-				else vec[i].count = 0;
+                else vec[i].count = 0;
             }
             source->CleanUpData();
             /*return _HandleDrop2(source,dropped_stage_ref, count);*/
             return;
-		}
+        }
         
         // at the same stage but different start times
         std::vector<size_t> instances_candidates = {};
@@ -973,19 +996,19 @@ public:
                     instances_candidates.push_back(index__);
                 }
                 index__++;
-		    }
+            }
         }
         if (instances_candidates.empty()) {
-			logger::error("HandleDrop: No instances found. Can be when dropping not yet registered stage items.");
-			return;
-		}
+            logger::error("HandleDrop: No instances found. Can be when dropping not yet registered stage items.");
+            return;
+        }
         // need to now order the instances_candidates by their elapsed times
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         std::sort(instances_candidates.begin(), instances_candidates.end(), 
             [source,curr_time](size_t a, size_t b) {
             return source->data[player_refid][a].GetElapsed(curr_time) >
                    source->data[player_refid][b].GetElapsed(curr_time);  // use up the old stuff first
-		});
+        });
 
         logger::trace("HandleDrop: setting count");
 
@@ -1003,14 +1026,14 @@ public:
             if (removed_indices.empty()) {
                 instance = &source->data[player_refid][index];
             } 
-			else {
+            else {
                 int shift = 0;
-				for (size_t removed_index: removed_indices) {
+                for (size_t removed_index: removed_indices) {
                     if (index == removed_index) return RaiseMngrErr("HandleDrop: Index already removed.");
                     if (index > removed_index) shift++;
-				}
+                }
                 instance = &source->data[player_refid][index - shift];
-			}
+            }
 
             if (count <= instance->count) {
                 
@@ -1041,8 +1064,8 @@ public:
                     auto new_ref = Utilities::FunctionsSkyrim::WorldObject::DropObjectIntoTheWorld(bound_to_drop, count);
                     if (!new_ref) return RaiseMngrErr("HandleDrop: New ref is null.");
                     if (new_ref->extraList.GetCount() != count) {
-						logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), count);
-					}
+                        logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), count);
+                    }
                     if (!source->InsertNewInstance(new_instance, new_ref->GetFormID())) {
                         return RaiseMngrErr("HandleDrop: InsertNewInstance failed.");
                     }
@@ -1089,8 +1112,8 @@ public:
                     }
                     // I NEED TO DO EVERYTHING THAT USES instance BEFORE MoveInstance!!!!!!!!
                     if (!source->MoveInstance(player_refid, new_ref->GetFormID(), instance)) {
-						return RaiseMngrErr("HandleDrop: MoveInstance failed.");
-					}
+                        return RaiseMngrErr("HandleDrop: MoveInstance failed.");
+                    }
                     if (temp_is_fake) _ApplyStageInWorld_Fake(new_ref, extra_text);
                 }
             }
@@ -1106,7 +1129,7 @@ public:
             }
             const auto __stage_no = GetStageNoFromSource(source, dropped_formid);
             if (!source->InitInsertInstanceWO(__stage_no, count, new_ref->GetFormID(),RE::Calendar::GetSingleton()->GetHoursPassed())) {
-            	return RaiseMngrErr("HandleDrop: InsertNewInstance failed 2.");
+                return RaiseMngrErr("HandleDrop: InsertNewInstance failed 2.");
             }
             //AddItem(player_ref, nullptr, dropped_formid, count);
             
@@ -1132,12 +1155,16 @@ public:
         const RefID npc_refid = npc_ref ? npc_ref->GetFormID() : player_refid;
         npc_ref = npc_ref ? npc_ref : player_ref; // naming...for the sake of functionality
         if (!RefIsRegistered(wo_refid)) {
+#ifndef NDEBUG
             if (worldobjectsevolve){
                 // bcs it shoulda been registered already before picking up (with some exceptions)
                 logger::warn("HandlePickUp: Not registered world object refid: {}, pickedup_formid: {}", wo_refid,
                              pickedup_formid);
             }
-            if (!RegisterAndGo(pickedup_formid, count, npc_refid)) logger::error("HandlePickUp: RegisterAndGo failed.");
+            if (!RegisterAndGo(pickedup_formid, count, npc_refid)) {
+                logger::warn("HandlePickUp: RegisterAndGo failed.");
+            }
+#endif
             return;
         }
         // so it was registered before
@@ -1175,9 +1202,9 @@ public:
             return;
         }
         if (stage_formid == source->formid && !IsStage(stage_formid, source)) {
-			logger::warn("HandleConsume:Formid is the same as the source formid.");
-			return;
-		}
+            logger::warn("HandleConsume:Formid is the same as the source formid.");
+            return;
+        }
 
         logger::trace("HandleConsume");
 
@@ -1195,9 +1222,9 @@ public:
             return;
         }
         if (total_registered_count == 0) {
-			logger::warn("HandleConsume: Nothing to consume.");
-			return;
-		}
+            logger::warn("HandleConsume: Nothing to consume.");
+            return;
+        }
 
         // check if player has the item
         // sometimes player does not have the item but it can still be there with count = 0.
@@ -1226,11 +1253,11 @@ public:
             if (diff <= instance->count) {
                 instance->count -= diff;
                 break;
-			} else {
+            } else {
                 diff -= instance->count;
                 instance->count = 0;
-			}
-		}
+            }
+        }
 
         UpdateStages(player_ref);
 
@@ -1243,23 +1270,23 @@ public:
     // giris noktasi RegisterAndGo uzerinden
     [[nodiscard]] const bool HandleBuy(const FormID bought_formid, const Count bought_count,
                                        const RefID vendor_chest_refid) {
-		if (!bought_formid) {
-			logger::warn("HandleBuy: Formid is null.");
-			return false;
-		}
-		if (!bought_count) {
-			logger::warn("HandleBuy: Count is 0.");
-			return false;
-		}
-		if (!vendor_chest_refid) {
-			logger::warn("HandleBuy: Vendor chest refid is null.");
-			return false;
-		}
+        if (!bought_formid) {
+            logger::warn("HandleBuy: Formid is null.");
+            return false;
+        }
+        if (!bought_count) {
+            logger::warn("HandleBuy: Count is 0.");
+            return false;
+        }
+        if (!vendor_chest_refid) {
+            logger::warn("HandleBuy: Vendor chest refid is null.");
+            return false;
+        }
 
-		logger::trace("HandleBuy: Formid {} , Count {} , Vendor chest refid {}", bought_formid, bought_count, vendor_chest_refid);
+        logger::trace("HandleBuy: Formid {} , Count {} , Vendor chest refid {}", bought_formid, bought_count, vendor_chest_refid);
         if (IsExternalContainer(bought_formid,vendor_chest_refid)) return UnLinkExternalContainer(bought_formid, bought_count,vendor_chest_refid);
-		else if (!RegisterAndGo(bought_formid, bought_count, player_refid)) logger::error("HandleBuy: RegisterAndGo failed.");
-		return false;
+        else if (!RegisterAndGo(bought_formid, bought_count, player_refid)) logger::error("HandleBuy: RegisterAndGo failed.");
+        return false;
 
     }
 
@@ -1274,9 +1301,9 @@ public:
         }
 
         if (!Settings::qform_bench_map.contains(bench_type)) {
-			logger::warn("HandleCraftingEnter: Bench type not found.");
-			return;
-		}
+            logger::warn("HandleCraftingEnter: Bench type not found.");
+            return;
+        }
 
         const auto& q_form_types = Settings::qform_bench_map.at(bench_type);
         
@@ -1285,9 +1312,9 @@ public:
         const auto player_inventory = player_ref->GetInventory();
         for (auto& src : sources) {
             if (src.data.empty()) {
-				logger::warn("HandleCraftingEnter: Source data is empty.");
-				continue;
-			}
+                logger::warn("HandleCraftingEnter: Source data is empty.");
+                continue;
+            }
             if (!Utilities::Functions::Vector::HasElement<std::string>(q_form_types, src.qFormType)) {
                 logger::trace("HandleCraftingEnter: qFormType mismatch: {} , {}", src.qFormType, bench_type);
                 continue;
@@ -1300,8 +1327,8 @@ public:
                 if (!st_inst.xtra.crafting_allowed) continue;
                 const auto stage_formid = st_inst.xtra.form_id;
                 if (!stage_formid) {
-                	logger::error("HandleCraftingEnter: Stage formid is null!!!");
-					continue;
+                    logger::error("HandleCraftingEnter: Stage formid is null!!!");
+                    continue;
                 }
                 if (stage_formid == src.formid) continue;
                 const FormFormID temp = {src.formid, stage_formid}; // formid1: source formid, formid2: stage formid
@@ -1317,7 +1344,7 @@ public:
                 if (!faves_list.contains(stage_formid)) faves_list[stage_formid] = Utilities::FunctionsSkyrim::Inventory::IsFavorited(stage_formid,player_refid);
                 else if (!faves_list[stage_formid]) faves_list[stage_formid] = Utilities::FunctionsSkyrim::Inventory::IsFavorited(stage_formid,player_refid);
                 if (!equipped_list.contains(stage_formid)) equipped_list[stage_formid] = Utilities::FunctionsSkyrim::Inventory::IsEquipped(stage_formid);
-				else if (!equipped_list[stage_formid]) equipped_list[stage_formid] = Utilities::FunctionsSkyrim::Inventory::IsEquipped(stage_formid);
+                else if (!equipped_list[stage_formid]) equipped_list[stage_formid] = Utilities::FunctionsSkyrim::Inventory::IsEquipped(stage_formid);
             }
         }
         
@@ -1334,7 +1361,7 @@ public:
         for (auto& [formids, counts] : handle_crafting_instances) {
             logger::trace("HandleCraftingEnter: Formid1: {} , Formid2: {} , Count1: {} , Count2: {}", formids.form_id1,
                           formids.form_id2, counts.first, counts.second);
-		}
+        }
 
     }
 
@@ -1345,11 +1372,11 @@ public:
 
 
         if (handle_crafting_instances.empty()) {
-			logger::warn("HandleCraftingExit: No instances found.");
+            logger::warn("HandleCraftingExit: No instances found.");
             faves_list.clear();
             equipped_list.clear();
-			return;
-		}
+            return;
+        }
 
         logger::trace("Crafting menu closed");
         for (auto& [formids, counts] : handle_crafting_instances) {
@@ -1375,7 +1402,7 @@ public:
                 if (__faved) Utilities::FunctionsSkyrim::Inventory::FavoriteItem(formids.form_id2, player_refid);
                 bool __equipped = equipped_list[formids.form_id2];
                 if (__equipped) Utilities::FunctionsSkyrim::Inventory::EquipItem(formids.form_id2, false);
-			}
+            }
             if (diff<=0) continue;
             HandleConsume(formids.form_id2);
         }
@@ -1406,61 +1433,57 @@ public:
         if (!external_ref->HasContainer()) return false;
         const auto external_refid = external_ref->GetFormID();
         for (const auto& src : sources) {
-			if (src.data.contains(external_refid)) return true;
-		}
+            if (src.data.contains(external_refid)) return true;
+        }
         return false;
     }
 
     [[nodiscard]] const bool IsExternalContainer(const RefID refid) {
-		if (!refid) return false;
-		auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(refid);
-		if (!ref) return false;
-		return IsExternalContainer(ref);
-	}
+        if (!refid) return false;
+        auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(refid);
+        if (!ref) return false;
+        return IsExternalContainer(ref);
+    }
 
     // TAMAM
     [[nodiscard]] const bool LinkExternalContainer(const FormID some_formid, Count item_count,
                                                    const RefID externalcontainer) {
+        auto updated = false;
         if (!some_formid) {
-			logger::error("Fake formid is null.");
-			return false;
-		}
+            logger::error("Fake formid is null.");
+            return updated;
+        }
         if (!item_count) {
             logger::error("Item count is 0.");
-            return false;
+            return updated;
         }
 
         const auto external_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(externalcontainer);
         if (!external_ref) {
             logger::critical("External ref is null.");
-            return false;
+            return updated;
         }
         if (!external_ref->HasContainer() || externalcontainer==player_refid) {
             logger::error("External container does not have a container or is player ref.");
-            return false;
+            return updated;
         }
         const auto source = GetSource(some_formid);
-        if (!source) {
-            logger::trace("LinkExternalContainer: Source not found.");
-            return false;
-        } else if (source->formid == some_formid && !IsStage(some_formid,source)) {
-            logger::trace("LinkExternalContainer: Source same formid and not stage");
-            return false;
+        if (source) {
+            logger::trace("Linking external container.");
+            if (const auto rest_ = source->MoveInstances(player_refid, externalcontainer, some_formid, item_count, true);rest_>0) {
+                logger::warn("LinkExternalContainer: Rest count: {}", rest_);
+                if (!RegisterAndGo(some_formid, rest_, externalcontainer)) logger::warn("LinkExternalContainer: RegisterAndGo failed.");
+            }
+            source->CleanUpData();
+        } else if (!RegisterAndGo(some_formid, item_count, externalcontainer)) {
+#ifndef NDEBUG
+            logger::warn("LinkExternalContainer: RegisterAndGo failed.");
+#endif
         }
 
-
-        logger::trace("Linking external container.");
-
-        if (const auto rest_ = source->MoveInstances(player_refid, externalcontainer, some_formid, item_count, true)) {
-            logger::warn("LinkExternalContainer: Rest count: {}", rest_);
-            if (!RegisterAndGo(source->formid, rest_, externalcontainer)) logger::error("LinkExternalContainer: RegisterAndGo failed.");
-		}
-
-        auto updated = false;
         if (!updated && UpdateStages(player_ref)) updated = true;
         if (!updated && UpdateStages(external_ref)) updated = true;
 
-        source->CleanUpData();
 
         logger::trace("Linked external container.");
         return updated;
@@ -1472,13 +1495,13 @@ public:
                                                      const RefID externalcontainer) { 
         // bu itemla bu containera linked olduunu varsayuyo
         if (!some_formid) {
-			logger::error("Fake formid is null.");
-			return false;
-		}
+            logger::error("Fake formid is null.");
+            return false;
+        }
         if (!count) {
-			logger::error("Item count is 0.");
-			return false;
-		}
+            logger::error("Item count is 0.");
+            return false;
+        }
 
         if (!externalcontainer) {
             logger::critical("External container is null.");
@@ -1486,31 +1509,26 @@ public:
         }
 
         const auto source = GetSource(some_formid);
-        if (!source) {
-            logger::trace("LinkExternalContainer: Source not found.");
-            return false;
-        } else if (source->formid == some_formid && !IsStage(some_formid,source)) {
-            logger::trace("LinkExternalContainer: Source same formid and not stage");
-            return false;
+        if (source) {
+            logger::trace("Unlinking external container. Formid {} , Count {} , External container refid {}", some_formid, count, externalcontainer);
+            if (const auto rest_ = source->MoveInstances(externalcontainer, player_refid, some_formid, count, false);rest_>0) {
+                logger::warn("UnLinkExternalContainer: Rest count: {}", rest_);
+                if (!RegisterAndGo(some_formid, rest_, player_refid))
+                    logger::warn("UnLinkExternalContainer: RegisterAndGo failed.");
+            }
+            source->CleanUpData();
+        } else if (!RegisterAndGo(some_formid, count, player_refid)) {
+            logger::warn("UnLinkExternalContainer: RegisterAndGo failed.");
         }
-
-        logger::trace("Unlinking external container. Formid {} , Count {} , External container refid {}", some_formid, count, externalcontainer);
-        // if there is count left, then we should register it in the player's inventory
-        if (const auto rest_ = source->MoveInstances(externalcontainer, player_refid, some_formid, count, false)) {
-            logger::warn("UnLinkExternalContainer: Rest count: {}", rest_);
-            if (!RegisterAndGo(some_formid, rest_, player_refid)) logger::error("UnLinkExternalContainer: RegisterAndGo failed.");
-		}
-        
-        source->CleanUpData();
-
+         
         logger::trace("Updating stages in player inventory and external container.");
         auto updated = false;
         if (!updated && UpdateStages(player_ref)) updated = true;
         if (auto external_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(externalcontainer)) {
-			if (external_ref->HasContainer()) {
+            if (external_ref->HasContainer()) {
                 if (!updated && UpdateStages(external_ref)) updated = true;
-			}
-		}
+            }
+        }
         logger::trace("Unlinked external container.");
 
         return updated;
@@ -1526,11 +1544,12 @@ public:
             return false;
         }
         if (sources.empty()) {
-			logger::warn("UpdateStages: Sources is empty.");
-			return false;
-		}
+            logger::warn("UpdateStages: Sources is empty.");
+            return false;
+        }
         
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+        logger::trace("UpdateStages: curr_time: {}", curr_time);
         
         // time modulator updates
         const bool is_inventory = ref->HasContainer() || ref->IsPlayerRef();
@@ -1557,9 +1576,9 @@ public:
     bool UpdateStages(RefID loc_refid) {
         logger::trace("Manager: Updating stages for loc_refid {}.",loc_refid);
         if (!loc_refid) {
-			logger::critical("UpdateStages: loc_refid is null.");
-			return false;
-		}
+            logger::critical("UpdateStages: loc_refid is null.");
+            return false;
+        }
         auto loc_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(loc_refid);
         if (!loc_ref) {
             logger::critical("UpdateStages: loc_ref is null.");
@@ -1577,8 +1596,8 @@ public:
         if (!wo_ref) return RaiseMngrErr("Ref is null.");
         const auto st_inst = GetWOStageInstance(wo_ref);
         if (!st_inst) {
-        	logger::warn("SwapWithStage: Source not found.");
-			return;
+            logger::warn("SwapWithStage: Source not found.");
+            return;
         }
         // remove the extra data that cause issues when dropping
         Utilities::FunctionsSkyrim::xData::PrintObjectExtraData(wo_ref);
@@ -1595,7 +1614,7 @@ public:
     }
 
     void Reset() {
-		ENABLE_IF_NOT_UNINSTALLED
+        ENABLE_IF_NOT_UNINSTALLED
         logger::info("Resetting manager...");
         for (auto& src : sources) src.Reset();
         sources.clear();
@@ -1611,7 +1630,7 @@ public:
         setListenCrosshair(true);
         setUninstalled(false);
         logger::info("Manager reset.");
-	}
+    }
 
     void SendData() {
         ENABLE_IF_NOT_UNINSTALLED
@@ -1645,24 +1664,24 @@ public:
 
         if (!loc_ref) {
             logger::error("Loc ref is null.");
-			return;
+            return;
         }
         const auto loc_refid = loc_ref->GetFormID();
 
         if (!locs_to_be_handled.contains(loc_refid)) {
-			logger::trace("Loc ref not in locs_to_be_handled.");
-			return;
-		}
+            logger::trace("Loc ref not in locs_to_be_handled.");
+            return;
+        }
 
         if (!loc_ref->HasContainer() && !loc_ref->IsPlayerRef()) {
-			logger::trace("DOes not have container");
+            logger::trace("DOes not have container");
             // remove the loc refid key from locs_to_be_handled map
             auto it = locs_to_be_handled.find(loc_refid);
             if (it != locs_to_be_handled.end()) {
                 locs_to_be_handled.erase(it);
             }
-			return;
-		}
+            return;
+        }
 
 
         // handle discrepancies in inventory vs registries
@@ -1683,7 +1702,7 @@ public:
                         total_fake_registry_counts[temp_formid] = st_inst.count;
                     else total_fake_registry_counts[temp_formid] += st_inst.count;
                 }
-			}
+            }
         }
 
         // onceki sessiondan kalan fakeleri yok et
@@ -1698,45 +1717,45 @@ public:
             if (!total_registry_counts.contains(fake_formid)) {
                 logger::info("HandleLoc: Deleting fake formid {}.", fake_formid);
                 fake_form->SetDelete(true);
-			}
+            }
         }
         
         // I add the fakes but not the reals. if there are discrepancies in the reals, I reflect that in the registries in the next step
         for (const auto& [formid_, count] : total_fake_registry_counts) {
-			if (count == 0) continue;
+            if (count == 0) continue;
             const auto bound = Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid_);
             if (!bound) {
-				logger::warn("HandleLoc: Bound is null.");
-				continue;
-			}
+                logger::warn("HandleLoc: Bound is null.");
+                continue;
+            }
             AddItem(loc_ref, nullptr, formid_, count);
-		}
+        }
 
         // for every formid, handle the discrepancies
         const auto loc_inventory = loc_ref->GetInventory(); // formids are unique so i can pull it out of for-loop
         for (auto& [formid, instances] : formid_instances_map) {
             auto total_registry_count = total_registry_counts[formid];
-			const auto it = loc_inventory.find(Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid));
-			const auto inventory_count = it != loc_inventory.end() ? it->second.first : 0;
+            const auto it = loc_inventory.find(Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid));
+            const auto inventory_count = it != loc_inventory.end() ? it->second.first : 0;
             auto diff = total_registry_count - inventory_count;
             if (diff < 0) {
-				logger::warn("HandleLoc: Something could have gone wrong with registration.");
-				continue;
-			}
+                logger::warn("HandleLoc: Something could have gone wrong with registration.");
+                continue;
+            }
             if (diff == 0) {
-				logger::warn("HandleLoc: Nothing to remove.");
-				continue;
-			}
+                logger::warn("HandleLoc: Nothing to remove.");
+                continue;
+            }
             for (auto& instance : instances) {
                 if (diff <= instance->count) {
-					instance->count -= diff;
-					break;
+                    instance->count -= diff;
+                    break;
                 }
                 else {
-					diff -= instance->count;
-					instance->count = 0;
-				}
-			}
+                    diff -= instance->count;
+                    instance->count = 0;
+                }
+            }
         }
 
         auto it = locs_to_be_handled.find(loc_refid);
@@ -1800,9 +1819,9 @@ public:
         const auto stage_no = st_plain.no;
         auto& stages = src->stages;
         if (!stages.contains(stage_no)) {
-			logger::warn("Stage not found.");
-			return nullptr;
-		}
+            logger::warn("Stage not found.");
+            return nullptr;
+        }
 
         StageInstance new_instance(st_plain.start_time, stage_no, st_plain.count);
         new_instance.xtra.form_id = stages[stage_no].formid;
@@ -1814,13 +1833,13 @@ public:
         new_instance.xtra.is_transforming = st_plain.is_transforming;
 
         if (!src->InsertNewInstance(new_instance, loc)) {
-        	logger::warn("RegisterAtReceiveData: InsertNewInstance failed.");
-			return nullptr;
+            logger::warn("RegisterAtReceiveData: InsertNewInstance failed.");
+            return nullptr;
         } 
         else {
             logger::trace("New instance registered at load game.");
             return &src->data[loc].back();
-    	}
+        }
     }
 
     void ReceiveData() {
@@ -1843,16 +1862,16 @@ public:
             if (!source_form) {
                 logger::critical("ReceiveData: Source form not found. Saved formid: {}, editorid: {}",
                                  formeditorid.form_id, formeditorid.editor_id);
-				continue;
-			}
+                continue;
+            }
             for (const auto& st_plain:rhs){
                 if (st_plain.is_fake) locs_to_be_handled[loc].push_back(st_plain.form_id);
                 auto* inserted_instance = _RegisterAtReceiveData(source_formid, loc, st_plain);
                 if (!inserted_instance) {
                     logger::warn("ReceiveData: could not insert instance: formid: {}, loc: {}", source_formid, loc);
-					continue;
-				}
-				n_instances++;
+                    continue;
+                }
+                n_instances++;
             }
         }
 
@@ -1870,8 +1889,10 @@ public:
     }
 
     void Print() {
+        logger::info("Printing sources...Current time: {}", RE::Calendar::GetSingleton()->GetHoursPassed());
         for (auto& src : sources) {
-		    src.PrintData();
+            if (src.data.empty()) continue;
+            src.PrintData();
         }
     }
 

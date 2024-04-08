@@ -224,6 +224,23 @@ namespace Utilities{
         };
 
         namespace String {
+
+            template <typename T>
+            std::string join(const T& container, const std::string_view& delimiter) {
+                std::ostringstream oss;
+                auto iter = container.begin();
+
+                if (iter != container.end()) {
+                    oss << *iter;
+                    ++iter;
+                }
+
+                for (; iter != container.end(); ++iter) {
+                    oss << delimiter << *iter;
+                }
+
+                return oss.str();
+            }
             
             std::string trim(const std::string& str) {
                 // Find the first non-whitespace character from the beginning
@@ -399,8 +416,10 @@ namespace Utilities{
             return nullptr;
         };
 
-        int GetFormEditorIDFromString(const std::string formEditorId) {
+        FormID GetFormEditorIDFromString(const std::string formEditorId) {
+            logger::trace("Getting formid from editorid: {}", formEditorId);
             if (Utilities::Functions::isValidHexWithLength7or8(formEditorId.c_str())) {
+                logger::trace("formEditorId is in hex format.");
                 int form_id_;
                 std::stringstream ss;
                 ss << std::hex << formEditorId;
@@ -410,7 +429,7 @@ namespace Utilities{
                     return temp_form->GetFormID();
                 else {
                     logger::error("Formid is null for editorid {}", formEditorId);
-                    return -1;
+                    return 0;
                 }
             }
             if (formEditorId.empty())
@@ -418,16 +437,17 @@ namespace Utilities{
             else if (!IsPo3Installed()) {
                 logger::error("Po3 is not installed.");
                 MsgBoxesNotifs::Windows::Po3ErrMsg();
-                return -1;
+                return 0;
             }
             auto temp_form = GetFormByID(0, formEditorId);
-            if (temp_form)
+            if (temp_form){
+                logger::trace("Formid is not null with formid {}", temp_form->GetFormID());
                 return temp_form->GetFormID();
+            }
             else {
                 logger::info("Formid is null for editorid {}", formEditorId);
-                return -1;
+                return 0;
             }
-            return -1;
         }
 
         std::size_t GetExtraDataListLength(const RE::ExtraDataList* dataList) {
@@ -1758,10 +1778,10 @@ namespace Utilities{
     
     namespace FunctionsJSON {
         
-        int GetFormEditorID(const rapidjson::Value& section, const char* memberName) {
+        FormID GetFormEditorID(const rapidjson::Value& section, const char* memberName) {
             if (!section.HasMember(memberName)) {
                 logger::error("Member {} not found", memberName);
-                return -1;
+                return 0;
             }
             if (section[memberName].IsString()) {
                 const std::string formEditorId = section[memberName].GetString();
@@ -1774,24 +1794,24 @@ namespace Utilities{
                     if (temp_form) return temp_form->GetFormID();
                     else {
                         logger::error("Formid is null for editorid {}", formEditorId);
-						return -1;
+						return 0;
                     }
                 }
                 if (formEditorId.empty()) return 0;
                 else if (!IsPo3Installed()) {
                     logger::error("Po3 is not installed.");
                     MsgBoxesNotifs::Windows::Po3ErrMsg();
-                    return -1;
+                    return 0;
                 }
                 auto temp_form = FunctionsSkyrim::GetFormByID(0, formEditorId);
                 if (temp_form) return temp_form->GetFormID();
                 else {
                     logger::error("Formid is null for editorid {}", formEditorId);
-                    return -1;
+                    return 0;
                 }
             } 
             else if (section[memberName].IsInt()) return section[memberName].GetInt();
-			return -1;
+			return 0;
         }
     }
 
@@ -2050,7 +2070,13 @@ namespace Utilities{
                 // yeni steigungla yeni ausgangspunkt yapiyoruz
                 // call only from UpdateTimeModulationInInventory
                 if (xtra.is_transforming) return;
-                if (_delay_mag == delay) return;
+                if (_delay_mag == delay) {
+                    if (_delay_formid == formid) return;
+                    else {
+                        _delay_formid = formid;
+                        return;
+                    }
+                }
 
                 _elapsed = GetElapsed(time);
                 _delay_start = time;
@@ -2061,7 +2087,7 @@ namespace Utilities{
             void SetTransform(const float time, const FormID formid) {
                 if (xtra.is_transforming){
                     if (_delay_formid != formid) {
-                        RemoveTransform(time, 1, 0);
+                        RemoveTransform(time);
                         return SetTransform(time, formid);
                     } else return;
                 } 
@@ -2073,17 +2099,18 @@ namespace Utilities{
                 return GetElapsed(curr_time) - _elapsed; 
             }
 
-            void RemoveTransform(const float curr_time, const float delay, const FormID formid) {
+            void RemoveTransform(const float curr_time) {
                 if (!xtra.is_transforming) return;
                 xtra.is_transforming = false;
                 _delay_start = curr_time;
-                _delay_mag = delay;
-                _delay_formid = formid;
+                _delay_mag = 1;
+                _delay_formid = 0;
             }
 
+            // use only for WO (e.g. HandleDrop)
             void RemoveTimeMod(const float time) { 
+                RemoveTransform(time);
                 SetDelay(time, 1, 0);
-                RemoveTransform(time, 1, 0);
 			}
 
             const float GetDelayMagnitude() const {
@@ -2096,7 +2123,7 @@ namespace Utilities{
 
             const float GetHittingTime(float schranke) const {
 				// _elapsed + dt*_delay_mag = schranke
-                return (schranke - _elapsed) / (GetDelaySlope() + std::numeric_limits<float>::epsilon());
+                return _delay_start + (schranke - _elapsed) / (GetDelaySlope() + std::numeric_limits<float>::epsilon());
 			}
 
             StageInstancePlain GetPlain() const {

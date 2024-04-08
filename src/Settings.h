@@ -307,11 +307,11 @@ namespace Settings
             logger::info("Stage no: {}", temp_no);
             settings.numbers.push_back(temp_no);
             const auto temp_formeditorid = stageNode["FormEditorID"].as<std::string>();
-            const auto temp_formid = temp_formeditorid.empty()
+            const FormID temp_formid = temp_formeditorid.empty()
                                          ? 0
                                          : Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
-            if (temp_formid < 0) {
-                logger::error("Formid is less than 0.");
+            if (!temp_formid && !temp_formeditorid.empty()) {
+                logger::error("Formid could not be obtained for {}", temp_formid, temp_formeditorid);
                 settings.init_failed = true;
                 return settings;
             }
@@ -343,7 +343,9 @@ namespace Settings
             
             // add to crafting_allowed
             logger::trace("Crafting");
-            settings.crafting_allowed[temp_no] = stageNode["crafting_allowed"].as<bool>();
+            if (stageNode["crafting_allowed"] && !stageNode["crafting_allowed"].IsNull()){
+                settings.crafting_allowed[temp_no] = stageNode["crafting_allowed"].as<bool>();
+            } else settings.crafting_allowed[temp_no] = false;
 
 
             // add to effects
@@ -354,7 +356,7 @@ namespace Settings
             } else {
                 for (const auto& effectNode : stageNode["mgeffect"]) {
                     const auto temp_effect_formeditorid = effectNode["FormEditorID"].as<std::string>();
-                    const auto temp_effect_formid =
+                    const FormID temp_effect_formid =
                         temp_effect_formeditorid.empty()
                             ? 0
                             : Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_effect_formeditorid);
@@ -373,7 +375,7 @@ namespace Settings
             settings.effects[temp_no] = effects;
         }
         // final formid
-        const auto temp_decayed_id =
+        const FormID temp_decayed_id =
             Utilities::FunctionsSkyrim::GetFormEditorIDFromString(config["finalFormEditorID"].as<std::string>());
         if (temp_decayed_id < 0) {
             logger::error("Decayed Formid is less than 0.");
@@ -385,7 +387,7 @@ namespace Settings
         logger::info("timeModulators");
         for (const auto& modulator : config["timeModulators"]) {
             const auto temp_formeditorid = modulator["FormEditorID"].as<std::string>();
-            const auto temp_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
+            const FormID temp_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
             if (temp_formid < 0) {
                 logger::warn("Delayer Formid is less than 0.");
                 continue;
@@ -395,13 +397,13 @@ namespace Settings
 
         for (const auto& transformer : config["transformers"]) {
             const auto temp_formeditorid = transformer["FormEditorID"].as<std::string>();
-            const auto temp_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
+            const FormID temp_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
             if (temp_formid < 0) {
                 logger::warn("Delayer Formid is less than 0.");
                 continue;
             }
             const auto temp_finalFormEditorID = transformer["finalFormEditorID"].as<std::string>();
-            const auto temp_formid2 = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_finalFormEditorID);
+            const FormID temp_formid2 = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_finalFormEditorID);
             if (temp_formid2 < 0) {
                 logger::warn("Delayer Formid is less than 0.");
                 continue;
@@ -714,9 +716,7 @@ struct Source {
                 Stage* old_stage = &stages[instance.no];
                 Stage* new_stage = nullptr;
                 if (_UpdateStageInstance(instance, curr_time)) {
-                    if (instance.xtra.is_decayed || !stages.contains(instance.no)) {
-                        new_stage = &decayed_stage;
-                    } else if (instance.xtra.is_transforming){
+                    if (instance.xtra.is_transforming){
                         instance.xtra.is_decayed = true;
                         const auto temp_formid = instance.GetDelayerFormID();
                         if (!transformed_stages.count(temp_formid)) {
@@ -724,6 +724,9 @@ struct Source {
 							continue;
 						}
                         new_stage = &transformed_stages[temp_formid];
+                    }
+                    else if (instance.xtra.is_decayed || !stages.contains(instance.no)) {
+                        new_stage = &decayed_stage;
                     }
                     else new_stage = &stages[instance.no];
                     auto is_fake__ = IsFakeStage(instance.no);
@@ -1037,7 +1040,7 @@ struct Source {
 
     // always update before doing this
     void UpdateTimeModulationInInventory(RE::TESObjectREFR* inventory_owner, const float _time) {
-        logger::trace("Updating time modulation in inventory.");
+        logger::trace("Updating time modulation in inventory for time {}",_time);
         if (!inventory_owner) {
             logger::error("Inventory owner is null.");
             return;
@@ -1055,7 +1058,7 @@ struct Source {
         }
 
         if (data.count(inventory_owner_refid) == 0) {
-			logger::error("Inventory owner refid not found in data: {} and source {}", inventory_owner_refid, editorid);
+			logger::error("Inventory owner refid not found in data: {} and source {}.", inventory_owner_refid, editorid);
 			return;
 		}
 
@@ -1145,13 +1148,17 @@ struct Source {
 	}
 
     void PrintData() {
-        logger::trace("Printing data for source {}", editorid);
+        if (init_failed) {
+			logger::critical("PrintData: Initialisation failed.");
+			return;
+		}
+        logger::trace("Printing data for source -{}-", editorid);
 		for (auto& [loc,instances] : data) {
+            if (data[loc].empty()) continue;
             logger::trace("Location: {}", loc);
             for (auto& instance : instances) {
-                logger::trace("No: {}, Count: {}, Start time: {}", instance.no,
-                    //instance.location,
-                              instance.count, instance.start_time);
+                logger::trace("No: {}, Count: {}, Start time: {}, Delay Mag {}, Delayer {}, isfake {}, istransforming {}, isdecayed {}",
+                    instance.no, instance.count, instance.start_time, instance.GetDelayMagnitude(), instance.GetDelayerFormID(), instance.xtra.is_fake, instance.xtra.is_transforming, instance.xtra.is_decayed);
             }
 		}
 	
@@ -1179,7 +1186,7 @@ private:
             const auto transformer_form_id = st_inst.GetDelayerFormID();
             if (!defaultsettings->transformers.contains(transformer_form_id)) {
 				logger::error("Transformer Formid {} not found in default settings.", transformer_form_id);
-                st_inst.RemoveTransform(curr_time,1,0);
+                st_inst.RemoveTransform(curr_time);
 			} else {
                 const auto transform_properties = defaultsettings->transformers[transformer_form_id];
                 const auto trnsfrm_duration = std::get<1>(transform_properties);
@@ -1188,9 +1195,6 @@ private:
                     logger::trace("Transform duration exceeded.");
                     const auto transformed_stage = transformed_stages[transformer_form_id];
                     st_inst.xtra.form_id = transformed_stage.formid;
-                    st_inst.xtra.editor_id = clib_util::editorID::get_editorID(transformed_stage.GetBound());
-                    st_inst.xtra.is_fake = false;
-                    st_inst.xtra.crafting_allowed = false;
                     st_inst.SetNewStart(curr_time, trnsfrm_elapsed - trnsfrm_duration);
                     return true;
                 }
@@ -1211,9 +1215,13 @@ private:
         logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,stages[st_inst.no].duration);
         
         while (diff < 0) {
-            logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no - 1);
             if (st_inst.no > 0) {
+                if (!stages.count(st_inst.no - 1)) {
+                    logger::critical("Stage {} does not exist.", st_inst.no - 1);
+                    return false;
+			    }
                 st_inst.no--;
+                logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no - 1);
 			    diff += stages[st_inst.no].duration;
                 updated = true;
             } else {
@@ -1427,29 +1435,38 @@ private:
             return;
         }
 
+        logger::trace("Setting delay of instances in inventory for time {}", some_time);
+
         // first check for transformer
-        const auto transformer_best = GetTransformerInInventory(inventory_owner);
+        const FormID transformer_best = GetTransformerInInventory(inventory_owner);
         if (transformer_best) {
+            logger::trace("Transformer found: {}", transformer_best);
             const auto allowed_stages = std::get<2>(defaultsettings->transformers[transformer_best]);
             for (auto& instance : data[loc]) {
 				if (instance.count <= 0) continue;
                 if (Utilities::Functions::Vector::HasElement<StageNo>(allowed_stages, instance.no)){
+                    logger::trace("Setting transform to {} for instance with no {} bcs of form with id {}", transformer_best, instance.no, transformer_best);
 				    instance.SetTransform(some_time, transformer_best);
+                    logger::trace("Transferm set to {} for instance with no {}", instance.GetDelayerFormID(), instance.no);
                 } else {
-                    instance.RemoveTransform(some_time, 1, 0);
+                    logger::trace("Removing transform for instance with no {} bcs of form with id {}", instance.no, transformer_best);
+                    instance.RemoveTransform(some_time);
                 }
 			}
         } else {
+            logger::trace("Transformer not found.");
             for (auto& instance : data[loc]) {
 				if (instance.count <= 0) continue;
-                instance.RemoveTransform(some_time, 1, 0);
+                logger::trace("Removing transform for instance with no {} bcs of no transformer", instance.no);
+                instance.RemoveTransform(some_time);
 			}
         }
 
-        const auto delayer_best = GetModulatorInInventory(inventory_owner); // basically the first on the list
+        const FormID delayer_best = GetModulatorInInventory(inventory_owner); // basically the first on the list
         const float __delay = delayer_best == 0 ? 1 : defaultsettings->delayers[delayer_best];
         for (auto& instance : data[loc]) {
             if (instance.count <= 0) continue;
+            logger::trace("Setting delay to {} for instance with no {} bcs of form with id {}", __delay, instance.no, delayer_best);
             instance.SetDelay(some_time, __delay, delayer_best);
         }
 	}
@@ -1463,13 +1480,17 @@ private:
         if (transformer_best) {
             const auto allowed_stages = std::get<2>(defaultsettings->transformers[transformer_best]);
             if (Utilities::Functions::Vector::HasElement<StageNo>(allowed_stages, instance.no)) {
+                logger::trace("Setting transform to {} for instance with no {} bcs of form with id {}", transformer_best, instance.no, transformer_best);
                 instance.SetTransform(curr_time, transformer_best);
+                logger::trace("Transferm set to {} for instance with no {}", instance.GetDelayerFormID(), instance.no);
             } else {
-				instance.RemoveTransform(curr_time, 1, 0);
+                logger::trace("Removing transform for instance with no {} bcs of form with id {}", instance.no, transformer_best);
+				instance.RemoveTransform(curr_time);
 			}
         }
         else {
-			instance.RemoveTransform(curr_time, 1, 0);
+            logger::trace("Transformer not found. Removing.");
+			instance.RemoveTransform(curr_time);
 		}
 
         const auto delayer_best = GetModulatorInInventory(inventory_owner);

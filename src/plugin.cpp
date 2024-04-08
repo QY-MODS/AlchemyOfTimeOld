@@ -48,7 +48,12 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
 
     void RefreshMenu(const char* menuname, RE::TESObjectREFR* inventory) {
         setListenMenu(false);
-        if (ui && !ui->IsMenuOpen(menuname)) return;
+        logger::trace("RefreshMenu: {}", menuname);
+        /*if (ui && !ui->IsMenuOpen(menuname)) {
+            logger::trace("Menu is not open.");
+            setListenMenu(true);
+            return;
+        }*/
         RE::BSFixedString menuName(menuname);
         if (!inventory) inventory = RE::PlayerCharacter::GetSingleton();
         if (menuname == RE::InventoryMenu::MENU_NAME){
@@ -60,7 +65,7 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
             Utilities::FunctionsSkyrim::Menu::UpdateItemList<RE::ContainerMenu>();
             //Utilities::FunctionsSkyrim::Menu::UpdateItemList<RE::ContainerMenu>();
 		} else if (menuname == RE::FavoritesMenu::MENU_NAME || menuname == RE::BarterMenu::MENU_NAME) {
-            if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
+            if (const auto queue = RE::UIMessageQueue::GetSingleton(); queue && ui && ui->IsMenuOpen(menuname)) {
                 queue->AddMessage(menuName, RE::UI_MESSAGE_TYPE::kHide, nullptr);
                 queue->AddMessage(menuName, RE::UI_MESSAGE_TYPE::kShow, nullptr);
             }
@@ -192,7 +197,9 @@ public:
         if (!M->RefIsRegistered(event->crosshairRef->GetFormID())) {
             logger::trace("Item not registered.");
             if (!M->RegisterAndGo(event->crosshairRef.get())) {
-				logger::error("Failed to register item.");
+#ifndef NDEBUG
+                logger::warn("Failed to register item.");
+#endif  // !NDEBUG
 			}
         } else {
             logger::trace("Item registered.");
@@ -389,7 +396,9 @@ public:
 				    // old container null deil ve registered deil
                     logger::trace("Old container not null and not registered.");
                     if (!M->RegisterAndGo(event->baseObj, event->itemCount, player_refid)) {
-						logger::error("Failed to register item.");
+#ifndef NDEBUG
+                        logger::warn("Failed to register item.");
+#endif  // !NDEBUG
 					}
                 }
             }
@@ -485,10 +494,11 @@ public:
                 RE::ButtonEvent* a_event = e->AsButtonEvent();
                 RE::IDEvent* id_event = e->AsIDEvent();
                 auto userEvent = id_event->userEvent;
+                if (a_event->GetIDCode() != 157) continue;
 
                 if (a_event->IsPressed()) {
-                    logger::trace("User event: {}", userEvent.c_str());
-                    //if (a_event->IsRepeating() && a_event->HeldDuration() > .3f && a_event->HeldDuration() < .32f) {
+                    if (a_event->IsRepeating() && a_event->HeldDuration() > .3f && a_event->HeldDuration() < .32f) {
+                        M->Print();
                     //    logger::trace("User event: {}", userEvent.c_str());
                     //    // we accept : "accept","RightEquip", "LeftEquip", "equip", "toggleFavorite"
                     //    auto userevents = RE::UserEvents::GetSingleton();
@@ -521,7 +531,7 @@ public:
                     //        queue->AddMessage(ReShowMenu, RE::UI_MESSAGE_TYPE::kHide, nullptr);
                     //        return RE::BSEventNotifyControl::kContinue;
                     //    }
-                    //}
+                    }
                 }
             }
         }
@@ -578,7 +588,9 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         eventSourceHolder->AddEventSink<RE::TESContainerChangedEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESFurnitureEvent>(eventSink);
         RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(OurEventSink::GetSingleton());
-        //RE::BSInputDeviceManager::GetSingleton()->AddEventSink(eventSink);
+#ifndef NDEBUG
+        RE::BSInputDeviceManager::GetSingleton()->AddEventSink(eventSink);
+#endif
         eventSourceHolder->AddEventSink<RE::TESSleepStopEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESWaitStopEvent>(eventSink);
         SKSE::GetCrosshairRefEventSource()->AddEventSink(eventSink);
