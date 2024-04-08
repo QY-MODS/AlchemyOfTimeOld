@@ -1839,7 +1839,9 @@ namespace Utilities{
         struct FormEditorIDX : FormEditorID {
             bool is_fake = false;
             bool is_decayed = false;
+            bool is_transforming = false;
             bool crafting_allowed = false;
+
 
             bool operator==(const FormEditorIDX& other) const {
 				return form_id == other.form_id;
@@ -1931,6 +1933,7 @@ namespace Utilities{
 
             bool is_fake = false;
             bool is_decayed = false;
+            bool is_transforming = false;
 
             bool is_faved = false;
             bool is_equipped = false;
@@ -2021,16 +2024,17 @@ namespace Utilities{
             RE::TESBoundObject* GetBound() const { return FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(xtra.form_id); };
         
 			const float GetElapsed(const float curr_time) const {
+                if (_delay_mag == 0) return _elapsed;
                 return (curr_time - _delay_start) * GetDelaySlope() + _elapsed;
             }
 
             const float GetDelaySlope() const {
                 const auto delay_magnitude = std::min(std::max(-1000.f, _delay_mag), 1000.f);
                 //return 1 - delay_magnitude;
-                if (std::abs(delay_magnitude) < 0.0001f) {
-                    // If the delay slope is too close to 0, return a small non-zero value
-                    return delay_magnitude < 0 ? -0.0001f : 0.0001f;
-                }
+                //if (std::abs(delay_magnitude) < 0.0001f) {
+                //    // If the delay slope is too close to 0, return a small non-zero value
+                //    return delay_magnitude < 0 ? -0.0001f : 0.0001f;
+                //}
 
                 return delay_magnitude;
             }
@@ -2045,7 +2049,7 @@ namespace Utilities{
             void SetDelay(const float time,const float delay,const FormID formid) {
                 // yeni steigungla yeni ausgangspunkt yapiyoruz
                 // call only from UpdateTimeModulationInInventory
-                
+                if (xtra.is_transforming) return;
                 if (_delay_mag == delay) return;
 
                 _elapsed = GetElapsed(time);
@@ -2054,7 +2058,32 @@ namespace Utilities{
                 _delay_formid = formid;
 			}
 
-            void RemoveTimeMod(const float time) { SetDelay(time, 1, 0);
+            void SetTransform(const float time, const FormID formid) {
+                if (xtra.is_transforming){
+                    if (_delay_formid != formid) {
+                        RemoveTransform(time, 1, 0);
+                        return SetTransform(time, formid);
+                    } else return;
+                } 
+                SetDelay(time, 1, formid);
+                xtra.is_transforming = true;
+            }
+
+            const float GetTransformElapsed(const float curr_time) const { 
+                return GetElapsed(curr_time) - _elapsed; 
+            }
+
+            void RemoveTransform(const float curr_time, const float delay, const FormID formid) {
+                if (!xtra.is_transforming) return;
+                xtra.is_transforming = false;
+                _delay_start = curr_time;
+                _delay_mag = delay;
+                _delay_formid = formid;
+            }
+
+            void RemoveTimeMod(const float time) { 
+                SetDelay(time, 1, 0);
+                RemoveTransform(time, 1, 0);
 			}
 
             const float GetDelayMagnitude() const {
@@ -2078,6 +2107,7 @@ namespace Utilities{
 
                 plain.is_fake = xtra.is_fake;
                 plain.is_decayed = xtra.is_decayed;
+                plain.is_transforming = xtra.is_transforming;
 
                 plain._elapsed = _elapsed;
                 plain._delay_start = _delay_start;

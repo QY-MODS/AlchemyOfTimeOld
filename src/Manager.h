@@ -1811,6 +1811,7 @@ public:
         if (src->IsFakeStage(stage_no)) new_instance.xtra.is_fake = true;
 
         new_instance.SetDelay(st_plain);
+        new_instance.xtra.is_transforming = st_plain.is_transforming;
 
         if (!src->InsertNewInstance(new_instance, loc)) {
         	logger::warn("RegisterAtReceiveData: InsertNewInstance failed.");
