@@ -72,7 +72,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         const auto refid = ref_n_stops[0].first;
         if (auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(refid)) {
             if (!UpdateStages(ref,curr_time)) {
-                logger::error("Queued Update failed for {}. update_time {}, curr_time {}", refid, stop_t, curr_time);
+                logger::warn("Queued Update failed for {}. update_time {}, curr_time {}", refid, stop_t, curr_time);
                 _ref_stops_.erase(refid);
             } else if (_ref_stops_.contains(refid) && _ref_stops_.at(refid) == stop_t) {
 				_ref_stops_.erase(refid);
@@ -103,9 +103,18 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
 
     void QueueWOUpdate(RefID refid,float stop_t) {
 		ENABLE_IF_NOT_UNINSTALLED
+        if (!worldobjectsevolve) return;
         _ref_stops_[refid] = stop_t;
         Start();
         logger::info("Queued WO update for {} with stop time {}", refid, stop_t);
+	}
+
+    void RemoveFromWOUpdateQueue(RefID refid) {
+		ENABLE_IF_NOT_UNINSTALLED
+		if (_ref_stops_.contains(refid)) {
+			_ref_stops_.erase(refid);
+			logger::info("Removed from WO update queue: {}", refid);
+		}
 	}
 
 
@@ -230,7 +239,10 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
 
     [[nodiscard]] Source* GetWOSource(RefID wo_refid) {
         if (!wo_refid) return nullptr;
-        if (sources.empty()) return nullptr;
+        if (sources.empty()) {
+            logger::error("GetWOSource: Sources is empty.");
+            return nullptr;
+        }
         for (auto& src : sources) {
             if (src.data.contains(wo_refid) && !src.data[wo_refid].empty()) {
                 if (src.data[wo_refid].size() == 1) return &src;
@@ -1090,7 +1102,7 @@ public:
         }
         
         source->CleanUpData(); // to ausschliessen decayed items
-        source->PrintData();
+        //source->PrintData();
         // print radius just for testing
         logger::trace("Radius: {}", Utilities::FunctionsSkyrim::WorldObject::GetDistanceFromPlayer(dropped_stage_ref));
 
@@ -1112,13 +1124,16 @@ public:
             const auto refid = dropped_stage_ref->GetFormID();
             source->MoveInstances(player_refid, refid, dropped_formid, count, true);
             // remove all instances except the first one
-            auto& vec = source->data[refid];
+            auto& vec = source->data.at(refid);
             for (size_t i = 0; i < vec.size(); ++i) {
                 if (i == 0) vec[i].count = count;
                 else vec[i].count = 0;
             }
             //source->CleanUpData();
             /*return _HandleDrop2(source,dropped_stage_ref, count);*/
+            auto& st_inst = source->data.at(refid)[0];
+            const auto hitting_time = source->GetNextUpdateTime(&st_inst);
+            QueueWOUpdate(refid, hitting_time);
             return;
         }
         
@@ -1179,6 +1194,7 @@ public:
                 StageInstance new_instance(*instance);
                 new_instance.count = count;
                 new_instance.RemoveTimeMod(curr_time);
+                const auto hitting_time = source->GetNextUpdateTime(&new_instance);
 
                 if (!handled_first_stack) {
                     logger::trace("SADSJFHOADF 1");
@@ -1192,6 +1208,8 @@ public:
                     auto bound = new_instance.xtra.is_fake ? source->GetBoundObject() : nullptr;
                     ApplyStageInWorld(dropped_stage_ref, source->stages.at(new_instance.no), bound);
                     handled_first_stack = true;
+                    // queue wo update
+                    QueueWOUpdate(dropped_stage_ref->GetFormID(), hitting_time);
                 } 
                 else {
                     logger::trace("SADSJFHOADF 2");
@@ -1205,6 +1223,8 @@ public:
                         return RaiseMngrErr("HandleDrop: InsertNewInstance failed.");
                     }
                     if (new_instance.xtra.is_fake) _ApplyStageInWorld_Fake(new_ref, source->stages.at(new_instance.no).GetExtraText());
+                    // queue wo update
+                    QueueWOUpdate(new_ref->GetFormID(), hitting_time);
                 }
                 count = 0;
                 /*break;*/
@@ -1216,6 +1236,7 @@ public:
                 logger::trace("instance count: {} vs count {}", instance->count,count);
 
                 instance->RemoveTimeMod(curr_time);
+                const auto hitting_time = source->GetNextUpdateTime(instance);
                 
                 removed_indices.push_back(index);
 
@@ -1227,12 +1248,15 @@ public:
                     //dropped_stage_ref->extraList.SetOwner(RE::TESForm::LookupByID<RE::TESForm>(0x07));
                     auto bound = instance->xtra.is_fake ? source->GetBoundObject() : nullptr;
                     const auto temp_stage_no = instance->no;
+                    // queue wo update
+                    QueueWOUpdate(dropped_stage_ref->GetFormID(), hitting_time);
                     // I NEED TO DO EVERYTHING THAT USES instance BEFORE MoveInstance!!!!!!!!
                     if (!source->MoveInstance(player_refid, dropped_stage_ref->GetFormID(), instance)) {
                         return RaiseMngrErr("HandleDrop: MoveInstance failed.");
                     }
                     ApplyStageInWorld(dropped_stage_ref, source->stages.at(temp_stage_no), bound);
                     handled_first_stack = true;
+
                 } 
                 else {
                     logger::trace("SADSJFHOADF 4");
@@ -1245,6 +1269,8 @@ public:
                     if (new_ref->extraList.GetCount() != instance->count) {
                         logger::warn("HandleDrop: NewRefCount mismatch: {} , {}", new_ref->extraList.GetCount(), instance->count);
                     }
+                    //queue wo update
+                    QueueWOUpdate(new_ref->GetFormID(), hitting_time);
                     // I NEED TO DO EVERYTHING THAT USES instance BEFORE MoveInstance!!!!!!!!
                     if (!source->MoveInstance(player_refid, new_ref->GetFormID(), instance)) {
                         return RaiseMngrErr("HandleDrop: MoveInstance failed.");
@@ -1267,6 +1293,8 @@ public:
                 return RaiseMngrErr("HandleDrop: InsertNewInstance failed 2.");
             }
             //AddItem(player_ref, nullptr, dropped_formid, count);
+            //queue wo update
+            QueueWOUpdate(new_ref->GetFormID(), source->GetNextUpdateTime(&source->data.at(new_ref->GetFormID())[0]));
             
         }
 
@@ -1276,7 +1304,7 @@ public:
         UpdateStages(player_ref);
 
         source->CleanUpData();
-        source->PrintData();
+        //source->PrintData();
         //mutex.unlock();
     }
 
@@ -1321,7 +1349,9 @@ public:
 
         UpdateStages(npc_ref);
 
-        source->PrintData();
+        RemoveFromWOUpdateQueue(wo_refid);
+
+        //source->PrintData();
     }
     // TAMAM
     // UpdateStages
@@ -1454,7 +1484,7 @@ public:
                 logger::trace("HandleCraftingEnter: qFormType mismatch: {} , {}", src.qFormType, bench_type);
                 continue;
             }
-            src.PrintData();
+            //src.PrintData();
             // just to align reality and registries:
             //AlignRegistries({player_refid});
             if (!src.data.contains(player_refid)) continue;
@@ -1727,6 +1757,8 @@ public:
         for (auto& src : sources) {
             src.CleanUpData();
 		}
+
+        Print();
 
         setUpdateIsBusy(false);
 
@@ -2045,17 +2077,17 @@ public:
 
         logger::info("--------Data received. Number of instances: {}---------", n_instances);
 
+        Print();
 
         setListenContainerChange(true);
     }
 
     void Print() {
-        return;
-        /*logger::info("Printing sources...Current time: {}", RE::Calendar::GetSingleton()->GetHoursPassed());
+        logger::info("Printing sources...Current time: {}", RE::Calendar::GetSingleton()->GetHoursPassed());
         for (auto& src : sources) {
             if (src.data.empty()) continue;
             src.PrintData();
-        }*/
+        }
     }
 
 #undef ENABLE_IF_NOT_UNINSTALLED

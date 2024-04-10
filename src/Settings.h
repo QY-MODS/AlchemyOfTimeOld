@@ -986,7 +986,7 @@ struct Source {
             }
         }
         logger::trace("MoveInstances: Printing data...");
-        PrintData();
+        //PrintData();
         return count;
 
     }
@@ -1134,7 +1134,7 @@ struct Source {
             return;
         }
 		logger::trace("Cleaning up data.");
-        PrintData();
+        //PrintData();
         // size before cleanup
         //logger::trace("Size before cleanup: {}", data.size());
         // if there are instances with same stage no and location, and start_time, merge them
@@ -1200,7 +1200,6 @@ struct Source {
 			logger::critical("PrintData: Initialisation failed.");
 			return;
 		}
-        return;
         logger::trace("Printing data for source -{}-", editorid);
 		for (auto& [loc,instances] : data) {
             if (data[loc].empty()) continue;
