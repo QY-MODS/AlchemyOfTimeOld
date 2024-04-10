@@ -754,15 +754,16 @@ namespace Utilities{
                     logger::error("Inventory owner is null.");
                     return;
                 }
-                if (T::MENU_NAME != RE::ContainerMenu::MENU_NAME && T::MENU_NAME != RE::InventoryMenu::MENU_NAME) {
+                if (T::MENU_NAME != RE::BarterMenu::MENU_NAME || T::MENU_NAME != RE::ContainerMenu::MENU_NAME &&
+                    T::MENU_NAME != RE::InventoryMenu::MENU_NAME) {
 					logger::error("Menu type not supported.");
 					return;
 				}
                 auto ui = RE::UI::GetSingleton();
-                if (!ui->IsMenuOpen(T::MENU_NAME)){
+                /*if (!ui->IsMenuOpen(T::MENU_NAME)){
                     logger::error("Menu is not open.");
 					return;
-                }
+                }*/
                 
                 std::map<FormID, Count> item_map;
                 auto inventory = inventory_owner->GetInventory();
