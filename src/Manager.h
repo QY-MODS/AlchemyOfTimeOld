@@ -1758,7 +1758,9 @@ public:
             src.CleanUpData();
 		}
 
+#ifndef NDEBUG
         Print();
+#endif  // !NDEBUG
 
         setUpdateIsBusy(false);
 

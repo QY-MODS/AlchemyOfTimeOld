@@ -1200,16 +1200,22 @@ struct Source {
 			logger::critical("PrintData: Initialisation failed.");
 			return;
 		}
-        logger::trace("Printing data for source -{}-", editorid);
+        int n_print=0;
+        logger::info("Printing data for source -{}-", editorid);
 		for (auto& [loc,instances] : data) {
             if (data[loc].empty()) continue;
-            logger::trace("Location: {}", loc);
+            logger::info("Location: {}", loc);
             for (auto& instance : instances) {
-                logger::trace("No: {}, Count: {}, Start time: {}, Delay Mag {}, Delayer {}, isfake {}, istransforming {}, isdecayed {}",
+                logger::info("No: {}, Count: {}, Start time: {}, Delay Mag {}, Delayer {}, isfake {}, istransforming {}, isdecayed {}",
                     instance.no, instance.count, instance.start_time, instance.GetDelayMagnitude(), instance.GetDelayerFormID(), instance.xtra.is_fake, instance.xtra.is_transforming, instance.xtra.is_decayed);
+#ifndef NDEBUG
+                if (n_print>2000) break;
+#else
+                if (n_print>20) break;
+#endif  // !NDEBUG
             }
+            n_print++;
 		}
-	
     }
 
     void Reset() {
