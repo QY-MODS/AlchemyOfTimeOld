@@ -1040,11 +1040,25 @@ namespace Utilities{
         };
 
         namespace WorldObject {
+            
+            template <typename T>
+            void ForEachRefInCell(T func) {
+                auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
+                if (!player_cell) {
+					logger::error("Player cell is null.");
+					return;
+				}
+                auto& cell_runtime_data = player_cell->GetRuntimeData();
+				for (auto& ref : cell_runtime_data.references) {
+					if (!ref) continue;
+					func(ref.get());
+				}
+            }
 
             RE::TESObjectREFR* TryToGetRefInCell(const FormID baseid, const Count count, float radius = 180,
                                                  unsigned int max_try = 2) {
                 auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
-                auto cell_runtime_data = player_cell->GetRuntimeData();
+                auto& cell_runtime_data = player_cell->GetRuntimeData();
                 for (auto& ref : cell_runtime_data.references) {
                     if (!ref) continue;
                     /*if (ref->IsDisabled()) continue;
@@ -1181,6 +1195,27 @@ namespace Utilities{
                 return newPropRef;
             }
 
+
+            //template <class... Args>
+            //inline void CallFunctionOn(RE::TESForm* a_form, std::string_view formKind, std::string_view function,
+            //                           Args... a_args) {
+            //    const auto skyrimVM = RE::SkyrimVM::GetSingleton();
+            //    auto vm = skyrimVM ? skyrimVM->impl : nullptr;
+            //    if (vm) {
+            //        RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
+            //        auto args = RE::MakeFunctionArguments(std::forward<Args>(a_args)...);
+            //        auto objectPtr = GetObjectPtr(a_form, std::string(formKind).c_str(), false);
+            //        if (!objectPtr) {
+            //            logger::error("Could not bind form");
+            //        }
+            //        vm->DispatchMethodCall(objectPtr, std::string(function).c_str(), args, callback);
+            //    }
+            //}
+
+            //void ApplyHavokImpulse(RE::TESObjectREFR* target, float afX, float afY, float afZ, float afMagnitude) {
+            //    CallFunctionOn(target, "ObjectReference", "ApplyHavokImpulse", afX, afY, afZ, afMagnitude);
+            //}
+
             void SwapObjects(RE::TESObjectREFR* a_from, RE::TESBoundObject* a_to, const bool apply_havok=true) {
                 logger::trace("SwapObjects");
                 if (!a_from) {
@@ -1192,13 +1227,21 @@ namespace Utilities{
                     logger::error("Ref base is null.");
 				    return;
                 }
+                if (!a_to) {
+					logger::error("Base is null.");
+					return;
+				}
                 if (ref_base->GetFormID() == a_to->GetFormID()) {
 				    logger::trace("Ref and base are the same.");
 				    return;
 			    }
                 a_from->SetObjectReference(a_to);
-                a_from->Disable();
-                a_from->Enable(false);
+                SKSE::GetTaskInterface()->AddTask([a_from]() {
+					a_from->Disable();
+					a_from->Enable(false);
+				});
+                /*a_from->Disable();
+                a_from->Enable(false);*/
                 if (!apply_havok) return;
 
                 /*float afX = 100;
@@ -1208,20 +1251,23 @@ namespace Utilities{
                 /*auto args = RE::MakeFunctionArguments(std::move(afX), std::move(afY), std::move(afZ),
                 std::move(afMagnitude)); vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback);*/
                 // Looked up here (wSkeever): https:  // www.nexusmods.com/skyrimspecialedition/mods/73607
-                SKSE::GetTaskInterface()->AddTask([a_from]() {
-                    // auto player_ch = RE::PlayerCharacter::GetSingleton();
-                    // player_ch->StartGrabObject();
-                    auto vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
-                    auto policy = vm->GetObjectHandlePolicy();
-                    auto handle = policy->GetHandleForObject(a_from->GetFormType(), a_from);
-                    RE::BSTSmartPointer<RE::BSScript::Object> object = nullptr;
-                    vm->CreateObject2("ObjectReference", object);
-                    vm->BindObject(object, handle, false);
-                    if (!object) logger::warn("Object is null");
-                    auto args = RE::MakeFunctionArguments(std::move(0.f), std::move(0.f), std::move(0.f), std::move(0.f));
-                    RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
-                    if (vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback)) logger::trace("FUSRODAH");
-                });
+                /*SKSE::GetTaskInterface()->AddTask([a_from]() {
+                    ApplyHavokImpulse(a_from, 0.f, 0.f, 10.f, 5000.f);
+                });*/
+                //SKSE::GetTaskInterface()->AddTask([a_from]() {
+                //    // auto player_ch = RE::PlayerCharacter::GetSingleton();
+                //    // player_ch->StartGrabObject();
+                //    auto vm = RE::BSScript::Internal::VirtualMachine::GetSingleton();
+                //    auto policy = vm->GetObjectHandlePolicy();
+                //    auto handle = policy->GetHandleForObject(a_from->GetFormType(), a_from);
+                //    RE::BSTSmartPointer<RE::BSScript::Object> object;
+                //    vm->CreateObject2("ObjectReference", object);
+                //    if (!object) logger::warn("Object is null");
+                //    vm->BindObject(object, handle, false);
+                //    auto args = RE::MakeFunctionArguments(std::move(0.f), std::move(0.f), std::move(1.f), std::move(5.f));
+                //    RE::BSTSmartPointer<RE::BSScript::IStackCallbackFunctor> callback;
+                //    if (vm->DispatchMethodCall(object, "ApplyHavokImpulse", args, callback)) logger::trace("FUSRODAH");
+                //});
             }
 
             [[nodiscard]] const bool PlayerPickUpObject(RE::TESObjectREFR* item, Count count, const unsigned int max_try = 3) {
@@ -1904,7 +1950,7 @@ namespace Utilities{
                 if (!formid)
                     logger::critical("FormID is null");
                 else
-                    logger::trace("Stage: FormID {}, Duration {}, StageNo {}, Name {}", formid, duration, no, name);
+                    logger::info("Stage: FormID {}, Duration {}, StageNo {}, Name {}", formid, duration, no, name);
                 if (e.empty()) mgeffect.clear();
             }
 
@@ -1940,6 +1986,35 @@ namespace Utilities{
 
         using Stages = std::vector<Stage>;
         using StageDict = std::map<StageNo, Stage>;
+
+        /*struct StageDict {
+            StageDict() = default;
+            StageDict(std::vector<StageNo> nos, std::vector<Stage> stages) {
+                for (size_t i = 0; i < nos.size(); i++) {
+                    stage_map[nos[i]] = stages[i];
+                }
+            }
+
+            [[nodiscard]] const bool CheckIntegrity() const {
+                for (const auto& [no, stage] : stage_map) {
+                    if (!stage.CheckIntegrity()) return false;
+                }
+                return true;
+            }
+
+            [[nodiscard]] const bool IsEmpty() const { return stage_map.empty(); }
+
+            [[nodiscard]] const bool contains(const StageNo no) const { return stage_map.contains(no); }
+
+            [[nodiscard]] const Stage& GetStage(const StageNo no) const {
+                if (contains(no)) return stage_map.at(no);
+                logger::critical("Stage {} not found", no);
+                return stage_map.at(0);
+            }
+
+        private:
+            std::map<StageNo, Stage> stage_map;
+        };*/
 
         struct StageInstancePlain{
             float start_time;
@@ -2070,13 +2145,7 @@ namespace Utilities{
                 // yeni steigungla yeni ausgangspunkt yapiyoruz
                 // call only from UpdateTimeModulationInInventory
                 if (xtra.is_transforming) return;
-                if (_delay_mag == delay) {
-                    if (_delay_formid == formid) return;
-                    else {
-                        _delay_formid = formid;
-                        return;
-                    }
-                }
+                if (_delay_mag == delay && _delay_formid == formid) return;
 
                 _elapsed = GetElapsed(time);
                 _delay_start = time;
@@ -2181,6 +2250,59 @@ namespace Utilities{
         using SaveDataRHS = std::vector<StageInstancePlain>;
     };
 
+    // https://github.com/ozooma10/OSLAroused-SKSE/blob/master/src/Utilities/Ticker.h
+    class Ticker {
+    public:
+        Ticker(std::function<void()> onTick, std::chrono::milliseconds interval)
+            : m_OnTick(onTick), m_Interval(interval), m_Running(false), m_ThreadActive(false) {}
+
+        void Start() {
+            if (m_Running) {
+                return;
+            }
+            m_Running = true;
+            logger::trace("Start Called with thread active state of: {}", m_ThreadActive);
+            if (!m_ThreadActive) {
+                std::thread tickerThread(&Ticker::RunLoop, this);
+                tickerThread.detach();
+            }
+        }
+
+        void Stop() { m_Running = false; }
+
+        void UpdateInterval(std::chrono::milliseconds newInterval) {
+            m_IntervalMutex.lock();
+            m_Interval = newInterval;
+            m_IntervalMutex.unlock();
+        }
+
+    private:
+        void RunLoop() {
+            m_ThreadActive = true;
+            while (m_Running) {
+                std::thread runnerThread(m_OnTick);
+                runnerThread.detach();
+
+                m_IntervalMutex.lock();
+                std::chrono::milliseconds interval;
+                if (m_Interval >= std::chrono::milliseconds(3000)) {
+                    interval = m_Interval;
+				} else {
+                    interval = std::chrono::milliseconds(3000);
+                }
+                m_IntervalMutex.unlock();
+                std::this_thread::sleep_for(interval);
+            }
+            m_ThreadActive = false;
+        }
+
+        std::function<void()> m_OnTick;
+        std::chrono::milliseconds m_Interval;
+
+        std::atomic<bool> m_ThreadActive;
+        std::atomic<bool> m_Running;
+        std::mutex m_IntervalMutex;
+    };
 
     bool read_string(SKSE::SerializationInterface* a_intfc, std::string& a_str) {
 		std::vector<std::pair<int, bool>> encodedStr;

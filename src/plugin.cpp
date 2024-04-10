@@ -3,6 +3,8 @@
 Manager* M = nullptr;
 bool block_eventsinks = false;
 
+
+// MP <3
 class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
                      public RE::BSTEventSink<RE::TESActivateEvent>,
                      public RE::BSTEventSink<SKSE::CrosshairRefEvent>,
@@ -11,8 +13,8 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
                      public RE::BSTEventSink<RE::TESContainerChangedEvent>,
                      public RE::BSTEventSink<RE::InputEvent*>,
                      public RE::BSTEventSink<RE::TESSleepStopEvent>,
-                     public RE::BSTEventSink<RE::TESWaitStopEvent>
-{
+                     public RE::BSTEventSink<RE::TESWaitStopEvent>,
+                     public RE::BSTEventSink<RE::BGSActorCellEvent> {
 
     OurEventSink() = default;
     OurEventSink(const OurEventSink&) = delete;
@@ -32,6 +34,8 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
     bool activate_eat = false;
     bool furniture_entered = false;
 
+    bool world_objects_evolve = false;
+
     RE::NiPointer<RE::TESObjectREFR> furniture = nullptr;
 
     std::mutex mutex;
@@ -46,15 +50,15 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
 		return listen_menu; 
 	}
 
-    void RefreshMenu(const char* menuname, RE::TESObjectREFR* inventory) {
+    void RefreshMenu(const RE::BSFixedString& menuName, RE::TESObjectREFR* inventory) {
         setListenMenu(false);
-        logger::trace("RefreshMenu: {}", menuname);
         /*if (ui && !ui->IsMenuOpen(menuname)) {
             logger::trace("Menu is not open.");
             setListenMenu(true);
             return;
         }*/
-        RE::BSFixedString menuName(menuname);
+        logger::trace("Refreshing menu: {}", menuName.c_str());
+        const auto menuname = menuName.c_str();
         if (!inventory) inventory = RE::PlayerCharacter::GetSingleton();
         if (menuname == RE::InventoryMenu::MENU_NAME){
             Utilities::FunctionsSkyrim::Menu::RefreshItemList<RE::InventoryMenu>(inventory);
@@ -74,18 +78,66 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
         setListenMenu(true);
 	}
 
-    void RefreshMenu(const std::string_view menuname, RE::TESObjectREFR* inventory) {
-        const auto menuName = std::string(menuname).c_str();
-        return RefreshMenu(menuName, inventory);
+    void HandleWO(RE::TESObjectREFR* ref) {
+        if (!world_objects_evolve) return;
+        if (!ref) return;
+        if (ref->IsDisabled() || ref->IsDeleted()) return;
+        if (ref->IsActivationBlocked()) return;
+        if (ref->extraList.GetOwner() && !ref->extraList.GetOwner()->IsPlayer()) return;
+        if (auto ref_base = ref->GetObjectReference()) /*logger::trace("HandleWO: {}", ref_base->GetName())*/
+            ;
+        else
+            return;
+        if (!Settings::IsItem(ref)) return;
+
+        if (ref->extraList.HasType(RE::ExtraDataType::kStartingPosition)) {
+            logger::trace("has Starting position.");
+            auto starting_pos = ref->extraList.GetByType<RE::ExtraStartingPosition>();
+            if (starting_pos->location) {
+                logger::trace("has location.");
+                logger::trace("Location: {}", starting_pos->location->GetName());
+                logger::trace("Location: {}", starting_pos->location->GetFullName());
+                return;
+            }
+            /*logger::trace("Position: {}", starting_pos->startPosition.pos.x);
+            logger::trace("Position: {}", starting_pos->startPosition.pos.y);
+            logger::trace("Position: {}", starting_pos->startPosition.pos.z);*/
+        }
+
+        if (!M->RefIsRegistered(ref->GetFormID())) {
+            logger::trace("Item not registered.");
+            if (!M->RegisterAndGo(ref)) {
+#ifndef NDEBUG
+                logger::warn("Failed to register item.");
+#endif  // !NDEBUG
+            }
+        } else {
+            logger::trace("Item registered.");
+            M->UpdateStages(ref);
+            /*logger::trace("Refreshing menu.");
+            Utilities::FunctionsSkyrim::Menu::RefreshMenu(RE::InventoryMenu::MENU_NAME);
+            logger::trace("Refreshed menu.");*/
+        }
     }
 
 
 public:
-    static OurEventSink* GetSingleton() {
-        static OurEventSink singleton;
+
+    OurEventSink(bool wo_evolve)
+        : world_objects_evolve(wo_evolve){};
+
+    static OurEventSink* GetSingleton(bool wo_evolve) {
+        logger::info("Eventsink: worldobjectsevolve {}",wo_evolve);
+        static OurEventSink singleton(wo_evolve);
         return &singleton;
     }
 
+    void HandleWOsInCell() {
+        if (!world_objects_evolve) return;
+        M->UpdateStages(player_refid);
+        Utilities::FunctionsSkyrim::WorldObject::ForEachRefInCell(
+            [this](RE::TESObjectREFR* arg) { this->HandleWO(arg); });
+    }
 
     RE::BSEventNotifyControl ProcessEvent(const RE::TESEquipEvent* event, RE::BSTEventSource<RE::TESEquipEvent>*) {
          
@@ -165,49 +217,11 @@ public:
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->crosshairRef) return RE::BSEventNotifyControl::kContinue;
         if (!M->getListenCrosshair()) return RE::BSEventNotifyControl::kContinue;
-        if (event->crosshairRef->IsActivationBlocked()) return RE::BSEventNotifyControl::kContinue;
 
 
         if (M->IsExternalContainer(event->crosshairRef.get())) M->UpdateStages(event->crosshairRef.get());
 
-
-        // rest is for World Objects
-        if (!Settings::IsItem(event->crosshairRef.get())) return RE::BSEventNotifyControl::kContinue;
-
-
-        if (event->crosshairRef->extraList.GetOwner() && !event->crosshairRef->extraList.GetOwner()->IsPlayer()){
-            logger::trace("Not player owned.");
-            return RE::BSEventNotifyControl::kContinue;
-        }
-
-        if (event->crosshairRef->extraList.HasType(RE::ExtraDataType::kStartingPosition)) {
-            logger::trace("has Starting position.");
-            auto starting_pos = event->crosshairRef->extraList.GetByType<RE::ExtraStartingPosition>();
-            if (starting_pos->location) {
-                logger::trace("has location.");
-                logger::trace("Location: {}", starting_pos->location->GetName());
-                logger::trace("Location: {}", starting_pos->location->GetFullName());
-                return RE::BSEventNotifyControl::kContinue;
-            }
-			/*logger::trace("Position: {}", starting_pos->startPosition.pos.x);
-			logger::trace("Position: {}", starting_pos->startPosition.pos.y);
-			logger::trace("Position: {}", starting_pos->startPosition.pos.z);*/
-        }
-
-        if (!M->RefIsRegistered(event->crosshairRef->GetFormID())) {
-            logger::trace("Item not registered.");
-            if (!M->RegisterAndGo(event->crosshairRef.get())) {
-#ifndef NDEBUG
-                logger::warn("Failed to register item.");
-#endif  // !NDEBUG
-			}
-        } else {
-            logger::trace("Item registered.");
-            M->UpdateStages(event->crosshairRef.get());
-            /*logger::trace("Refreshing menu.");
-            Utilities::FunctionsSkyrim::Menu::RefreshMenu(RE::InventoryMenu::MENU_NAME);
-            logger::trace("Refreshed menu.");*/
-        }
+        HandleWO(event->crosshairRef.get());
         
         return RE::BSEventNotifyControl::kContinue;
     }
@@ -229,13 +243,13 @@ public:
         // return if menu is not favorite menu, container menu, barter menu or inventory menu
         if (menuname == RE::FavoritesMenu::MENU_NAME) {
             logger::trace("Favorites menu is open.");
-            if (M->UpdateStages(player_refid)) RefreshMenu(menuname,nullptr);
+            if (M->UpdateStages(player_refid)) RefreshMenu(event->menuName, nullptr);
             logger::trace("Spoilage updated.");
             return RE::BSEventNotifyControl::kContinue;
         }
         else if (menuname == RE::InventoryMenu::MENU_NAME) {
             logger::trace("Inventory menu is open.");
-            if (M->UpdateStages(player_refid)) RefreshMenu(menuname, nullptr);
+            if (M->UpdateStages(player_refid)) RefreshMenu(event->menuName, nullptr);
             logger::trace("Spoilage updated.");
             return RE::BSEventNotifyControl::kContinue;
         }
@@ -246,14 +260,14 @@ public:
             if (const auto vendor_chest = Utilities::FunctionsSkyrim::Menu::GetVendorChestFromMenu()) {
                 vendor_updated = M->UpdateStages(vendor_chest->GetFormID());
             } else logger ::error("Could not get vendor chest.");
-            if (player_updated || vendor_updated) RefreshMenu(menuname, nullptr);
+            if (player_updated || vendor_updated) RefreshMenu(event->menuName, nullptr);
             return RE::BSEventNotifyControl::kContinue;
         } else if (menuname == RE::ContainerMenu::MENU_NAME) {
             logger::trace("Container menu is open.");
             if (auto container = Utilities::FunctionsSkyrim::Menu::GetContainerFromMenu()) {
                 if (M->UpdateStages(player_refid) || M->UpdateStages(container->GetFormID())) {
-                    RefreshMenu(menuname, container);
-                    RefreshMenu(RE::InventoryMenu::MENU_NAME, nullptr);
+                    RefreshMenu(event->menuName, container);
+                    RefreshMenu(event->menuName, nullptr);
                 }
             } else logger::error("Could not get container.");
         }
@@ -383,7 +397,7 @@ public:
                                 RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->oldContainer)) {
                             RefreshMenu(RE::ContainerMenu::MENU_NAME, temp_container);
                         }
-                        RefreshMenu(RE::InventoryMenu::MENU_NAME, nullptr);
+                        RefreshMenu(RE::ContainerMenu::MENU_NAME, nullptr);
                     }
                 }
                 // NPC: you dropped this...
@@ -468,6 +482,7 @@ public:
                     if (M->LinkExternalContainer(event->baseObj,event->itemCount,event->newContainer)){
                         auto temp_container = RE::TESObjectREFR::LookupByID<RE::TESObjectREFR>(event->newContainer);
                         RefreshMenu(RE::ContainerMenu::MENU_NAME, temp_container);
+                        RefreshMenu(RE::ContainerMenu::MENU_NAME, nullptr);
                     }
                 }
                 else {
@@ -543,7 +558,7 @@ public:
         
         if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
         logger::trace("Sleep stop event.");
-        M->UpdateStages(player_refid);
+        HandleWOsInCell();
         return RE::BSEventNotifyControl::kContinue;
     }
 
@@ -552,8 +567,33 @@ public:
         
         if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
         logger::trace("Wait stop event.");
-        M->UpdateStages(player_refid);
+        HandleWOsInCell();
         return RE::BSEventNotifyControl::kContinue;
+    }
+
+    // https:  // github.com/SeaSparrowOG/RainExtinguishesFires/blob/c1aee0045aeb987b2f70e495b301c3ae8bd7b3a3/src/loadEventManager.cpp#L15
+    RE::BSEventNotifyControl ProcessEvent(const RE::BGSActorCellEvent* a_event, RE::BSTEventSource<RE::BGSActorCellEvent>*) {
+        if (!a_event) return RE::BSEventNotifyControl::kContinue;
+        auto eventActorHandle = a_event->actor;
+        auto eventActorPtr = eventActorHandle ? eventActorHandle.get() : nullptr;
+        auto eventActor = eventActorPtr ? eventActorPtr.get() : nullptr;
+        if (!eventActor) return RE::BSEventNotifyControl::kContinue;
+
+        if (eventActor != RE::PlayerCharacter::GetSingleton()) return RE::BSEventNotifyControl::kContinue;
+
+        auto cellID = a_event->cellID;
+        auto* cellForm = cellID ? RE::TESForm::LookupByID(cellID) : nullptr;
+        auto* cell = cellForm ? cellForm->As<RE::TESObjectCELL>() : nullptr;
+        if (!cell) return RE::BSEventNotifyControl::kContinue;
+
+        if (a_event->flags.any(RE::BGSActorCellEvent::CellFlag::kEnter)) {
+            logger::trace("Player entered cell: {}", cell->GetName());
+            M->ClearWOUpdateQueue();
+            HandleWOsInCell();
+        }
+
+        return RE::BSEventNotifyControl::kContinue;
+	
     }
 };
 
@@ -581,19 +621,22 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         // Post-load
         if (!M) return;
         // EventSink
-        auto* eventSink = OurEventSink::GetSingleton();
+        bool wo_e = Settings::INI_settings["Other Settings"]["WorldObjectsEvolve"];
+        auto* eventSink = OurEventSink::GetSingleton(wo_e);
         auto* eventSourceHolder = RE::ScriptEventSourceHolder::GetSingleton();
         eventSourceHolder->AddEventSink<RE::TESEquipEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESActivateEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESContainerChangedEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESFurnitureEvent>(eventSink);
-        RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(OurEventSink::GetSingleton());
+        RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(eventSink);
 #ifndef NDEBUG
         RE::BSInputDeviceManager::GetSingleton()->AddEventSink(eventSink);
 #endif
         eventSourceHolder->AddEventSink<RE::TESSleepStopEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESWaitStopEvent>(eventSink);
         SKSE::GetCrosshairRefEventSource()->AddEventSink(eventSink);
+        logger::info("Event sinks added.");
+        eventSink->HandleWOsInCell();
     }
 }
 

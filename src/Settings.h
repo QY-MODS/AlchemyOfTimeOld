@@ -68,13 +68,9 @@ namespace Settings
         std::map<FormID,float> delayers;
         std::map<FormID, std::tuple<FormID, Duration, std::vector<StageNo>>> transformers;
 
-        bool init_failed = false;
+        [[nodiscard]] const bool IsHealthy() const { return !init_failed; }
 
         [[nodiscard]] const bool CheckIntegrity() {
-            if (init_failed) {
-				logger::error("Initialisation failed.");
-				return false;
-			}
             if (items.empty() || durations.empty() || stage_names.empty() || effects.empty() || numbers.empty()) {
                 logger::error("One of the maps is empty.");
                 // list sizes of each
@@ -147,6 +143,9 @@ namespace Settings
 			}
 			return true;
 		}
+
+    private:
+        bool init_failed = false;
 	};
 
     std::vector<std::string> QFORMS;
@@ -293,13 +292,11 @@ namespace Settings
          //we have:stages, decayedFormEditorID and delayers
         if (!config["stages"] || config["stages"].size() == 0) {
             logger::error("Stages are empty.");
-            settings.init_failed = true;
             return settings;
         }
         for (const auto& stageNode : config["stages"]) {
             if (!stageNode["no"] || stageNode["no"].IsNull()) {
 				logger::error("No is missing for stage.");
-                settings.init_failed = true;
                 return settings;
 			}
             const auto temp_no = stageNode["no"].as<StageNo>();
@@ -312,8 +309,7 @@ namespace Settings
                                          : Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
             if (!temp_formid && !temp_formeditorid.empty()) {
                 logger::error("Formid could not be obtained for {}", temp_formid, temp_formeditorid);
-                settings.init_failed = true;
-                return settings;
+                return DefaultSettings();
             }
             // add to items
             logger::trace("Formid");
@@ -362,8 +358,7 @@ namespace Settings
                             : Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_effect_formeditorid);
                     if (temp_effect_formid < 0) {
                         logger::error("Effect Formid is less than 0.");
-                        settings.init_failed = true;
-                        return settings;
+                        return DefaultSettings();
                     }
                     if (temp_effect_formid>0){
                         const auto temp_magnitude = effectNode["magnitude"].as<float>();
@@ -379,8 +374,7 @@ namespace Settings
             Utilities::FunctionsSkyrim::GetFormEditorIDFromString(config["finalFormEditorID"].as<std::string>());
         if (temp_decayed_id < 0) {
             logger::error("Decayed Formid is less than 0.");
-            settings.init_failed = true;
-            return settings;
+            return DefaultSettings();
         }
         settings.decayed_id = temp_decayed_id;
         // delayers
@@ -444,7 +438,11 @@ namespace Settings
         logger::info("Filename: {}", filename);
 		YAML::Node config = YAML::LoadFile(filename);
         logger::info("File loaded.");
-        return _parseDefaults(config);
+        auto temp_settings = _parseDefaults(config);
+        if (!temp_settings.CheckIntegrity()) {
+            logger::warn("parseDefaults: Settings integrity check failed for {}", _type);
+        }
+        return temp_settings;
     }
 
     CustomSettings parseCustoms(std::string _type){
@@ -456,14 +454,19 @@ namespace Settings
             // we have list of owners at each node or a scalar owner
             if (_Node["owners"].IsScalar()) {
                 const auto ownerName = _Node["owners"].as<std::string>();
-                _custom_settings[std::vector<std::string>{ownerName}] = _parseDefaults(_Node);
+                auto temp_settings = _parseDefaults(_Node);
+                if (temp_settings.CheckIntegrity())
+                    _custom_settings[std::vector<std::string>{ownerName}] = temp_settings;
 			} 
             else {
 				std::vector<std::string> owners;
                 for (const auto& owner : _Node["owners"]) {
 					owners.push_back(owner.as<std::string>());
 				}
-                _custom_settings[owners] = _parseDefaults(_Node);
+
+                auto temp_settings = _parseDefaults(_Node);
+                if (temp_settings.CheckIntegrity())
+                    _custom_settings[owners] = temp_settings;
 			}
         }
         return _custom_settings;
@@ -553,7 +556,6 @@ struct Source {
     RE::EffectSetting* empty_mgeff;
     Settings::DefaultSettings* defaultsettings = nullptr; // eigentlich sollte settings heissen
 
-    bool init_failed = false;
     RE::FormType formtype;
     std::string qFormType;
     std::vector<StageNo> fake_stages = {};
@@ -569,6 +571,7 @@ struct Source {
         RE::TESForm* form = Utilities::FunctionsSkyrim::GetFormByID(formid, editorid);
         auto bound_ = GetBoundObject();
         if (!form || !bound_) {
+            logger::error("Form not found.");
             InitFailed();
             return;
         } 
@@ -584,6 +587,7 @@ struct Source {
 		}
 
         if (!Settings::IsItem(formid, "",true)) {
+            logger::error("Form is not an item.");
             InitFailed();
             return;
         }
@@ -634,7 +638,8 @@ struct Source {
             for (auto& [key, value] : stages) {
                 if (!Utilities::FunctionsSkyrim::GetFormByID(value.formid, "")) {
                     if (!Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType)) {
-                        logger::warn("Formid {} for stage {} does not exist.", value.formid, key);
+                        logger::warn("Formid {} for stage {} does not exist and fakes not allowed for {}", value.formid,
+                                     key, qFormType);
                         InitFailed();
                         return;
                     }
@@ -644,10 +649,12 @@ struct Source {
                     else if (formtype == RE::FormType::Ingredient) value.formid = CreateFake<RE::IngredientItem>(form->As<RE::IngredientItem>());
                     //else if (formtype == RE::FormType::magi) value.formid = CreateFake<RE::MagicItem>(form->As<RE::MagicItem>());
 					else {
+                        logger::error("Formtype is not one of the predefined types.");
 						InitFailed();
 						return;
 					}
                     if (!value.formid) {
+                        logger::error("Formid could not be created.");
                         InitFailed();
                         return;
                     }
@@ -713,7 +720,8 @@ struct Source {
 			}
             auto& instances = data[reffid];
             for (auto& instance : instances) {
-                Stage* old_stage = &stages[instance.no];
+                if (instance.xtra.is_decayed) continue;
+                Stage* old_stage = &stages.at(instance.no);
                 Stage* new_stage = nullptr;
                 if (_UpdateStageInstance(instance, curr_time)) {
                     if (instance.xtra.is_transforming){
@@ -728,7 +736,7 @@ struct Source {
                     else if (instance.xtra.is_decayed || !stages.contains(instance.no)) {
                         new_stage = &decayed_stage;
                     }
-                    else new_stage = &stages[instance.no];
+                    else new_stage = &stages.at(instance.no);
                     auto is_fake__ = IsFakeStage(instance.no);
                     updated_instances[reffid].emplace_back(old_stage, new_stage, instance.count, instance.start_time ,is_fake__);
                 }
@@ -773,7 +781,7 @@ struct Source {
 			logger::error("Location is 0.");
 			return false;
 		}*/
-        if (stage_instance.xtra.form_id != stages[n].formid) {
+        if (stage_instance.xtra.form_id != stages.at(n).formid) {
 			logger::error("Formid does not match the stage formid.");
 			return false;
 		}
@@ -785,7 +793,7 @@ struct Source {
 			logger::error("Decayed status is true.");
 			return false;
 		}
-        if (stage_instance.xtra.crafting_allowed != stages[n].crafting_allowed) {
+        if (stage_instance.xtra.crafting_allowed != stages.at(n).crafting_allowed) {
 			logger::error("Crafting allowed status does not match the stage crafting allowed status.");
 			return false;
 		}
@@ -811,10 +819,14 @@ struct Source {
             logger::critical("InitInsertInstance: Initialisation failed.");
             return false;
         }
+        if (!stages.count(n)) {
+			logger::error("Stage {} does not exist.", n);
+			return false;
+		}
         StageInstance new_instance(t_0, n, c);
-        new_instance.xtra.form_id = stages[n].formid;
-        new_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages[n].GetBound());
-        new_instance.xtra.crafting_allowed = stages[n].crafting_allowed;
+        new_instance.xtra.form_id = stages.at(n).formid;
+        new_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages.at(n).GetBound());
+        new_instance.xtra.crafting_allowed = stages.at(n).crafting_allowed;
         if (IsFakeStage(n)) new_instance.xtra.is_fake = true;
 
         return InsertNewInstance(new_instance,l);
@@ -1085,20 +1097,46 @@ struct Source {
   //          return stage_update;
 		//}
   //  }
+    
+    const float GetNextUpdateTime(StageInstance* st_inst) {
+        if (!st_inst) {
+            logger::error("Stage instance is null.");
+            return 0;
+        }
+        if (!IsHealthy()) {
+            logger::critical("GetNextUpdateTime: Source is not healthy.");
+            logger::critical("GetNextUpdateTime: Source formid: {}, qformtype: {}", formid, qFormType);
+            return 0;
+        }
+        if (st_inst->xtra.is_decayed) return 0;
+        if (!stages.contains(st_inst->no)) {
+            logger::error("Stage {} does not exist.", st_inst->no);
+            return 0;
+        }
+        const auto stage_duration = stages.at(st_inst->no).duration;
+        return st_inst->GetHittingTime(stage_duration);
+    }
 
     void CleanUpData() {
         if (init_failed) {
+            /*try{
+                logger::critical("CleanUpData: Initialisation failed. source formid: {}, qformtype: {}", formid, qFormType);
+                return;
+            } catch (const std::exception&)  {
+                logger::critical("CleanUpData: Initialisation failed.");
+                return;
+            }*/
             logger::critical("CleanUpData: Initialisation failed.");
             return;
         }
         if (data.empty()) {
-            logger::warn("No data found for source {}", editorid);
+            logger::info("No data found for source {}", editorid);
             return;
         }
 		logger::trace("Cleaning up data.");
         PrintData();
         // size before cleanup
-        logger::trace("Size before cleanup: {}", data.size());
+        //logger::trace("Size before cleanup: {}", data.size());
         // if there are instances with same stage no and location, and start_time, merge them
         
         for (auto it = data.begin(); it != data.end();) {
@@ -1112,6 +1150,7 @@ struct Source {
 
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         for (auto& [_, instances] : data) {
+            if (instances.empty()) continue;
             for (auto it = instances.begin(); it != instances.end(); ++it) {
                 for (auto it2 = it; it2 != instances.end(); ++it2) {
 				    if (it == it2) continue;
@@ -1139,12 +1178,21 @@ struct Source {
 		    }
         }
         
+        for (auto it = data.begin(); it != data.end();) {
+            if (it->second.empty()) {
+                logger::trace("Erasing key from data: {} 2", it->first);
+                it = data.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
         if (!CheckIntegrity()) {
 			logger::critical("CheckIntegrity failed");
 			InitFailed();
         }
 
-        logger::trace("Size after cleanup: {}", data.size());
+        //logger::trace("Size after cleanup: {}", data.size());
 	}
 
     void PrintData() {
@@ -1152,6 +1200,7 @@ struct Source {
 			logger::critical("PrintData: Initialisation failed.");
 			return;
 		}
+        return;
         logger::trace("Printing data for source -{}-", editorid);
 		for (auto& [loc,instances] : data) {
             if (data[loc].empty()) continue;
@@ -1165,6 +1214,7 @@ struct Source {
     }
 
     void Reset() {
+        logger::trace("Resetting source.");
         formid = 0;
 		editorid = "";
 		stages.clear();
@@ -1172,7 +1222,14 @@ struct Source {
 		init_failed = false;
     }
     
+    [[nodiscard]] const bool IsHealthy() const { 
+        return !init_failed;
+	}
+
 private:
+
+    bool init_failed = false;
+    
 
     // counta karismiyor
     [[nodiscard]] const bool _UpdateStageInstance(StageInstance& st_inst, const float curr_time) {
@@ -1212,7 +1269,7 @@ private:
         
         float diff = st_inst.GetElapsed(curr_time);
         bool updated = false;
-        logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,stages[st_inst.no].duration);
+        logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,stages.at(st_inst.no).duration);
         
         while (diff < 0) {
             if (st_inst.no > 0) {
@@ -1222,16 +1279,16 @@ private:
 			    }
                 st_inst.no--;
                 logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no - 1);
-			    diff += stages[st_inst.no].duration;
+			    diff += stages.at(st_inst.no).duration;
                 updated = true;
             } else {
                 diff = 0;
                 break;
             }
         }
-        while (diff > stages[st_inst.no].duration) {
+        while (diff > stages.at(st_inst.no).duration) {
             logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no + 1);
-			diff -= stages[st_inst.no].duration;
+            diff -= stages.at(st_inst.no).duration;
 			st_inst.no++;
             updated = true;
             if (!stages.count(st_inst.no)) {
@@ -1252,10 +1309,10 @@ private:
                 st_inst.xtra.crafting_allowed = false;
             } 
             else {
-                st_inst.xtra.form_id = stages[st_inst.no].formid;
-                st_inst.xtra.editor_id = clib_util::editorID::get_editorID(stages[st_inst.no].GetBound());
+                st_inst.xtra.form_id = stages.at(st_inst.no).formid;
+                st_inst.xtra.editor_id = clib_util::editorID::get_editorID(stages.at(st_inst.no).GetBound());
                 st_inst.xtra.is_fake = IsFakeStage(st_inst.no);
-                st_inst.xtra.crafting_allowed = stages[st_inst.no].crafting_allowed;
+                st_inst.xtra.crafting_allowed = stages.at(st_inst.no).crafting_allowed;
             }
             // as long as the delay start was before the ueberschreitung time this will work,
             // the delay start cant be strictly after the ueberschreitung time bcs we call update when a new delay
@@ -1549,12 +1606,12 @@ private:
                 logger::error("Formid {} is the same as the source formid.", formid);
 				return false;
             }*/
-            if (!stages[i].CheckIntegrity()) {
-				logger::error("Stage {} integrity check failed.", i);
+            if (!stages.at(i).CheckIntegrity()) {
+                logger::error("Stage {} integrity check failed. FormID", i, stages.at(i).formid);
 				return false;
 			}
             // also need to check if qformtype is the same as source's qformtype
-            const auto stage_formid = stages[i].formid;
+            const auto stage_formid = stages.at(i).formid;
             const auto stage_qformtype = Settings::GetQFormType(stage_formid);
             if (stage_qformtype != qFormType) {
 				logger::error("Stage {} qformtype is not the same as the source qformtype.", i);
@@ -1584,7 +1641,7 @@ private:
         const auto last_stage_no = stages.rbegin()->first;
         float total_duration = 0;
         while (curr_stageno <= last_stage_no) {
-            total_duration += stages[curr_stageno].duration;
+            total_duration += stages.at(curr_stageno).duration;
             curr_stageno+=1;
 		}
         if (diff> total_duration) return true;
@@ -1592,6 +1649,8 @@ private:
     };
 
     void InitFailed(){
+        logger::error("Initialisation failed.");
+        logger::error("Initialisation failed.");
         logger::error("Initialisation failed.");
         Reset();
         init_failed = true;

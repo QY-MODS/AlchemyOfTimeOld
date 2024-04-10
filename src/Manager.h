@@ -3,7 +3,7 @@
 #include "Settings.h"
 #include "Utils.h"
 
-class Manager : public Utilities::SaveLoadData {
+class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
     
     //const RefID chest_Refid = 0x0201824C;
 
@@ -41,7 +41,73 @@ class Manager : public Utilities::SaveLoadData {
     unsigned int _instance_limit = 200000;
 
 
+    std::map<RefID, float> _ref_stops_;
+    bool listen_woupdate = true;
+    bool update_is_busy = false;
+
+    std::vector<std::tuple<FormID, Count, RefID, Duration>> to_register_go;
+
+
+
 #define ENABLE_IF_NOT_UNINSTALLED if (isUninstalled) return;
+
+    void _WOUpdateLoop(const float curr_time) {
+        
+        std::map<RefID, float> ref_stops_copy = _ref_stops_;
+        std::vector<std::pair<RefID, float>> ref_n_stops;
+        for (auto& [refid, stop_t] : ref_stops_copy) {
+            if (stop_t <= curr_time) ref_n_stops.push_back({refid, stop_t});
+        }
+
+        if (ref_n_stops.empty()) {
+			Stop();
+			return;
+		}
+
+        std::sort(ref_n_stops.begin(), ref_n_stops.end(),
+                  [](std::pair<RefID, float> a, std::pair<RefID, float> b) { return a.second < b.second; });
+
+        auto stop_t = ref_n_stops[0].second;
+        if (stop_t > curr_time) return;
+        const auto refid = ref_n_stops[0].first;
+        if (auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(refid)) {
+            if (!UpdateStages(ref,curr_time)) {
+                logger::error("Queued Update failed for {}. update_time {}, curr_time {}", refid, stop_t, curr_time);
+                _ref_stops_.erase(refid);
+            } else if (_ref_stops_.contains(refid) && _ref_stops_.at(refid) == stop_t) {
+				_ref_stops_.erase(refid);
+            }
+            _WOUpdateLoop(curr_time);
+        }
+        
+    }
+    
+    void UpdateLoop() {
+        ENABLE_IF_NOT_UNINSTALLED
+        if (!getListenWOUpdate()) return;
+        setListenWOUpdate(false);
+        if (_ref_stops_.empty()) {
+            Stop();
+            return setListenWOUpdate(true);
+        }
+        logger::trace("UpdateLoop");
+        if (auto ui = RE::UI::GetSingleton(); ui && ui->GameIsPaused()) return setListenWOUpdate(true);
+        if (auto cal = RE::Calendar::GetSingleton()) {
+            const auto curr_time = cal->GetHoursPassed();
+            _WOUpdateLoop(curr_time);
+        }
+        logger::trace("UpdateLoop done.");
+        setListenWOUpdate(true);
+        Start();
+    };
+
+    void QueueWOUpdate(RefID refid,float stop_t) {
+		ENABLE_IF_NOT_UNINSTALLED
+        _ref_stops_[refid] = stop_t;
+        Start();
+        logger::info("Queued WO update for {} with stop time {}", refid, stop_t);
+	}
+
 
     [[nodiscard]] const bool IsStage(FormID some_formid, Source* source) {
         for (auto& [st_no, stage] : source->stages) {
@@ -66,7 +132,7 @@ class Manager : public Utilities::SaveLoadData {
         if (!source_formid) return nullptr;
         if (source_formid>=0xFF000000) return nullptr;
         Source new_source(source_formid, "", empty_mgeff, settings);
-        if (new_source.init_failed) return nullptr;
+        if (!new_source.IsHealthy()) return nullptr;
         sources.push_back(new_source);
         return &sources.back();
     }
@@ -80,7 +146,7 @@ class Manager : public Utilities::SaveLoadData {
         }
         // maybe it already exists
         for (auto& src : sources) {
-            if (src.init_failed) continue;
+            if (!src.IsHealthy()) continue;
             if (src.formid == some_formid) {
                 return &src;
             }
@@ -101,7 +167,7 @@ class Manager : public Utilities::SaveLoadData {
         if (!_qformtype.empty() && Settings::custom_settings.contains(_qformtype)) {
             auto& custom_settings = Settings::custom_settings[_qformtype];
             for (auto& [names,sttng]: custom_settings){
-                if (sttng.init_failed) continue;
+                if (!sttng.IsHealthy()) continue;
                 logger::trace("GetSource: custom settings owner names {}",Utilities::Functions::String::join(names,", "));
                 for (auto& name : names) {
                     const FormID temp_cstm_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(name);
@@ -122,6 +188,7 @@ class Manager : public Utilities::SaveLoadData {
     };
 
     [[nodiscard]] const StageNo GetStageNoFromSource(Source* src,const FormID stage_id) {
+        logger::trace("GetStageNoFromSource");
         StageNo stage_no=0; // doesnt matter
         if (!src) {
             RaiseMngrErr("Source is null.");
@@ -297,7 +364,7 @@ class Manager : public Utilities::SaveLoadData {
             logger::error("ExtraTextDisplayData is null.");
             return;
         }
-        logger::trace("Setting text display data.");
+        logger::trace("Setting text display data for fake wo.");
         wo_ref->extraList.RemoveByType(RE::ExtraDataType::kTextDisplayData);
         auto xText = RE::BSExtraData::Create<RE::ExtraTextDisplayData>();
         xText->SetName(xname);
@@ -457,11 +524,11 @@ class Manager : public Utilities::SaveLoadData {
     }
     
     // TAMAM
-    bool _UpdateStagesInSource(std::vector<RE::TESObjectREFR*> refs, Source* src, const float curr_time) {
-        if (!src) {
-            RaiseMngrErr("_UpdateStages: Source is null.");
-            return false;
-        }
+    bool _UpdateStagesInSource(std::vector<RE::TESObjectREFR*> refs, Source& src, const float curr_time) {
+        if (!src.IsHealthy()) {
+			RaiseMngrErr("_UpdateStages: Source is not healthy.");
+			return false;
+		}
         if (refs.empty()) {
             RaiseMngrErr("_UpdateStages: Refs is empty.");
             return false;
@@ -478,36 +545,38 @@ class Manager : public Utilities::SaveLoadData {
             ids_refs[ref->GetFormID()] = ref;
             refids.push_back(ref->GetFormID());
         }
-        auto updated_stages = src->UpdateAllStages(refids, curr_time);
+        auto updated_stages = src.UpdateAllStages(refids, curr_time);
         if (updated_stages.empty()) {
             logger::trace("No update2");
             return false;
         }
 
         //std::set<RefID> decayed_was_registered;
-        for (auto& [loc,updates] : updated_stages) {
-            for (auto& update : updates) {
+        for (const auto& [loc,updates] : updated_stages) {
+            for (const auto& update : updates) {
                 if (!update.oldstage || !update.newstage || !update.count) {
                     logger::error("_UpdateStages: Update is null.");
                     continue;
                 }
                 auto ref = ids_refs[loc];
                 if (ref->HasContainer() || ref->IsPlayerRef()) {
-                    ApplyEvolutionInInventory(src->qFormType,ref, update.count, update.oldstage->formid, update.newstage->formid);
-                    if (src->IsDecayedItem(update.newstage->formid)) {
-                        if (RegisterAndGo(update.newstage->formid, update.count, loc, update.update_time)) {
-                            //decayed_was_registered.insert(loc);
-                        }
+                    ApplyEvolutionInInventory(src.qFormType,ref, update.count, update.oldstage->formid, update.newstage->formid);
+                    if (src.IsDecayedItem(update.newstage->formid)) {
+                        to_register_go.push_back({update.newstage->formid, update.count, loc, update.update_time});
                     }
                 }
                 // WO
                 else if (worldobjectsevolve) {
                     logger::trace("_UpdateStages: ref out in the world.");
-                    auto bound = src->IsFakeStage(update.newstage->no) ? src->GetBoundObject() : nullptr;
+                    auto bound = src.IsFakeStage(update.newstage->no) ? src.GetBoundObject() : nullptr;
                     ApplyStageInWorld(ref, *update.newstage, bound);
-                    if (src->IsDecayedItem(update.newstage->formid)) {
-                        if (RegisterAndGo(update.newstage->formid, update.count, loc, update.update_time)){
-                            //decayed_was_registered.insert(loc);
+                    if (src.IsDecayedItem(update.newstage->formid)) {
+                        logger::trace("_UpdateStages: Decayed item. Source formid {} editorid {}",
+									  src.formid, src.editorid);
+                        to_register_go.push_back({update.newstage->formid, update.count, loc, update.update_time});
+                        if (!src.IsHealthy()) {
+                                RaiseMngrErr("_UpdateStages: Source is not healthy7.");
+                                return false;
                         }
                     }
                 } else {
@@ -516,6 +585,10 @@ class Manager : public Utilities::SaveLoadData {
                 }
             }
         }
+        if (!src.IsHealthy()) {
+            RaiseMngrErr("_UpdateStages: Source is not healthy8.");
+            return false;
+        }
 
         //src->CleanUpData();
         return true;
@@ -523,25 +596,72 @@ class Manager : public Utilities::SaveLoadData {
 
     // a ref can have multiple sources
     // _UpdateTimeModulators ve UpdateStages kullaniyo
-    bool _UpdateStagesOfRef(RE::TESObjectREFR* ref, const float _time, bool is_inventory, bool cleanup = true) {
+    bool _UpdateStagesOfRef(RE::TESObjectREFR* ref, const float _time, bool is_inventory) {
         if (!ref) {
             RaiseMngrErr("_UpdateStagesOfRef: Ref is null.");
             return false;
         }
+
+        logger::trace("_UpdateStagesOfRef");
         const RefID refid = ref->GetFormID();
         bool update_took_place = false;
+        if (!is_inventory){
+            auto src_ = GetWOSource(ref);
+            if (!src_) {
+				logger::error("Source not found for the ref.");
+				return false;
+			}
+            Source& src = *src_;
+            if (!src.IsHealthy()) {
+                logger::error("Source is not healthy.");
+                return false;
+            }
+            if (src.data.empty()) {
+                logger::error("Source data is empty.");
+				return false;
+            }
+            if (!src.data.contains(refid)) {
+            	logger::critical("Source data does not contain refid.");
+                return false;
+            }
+            if (src.data.at(refid).empty()) {
+                logger::warn("Source data is empty for refid.");
+                return false;
+            }
+            if (!src.IsHealthy()) {
+                RaiseMngrErr("_UpdateStagesOfRef: Source is not healthy1.");
+                return false;
+            }
+            update_took_place = _UpdateStagesInSource({ref}, src, _time);
+            
+            if (!src.IsHealthy()) {
+                RaiseMngrErr("_UpdateStagesOfRef: Source is not healthy2.");
+                return false;
+            }
+
+            if (auto wo_inst = GetWOStageInstance(refid); wo_inst) {
+                const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+                const auto next_update = src.GetNextUpdateTime(wo_inst);
+                if (next_update > curr_time) QueueWOUpdate(refid,next_update);
+            }
+
+            return update_took_place;
+        }
+
         for (auto& src : sources) {
+            if (!src.IsHealthy()) continue;
+            if (src.data.empty()) continue;
             if (!src.data.contains(refid)) continue;
             if (src.data[refid].empty()) continue;
-            auto* src_ptr = &src;
-            const bool temp_update_took_place = _UpdateStagesInSource({ref}, src_ptr, _time);
-            if (temp_update_took_place && cleanup) src.CleanUpData();
+            const bool temp_update_took_place = _UpdateStagesInSource({ref}, src, _time);
             if (!update_took_place) update_took_place = temp_update_took_place;
         }
         for (auto& src : sources) {
+            if (!src.IsHealthy()) continue;
+            if (src.data.empty()) continue;
             if (!src.data.contains(refid)) continue;
-            auto* src_ptr = &src;
-            if (is_inventory) src_ptr->UpdateTimeModulationInInventory(ref, _time);
+            if (src.data[refid].empty()) continue;
+            if (is_inventory) src.UpdateTimeModulationInInventory(ref, _time);
         }
         return update_took_place;
     }
@@ -560,7 +680,7 @@ class Manager : public Utilities::SaveLoadData {
 
 
         //std::vector<StageInstance*> all_instances_in_inventory;
-        std::vector<std::pair<std::pair<size_t,size_t>, float>> queued_updates;  // pair: source owner index , hitting time
+        std::vector<float> queued_updates;  // pair: source owner index , hitting time
         // since these instances are in the same inventory, they are affected by the same time modulator
 
         std::set<FormID> all_time_modulators;
@@ -572,78 +692,54 @@ class Manager : public Utilities::SaveLoadData {
                 all_time_modulators.insert(temp_dlyr.first);
             }
         }
-        size_t index_src = 0;
         for (auto& src : sources) {
+            if (!src.IsHealthy()) {
+                RaiseMngrErr("_UpdateTimeModulators: Source is not healthy.");
+            }
             if (!src.data.contains(inventory_owner_refid)) continue;
-            size_t index_inst = 0;
-            for (auto& st_inst : src.data[inventory_owner_refid]) {
+            for (auto& st_inst : src.data.at(inventory_owner_refid)) {
                 if (st_inst.xtra.is_decayed || !src.stages.contains(st_inst.no)) continue;
                 if (all_time_modulators.contains(st_inst.xtra.form_id)) {
                     const auto delay_slope = st_inst.GetDelaySlope();
                     if (delay_slope == 0) continue;
-                    const auto schranke = delay_slope > 0 ? src.stages[st_inst.no].duration : 0.f;
+                    const auto schranke = delay_slope > 0 ? src.stages.at(st_inst.no).duration : 0.f;
+                    logger::trace("getting hitting time for {} with source formid {}", st_inst.xtra.form_id, src.formid);
                     const auto hitting_time = st_inst.GetHittingTime(schranke);
                     if (hitting_time<=0) {
                         logger::warn("Hitting time is 0 or less!");
                         continue;
                     }
-                    else if (hitting_time <= curr_time) queued_updates.push_back({{index_src, index_inst}, hitting_time});
+                    else if (hitting_time <= curr_time) queued_updates.push_back(hitting_time);
                 }
-                index_inst++;
             }
-            index_src++;
         }
+
+        all_time_modulators.clear();
         
         if (queued_updates.empty()) {
             logger::trace("No queued updates.");
             return false;
         } else logger::trace("Queued updates: {}", queued_updates.size());
 
-        size_t max_try = queued_updates.size()+100;
-        bool update_happened = false;
-        while (!queued_updates.empty() && max_try > 0) {
-            max_try--;
-            // order them by hitting time
-            std::sort(queued_updates.begin(), queued_updates.end(),
-                      [](std::pair<std::pair<size_t, size_t>, float> a, std::pair<std::pair<size_t, size_t>, float> b) {
-                          return a.second < b.second;
-                      });
+        // order them by hitting time
+        logger::trace("Sorting queued updates.");
+        std::sort(queued_updates.begin(), queued_updates.end(), [](float a, float b) {
+                        return a < b;
+            });
 
-            const auto& q_u = queued_updates[0];
-            index_src = q_u.first.first;
-            const auto index_inst = q_u.first.second;
-            const auto hitting_time = q_u.second;
-            queued_updates.erase(queued_updates.begin());
-
-            auto& src = sources[index_src];
-            auto& st_inst = src.data[inventory_owner_refid][index_inst];
-            const auto _t_ = hitting_time + std::numeric_limits<float>::epsilon();
-            const auto formid_before = st_inst.xtra.form_id;
-            if (_UpdateStagesOfRef(inventory_owner, _t_, true, false)) {
+        logger::trace("Applying queued updates.");
+        for (auto& q_u: queued_updates) {
+            const auto _t_ = q_u + std::numeric_limits<float>::epsilon();
+            if (_UpdateStagesOfRef(inventory_owner, _t_, true)) {
                 logger::trace("Time modulator updated.");
-                update_happened = true;
-                if (formid_before != st_inst.xtra.form_id && !st_inst.xtra.is_decayed) {
-                    const auto temp_time_modulators =
-                        Utilities::Functions::getKeys<FormID, float>(src.defaultsettings->delayers);
-                    if (Utilities::Functions::Vector::HasElement<FormID>(temp_time_modulators, st_inst.xtra.form_id)) {
-                        const auto delay_slope = st_inst.GetDelaySlope();
-                        if (delay_slope != 0) {
-                            const auto schranke = delay_slope > 0 ? src.stages[st_inst.no].duration : 0.f;
-                            const auto new_hitting_time = st_inst.GetHittingTime(schranke);
-                            if (new_hitting_time <= 0) {
-                                logger::warn("Hitting time is 0 or less!");
-                            } else if (new_hitting_time <= curr_time) {
-                                queued_updates.push_back({{index_src, index_inst}, new_hitting_time});
-                                max_try++; 
-                            }
-                        }
-                    }
-                }
+                _UpdateTimeModulators(inventory_owner, curr_time);
+                return true;
             }
+		}
+        
+        logger::trace("_UpdateTimeModulators: Done.");
 
-        }
-
-        return update_happened;
+        return false;
     }
 
     void RaiseMngrErr(const std::string err_msg_ = "Error") {
@@ -711,13 +807,44 @@ class Manager : public Utilities::SaveLoadData {
         listen_menuopenclose = value;
     }
 
+    void setListenWOUpdate(const bool value) {
+        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        listen_woupdate = value;
+    }
+
+    [[nodiscard]] const bool getListenWOUpdate() {
+		std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+		return listen_woupdate;
+	}
+
+    void setUpdateIsBusy(const bool) {
+        return;
+        //std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        //update_is_busy = value;
+    }
+    
+	[[nodiscard]] const bool getUpdateIsBusy() {
+		std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+		return update_is_busy;
+	}
+
     void setUninstalled(const bool value) {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         isUninstalled = value;
     }
 
 public:
-    Manager(std::vector<Source>& data) : sources(data) { Init(); };
+
+    Manager(std::vector<Source>& data, std::chrono::milliseconds interval)
+        : sources(data), Utilities::Ticker([this]() { UpdateLoop(); }, interval) {
+        Init();
+    };
+
+
+    static Manager* GetSingleton(std::vector<Source>& data, int u_intervall=3000) {
+        static Manager singleton(data, std::chrono::milliseconds(u_intervall));
+        return &singleton;
+    }
 
     void Uninstall() {
         isUninstalled = true;
@@ -725,52 +852,51 @@ public:
         // Settings::UninstallOtherSettings();
     }
 
-    static Manager* GetSingleton(std::vector<Source>& data) {
-        static Manager singleton(data);
-        return &singleton;
-    }
-
     const char* GetType() override { return "Manager"; }
 
     void setListenCrosshair(const bool value) {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        std::lock_guard<std::mutex> lock(mutex);
         listen_crosshair = value;
     }
 
-    [[nodiscard]] bool getListenCrosshair() {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+    [[nodiscard]] const bool getListenCrosshair() {
+        std::lock_guard<std::mutex> lock(mutex);
         return listen_crosshair;
     }
 
-    [[nodiscard]] bool getListenMenuOpenClose() {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+    [[nodiscard]] const bool getListenMenuOpenClose() {
+        std::lock_guard<std::mutex> lock(mutex);
         return listen_menuopenclose;
     }
 
-    [[nodiscard]] bool getListenEquip() {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+    [[nodiscard]] const bool getListenEquip() {
+        std::lock_guard<std::mutex> lock(mutex);
         return listen_equip;
     }
 
-    [[nodiscard]] bool getListenActivate() {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+    [[nodiscard]] const bool getListenActivate() {
+        std::lock_guard<std::mutex> lock(mutex);
         return listen_activate;
     }
 
-    [[nodiscard]] bool getListenContainerChange() {
+    [[nodiscard]] const bool getListenContainerChange() {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         return listen_container_change;
     }
 
-    [[nodiscard]] bool getPO3UoTInstalled() {
+    [[nodiscard]] const bool getPO3UoTInstalled() {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         return po3_use_or_take;
     }
 
-    [[nodiscard]] bool getUninstalled() {
+    [[nodiscard]] const bool getUninstalled() {
         std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
         return isUninstalled;
     }
+
+    void ClearWOUpdateQueue() { 
+        _ref_stops_.clear();
+	}
 
     // use it only for world objects! checks if there is a stage instance for the given refid
     [[nodiscard]] const bool RefIsRegistered(const RefID refid) {
@@ -783,7 +909,7 @@ public:
             return false;
         }
         for (auto& src : sources) {
-            if (src.data.contains(refid)) return true;
+            if (src.data.contains(refid) && !src.data[refid].empty()) return true;
         }
         return false;
     }
@@ -817,10 +943,12 @@ public:
             return false;
         }
 
-        logger::trace("Registering new instance.Formid {} , Count {} , Location refid {}", some_formid, count, location_refid);
+        logger::trace("Registering new instance.Formid {} , Count {} , Location refid {}, register_time {}",
+                      some_formid, count, location_refid, register_time);
         // make new registry
         auto src = GetSource(some_formid);  // also saves it to sources if it was created new
         // can be null if it is not a custom stage and not registered before
+        
         if (!src) {
             logger::trace("No existing source and no custom settings found for the formid {}", some_formid);
             const auto qform_type = Settings::GetQFormType(some_formid);
@@ -831,7 +959,7 @@ public:
             else if (!Settings::defaultsettings.contains(qform_type)){
                 logger::trace("Cannot register bcs No default settings found for the qform_type {}", qform_type);
                 return false;
-            } else if (Settings::defaultsettings[qform_type].init_failed) {
+            } else if (!Settings::defaultsettings[qform_type].IsHealthy()) {
                 logger::trace("Cannot register bcs Default settings not loaded for the qform_type {}", qform_type);
                 return false;
             } else {
@@ -859,21 +987,24 @@ public:
                 RaiseMngrErr("Register: InsertNewInstance failed 1.");
                 return false;
             }
-            const auto stage_formid = src->stages[stage_no].formid;
+            const auto stage_formid = src->stages.at(stage_no).formid;
             // to change from the source form to the stage form
             ApplyEvolutionInInventory(src->qFormType,ref, count, some_formid, stage_formid);
         } 
         else {
-            logger::trace("Registering in world.");
+            logger::trace("Registering in world. name {} formid {}",ref->GetObjectReference()->GetName(),ref->GetObjectReference()->GetFormID());
             if (!src->InitInsertInstanceWO(stage_no, count, location_refid,register_time)) {
                 RaiseMngrErr("Register: InsertNewInstance failed 1.");
                 return false;
             }
             auto bound =  src->IsFakeStage(stage_no) ? src->GetBoundObject() : nullptr;
-            ApplyStageInWorld(ref, src->stages[stage_no], bound);
+            for (const auto& [no,stg] : src->stages) {
+				logger::trace("Stage no {} formid {}, is fake {}",stg.no,stg.formid,src->IsFakeStage(stg.no));
+			}
+            ApplyStageInWorld(ref, src->stages.at(stage_no), bound);
         }
 
-        src->PrintData();
+        UpdateStages(location_refid);
 
         return true;
     }
@@ -949,12 +1080,16 @@ public:
         if (!source) {
             logger::warn("HandleDrop: Source not found! Can be if it was never registered before.");
             return;
-        } 
+        } else if (!source->IsHealthy()) {
+			logger::warn("HandleDrop: Source is not healthy!");
+			return;
+		}
         else if (source->formid == dropped_formid && !IsStage(dropped_formid, source)) {
-            logger::warn("HandleDrop: Source same formid as dropped one! Can be bcs the item's evolution did not start yet or the stage item is the same as source item.");
+            logger::warn("HandleDrop: Source same formid as dropped one and it is not a stage form! Can be bcs the item's evolution did not start yet.");
             return;
         }
         
+        source->CleanUpData(); // to ausschliessen decayed items
         source->PrintData();
         // print radius just for testing
         logger::trace("Radius: {}", Utilities::FunctionsSkyrim::WorldObject::GetDistanceFromPlayer(dropped_stage_ref));
@@ -964,7 +1099,7 @@ public:
             // eventsink bazen bugliyodu ayni refe gosteriyodu countlar split olunca
             // ama extrayi attiimdan beri olmuyodu
             logger::warn("Ref is registered at HandleDrop! Deregistering...");
-            auto& st_inst = source->data[dropped_stage_ref->GetFormID()];
+            auto& st_inst = source->data.at(dropped_stage_ref->GetFormID());
             for (auto& inst : st_inst) inst.count = 0;
             HandleConsume(dropped_formid);
             /*const auto curr_count = dropped_stage_ref->extraList.GetCount();
@@ -982,7 +1117,7 @@ public:
                 if (i == 0) vec[i].count = count;
                 else vec[i].count = 0;
             }
-            source->CleanUpData();
+            //source->CleanUpData();
             /*return _HandleDrop2(source,dropped_stage_ref, count);*/
             return;
         }
@@ -991,7 +1126,7 @@ public:
         std::vector<size_t> instances_candidates = {};
         if (source->data.contains(player_refid)){
             size_t index__ = 0;
-            for (auto& st_inst : source->data[player_refid]) {
+            for (auto& st_inst : source->data.at(player_refid)) {
                 if (st_inst.xtra.form_id == dropped_formid) {
                     instances_candidates.push_back(index__);
                 }
@@ -1006,8 +1141,8 @@ public:
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
         std::sort(instances_candidates.begin(), instances_candidates.end(), 
             [source,curr_time](size_t a, size_t b) {
-            return source->data[player_refid][a].GetElapsed(curr_time) >
-                   source->data[player_refid][b].GetElapsed(curr_time);  // use up the old stuff first
+            return source->data.at(player_refid)[a].GetElapsed(curr_time) >
+                   source->data.at(player_refid)[b].GetElapsed(curr_time);  // use up the old stuff first
         });
 
         logger::trace("HandleDrop: setting count");
@@ -1024,7 +1159,7 @@ public:
             if (!count) break;
             StageInstance* instance = nullptr;
             if (removed_indices.empty()) {
-                instance = &source->data[player_refid][index];
+                instance = &source->data.at(player_refid)[index];
             } 
             else {
                 int shift = 0;
@@ -1032,7 +1167,7 @@ public:
                     if (index == removed_index) return RaiseMngrErr("HandleDrop: Index already removed.");
                     if (index > removed_index) shift++;
                 }
-                instance = &source->data[player_refid][index - shift];
+                instance = &source->data.at(player_refid)[index - shift];
             }
 
             if (count <= instance->count) {
@@ -1055,7 +1190,7 @@ public:
                         return RaiseMngrErr("HandleDrop: InsertNewInstance failed.");
                     }
                     auto bound = new_instance.xtra.is_fake ? source->GetBoundObject() : nullptr;
-                    ApplyStageInWorld(dropped_stage_ref, source->stages[new_instance.no], bound);
+                    ApplyStageInWorld(dropped_stage_ref, source->stages.at(new_instance.no), bound);
                     handled_first_stack = true;
                 } 
                 else {
@@ -1069,7 +1204,7 @@ public:
                     if (!source->InsertNewInstance(new_instance, new_ref->GetFormID())) {
                         return RaiseMngrErr("HandleDrop: InsertNewInstance failed.");
                     }
-                    if (new_instance.xtra.is_fake) _ApplyStageInWorld_Fake(new_ref, source->stages[new_instance.no].GetExtraText());
+                    if (new_instance.xtra.is_fake) _ApplyStageInWorld_Fake(new_ref, source->stages.at(new_instance.no).GetExtraText());
                 }
                 count = 0;
                 /*break;*/
@@ -1096,13 +1231,13 @@ public:
                     if (!source->MoveInstance(player_refid, dropped_stage_ref->GetFormID(), instance)) {
                         return RaiseMngrErr("HandleDrop: MoveInstance failed.");
                     }
-                    ApplyStageInWorld(dropped_stage_ref, source->stages[temp_stage_no], bound);
+                    ApplyStageInWorld(dropped_stage_ref, source->stages.at(temp_stage_no), bound);
                     handled_first_stack = true;
                 } 
                 else {
                     logger::trace("SADSJFHOADF 4");
                     const auto temp_is_fake = instance->xtra.is_fake;
-                    const char* extra_text = temp_is_fake ? source->stages[instance->no].GetExtraText() : nullptr;
+                    const char* extra_text = temp_is_fake ? source->stages.at(instance->no).GetExtraText() : nullptr;
                     const auto bound_to_drop = temp_is_fake ? source->GetBoundObject() : instance->GetBound();
                     auto new_ref =
                         Utilities::FunctionsSkyrim::WorldObject::DropObjectIntoTheWorld(bound_to_drop, instance->count);
@@ -1171,7 +1306,7 @@ public:
         auto source = GetWOSource(wo_refid);
         if (!source) return RaiseMngrErr("HandlePickUp: Source not found.");
         if (!source->data.contains(wo_refid)) return RaiseMngrErr("HandlePickUp: Source data not found.");
-        auto st_inst = &source->data[wo_refid].back();
+        auto st_inst = &source->data.at(wo_refid).back();
         if (!st_inst) return RaiseMngrErr("HandlePickUp: st_inst not found.");
         const auto instance_is_fake = st_inst->xtra.is_fake;
         const auto instance_formid = st_inst->xtra.form_id;
@@ -1536,19 +1671,29 @@ public:
 
     // TAMAM
     // queued time modulator updates, update stages, update time modulators in inventory
-    bool UpdateStages(RE::TESObjectREFR* ref) {
+    bool UpdateStages(RE::TESObjectREFR* ref,const float _time = 0) {
+        if (getUpdateIsBusy()) {
+            logger::critical("UpdateStages: Update is busy.");
+            return false;
+        }
+        setUpdateIsBusy(true);
+        //std::lock_guard<std::mutex> lock(mutex);
         // assumes that the ref is registered
         logger::trace("Manager: Updating stages.");
         if (!ref) {
             logger::critical("UpdateStages: ref is null.");
+            setUpdateIsBusy(false);
             return false;
         }
         if (sources.empty()) {
             logger::warn("UpdateStages: Sources is empty.");
+            setUpdateIsBusy(false);
             return false;
         }
+
         
-        const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+        const auto curr_time = _time ? _time : RE::Calendar::GetSingleton()->GetHoursPassed();
+
         logger::trace("UpdateStages: curr_time: {}", curr_time);
         
         // time modulator updates
@@ -1559,15 +1704,31 @@ public:
             // if there are time modulators which can also evolve, they need to be updated first
             const bool temp_update_took_place = _UpdateTimeModulators(ref, curr_time);
             if (!update_took_place) update_took_place = temp_update_took_place;
+        } else if (!worldobjectsevolve) {
+            setUpdateIsBusy(false);
+            return false;
         }
-        else if (!worldobjectsevolve) return false;
 
         // need to handle queued_time_modulator_updates
         // order them by GetRemainingTime method of QueuedTModUpdate
         const bool temp_update_took_place = _UpdateStagesOfRef(ref, curr_time, is_inventory);
         logger::trace("UpdateStages: temp_update_took_place: {}", temp_update_took_place);
         if (!update_took_place) update_took_place = temp_update_took_place;
-        if (!update_took_place) logger::trace("No update1");       
+        if (!update_took_place) logger::trace("No update1");
+
+        while (!to_register_go.empty()) {
+			const auto& [formid, count, refid,r_time] = to_register_go.front();
+            to_register_go.erase(to_register_go.begin());
+            if (!RegisterAndGo(formid, count, refid, r_time)) {
+				logger::warn("UpdateStages: RegisterAndGo failed.");
+			}
+        }
+
+        for (auto& src : sources) {
+            src.CleanUpData();
+		}
+
+        setUpdateIsBusy(false);
 
         return update_took_place;
     }
@@ -1805,7 +1966,7 @@ public:
             } else if (!Settings::defaultsettings.contains(qform_type)) {
                 logger::trace("No default settings found for the qform_type {}", qform_type);
                 return nullptr;
-            } else if (Settings::defaultsettings[qform_type].init_failed) {
+            } else if (!Settings::defaultsettings[qform_type].IsHealthy()) {
                 logger::trace("Default settings not loaded for the qform_type {}", qform_type);
                 return nullptr;
             } else {
@@ -1889,11 +2050,12 @@ public:
     }
 
     void Print() {
-        logger::info("Printing sources...Current time: {}", RE::Calendar::GetSingleton()->GetHoursPassed());
+        return;
+        /*logger::info("Printing sources...Current time: {}", RE::Calendar::GetSingleton()->GetHoursPassed());
         for (auto& src : sources) {
             if (src.data.empty()) continue;
             src.PrintData();
-        }
+        }*/
     }
 
 #undef ENABLE_IF_NOT_UNINSTALLED
