@@ -754,9 +754,9 @@ namespace Utilities{
                     logger::error("Inventory owner is null.");
                     return;
                 }
-                if (T::MENU_NAME != RE::BarterMenu::MENU_NAME || T::MENU_NAME != RE::ContainerMenu::MENU_NAME &&
+                if (T::MENU_NAME != RE::BarterMenu::MENU_NAME && T::MENU_NAME != RE::ContainerMenu::MENU_NAME &&
                     T::MENU_NAME != RE::InventoryMenu::MENU_NAME) {
-					logger::error("Menu type not supported.");
+                    logger::error("Menu type not supported: {}", T::MENU_NAME);
 					return;
 				}
                 auto ui = RE::UI::GetSingleton();
