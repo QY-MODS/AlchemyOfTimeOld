@@ -166,16 +166,29 @@ namespace Settings
     std::map <std::string,std::vector<std::string>> exclude_list;
 
     std::vector<std::string> LoadExcludeList(const std::string postfix) {
-        const auto exclude_path = "Data/SKSE/Plugins/AlchemyOfTime/" +postfix +"/AoT_exclude" + postfix + ".txt ";
-        logger::trace("Exclude path: {}", exclude_path);
-        std::ifstream file(exclude_path);
-        std::vector<std::string> strings;
-        std::string line;
-        while (std::getline(file, line)) {
-            strings.push_back(line);
+        const auto folder_path = "Data/SKSE/Plugins/AlchemyOfTime/" + postfix + "/exclude";
+        logger::trace("Exclude path: {}", folder_path);
+
+        // Create folder if it doesn't exist
+        std::filesystem::create_directories(folder_path);
+        std::set<std::string> strings;
+
+        // Iterate over files in the folder
+        for (const auto& entry : std::filesystem::directory_iterator(folder_path)) {
+            // Check if the entry is a regular file and ends with ".txt"
+            if (entry.is_regular_file() && entry.path().extension() == ".txt") {
+                std::ifstream file(entry.path());
+                std::string line;
+                while (std::getline(file, line)) {
+                    if (!line.empty()) strings.insert(line);
+                }
+            }
         }
-        return strings;
+
+        auto result = Utilities::Functions::Vector::SetToVector(strings);
+        return result;
     }
+
 
     void LoadINISettings() {
         logger::info("Loading ini settings");
@@ -444,27 +457,41 @@ namespace Settings
 
     CustomSettings parseCustoms(std::string _type){
         CustomSettings _custom_settings;
-        const auto filename = "Data/SKSE/Plugins/AlchemyOfTime/" + _type + "/AoT_custom" + _type + ".yml";
-        YAML::Node config = YAML::LoadFile(filename);
+        const auto folder_path = "Data/SKSE/Plugins/AlchemyOfTime/" + _type + "/custom";
+        std::filesystem::create_directories(folder_path);
+        logger::trace("Custom path: {}", folder_path);
+        
+        for (const auto& entry : std::filesystem::directory_iterator(folder_path)) {
 
-        for (const auto& _Node : config["ownerLists"]){
-            // we have list of owners at each node or a scalar owner
-            if (_Node["owners"].IsScalar()) {
-                const auto ownerName = _Node["owners"].as<std::string>();
-                auto temp_settings = _parseDefaults(_Node);
-                if (temp_settings.CheckIntegrity())
-                    _custom_settings[std::vector<std::string>{ownerName}] = temp_settings;
-			} 
-            else {
-				std::vector<std::string> owners;
-                for (const auto& owner : _Node["owners"]) {
-					owners.push_back(owner.as<std::string>());
+            if (entry.is_regular_file() && entry.path().extension() == ".yml") {
+                const auto filename = entry.path().string();
+                YAML::Node config = YAML::LoadFile(filename);
+
+                if (!config["ownerLists"]) {
+					logger::trace("OwnerLists not found in {}", filename);
+					continue;
 				}
 
-                auto temp_settings = _parseDefaults(_Node);
-                if (temp_settings.CheckIntegrity())
-                    _custom_settings[owners] = temp_settings;
-			}
+                for (const auto& _Node : config["ownerLists"]){
+                    // we have list of owners at each node or a scalar owner
+                    if (_Node["owners"].IsScalar()) {
+                        const auto ownerName = _Node["owners"].as<std::string>();
+                        auto temp_settings = _parseDefaults(_Node);
+                        if (temp_settings.CheckIntegrity())
+                            _custom_settings[std::vector<std::string>{ownerName}] = temp_settings;
+			        } 
+                    else {
+				        std::vector<std::string> owners;
+                        for (const auto& owner : _Node["owners"]) {
+					        owners.push_back(owner.as<std::string>());
+				        }
+
+                        auto temp_settings = _parseDefaults(_Node);
+                        if (temp_settings.CheckIntegrity())
+                            _custom_settings[owners] = temp_settings;
+			        }
+                }
+            }
         }
         return _custom_settings;
     }

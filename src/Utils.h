@@ -15,7 +15,8 @@
 #include <ClibUtil/editorID.hpp>
 #include "rapidjson/document.h"
 #include <yaml-cpp/yaml.h>
-
+#include <filesystem>
+#include <fstream>
 
 
 namespace Utilities{
@@ -219,6 +220,12 @@ namespace Utilities{
                     }
                 }
                 return complementarySet;
+            }
+
+            std::vector<std::string> SetToVector(const std::set<std::string>& input_set) {
+                // Construct a vector using the range constructor
+                std::vector<std::string> result(input_set.begin(), input_set.end());
+                return result;
             }
 
         };
