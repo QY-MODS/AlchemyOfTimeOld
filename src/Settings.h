@@ -303,7 +303,9 @@ namespace Settings
             // add to numbers
             logger::info("Stage no: {}", temp_no);
             settings.numbers.push_back(temp_no);
-            const auto temp_formeditorid = stageNode["FormEditorID"].as<std::string>();
+            const auto temp_formeditorid = stageNode["FormEditorID"] && !stageNode["FormEditorID"].IsNull()
+                                               ? stageNode["FormEditorID"].as<std::string>()
+                                               : "";
             const FormID temp_formid = temp_formeditorid.empty()
                                          ? 0
                                          : Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
@@ -330,12 +332,12 @@ namespace Settings
             logger::trace("Cost");
             if (stageNode["value"] && !stageNode["value"].IsNull()) {
                 settings.costoverrides[temp_no] = stageNode["value"].as<int>();
-            } else settings.costoverrides[temp_no] = -1;  // Or whatever default value you prefer
+            } else settings.costoverrides[temp_no] = -1;
             // add to weightoverrides
             logger::trace("Weight");
             if (stageNode["weight"] && !stageNode["weight"].IsNull()) {
                 settings.weightoverrides[temp_no] = stageNode["weight"].as<float>();
-            } else settings.weightoverrides[temp_no] = -1.0f;  // Or whatever default value you prefer
+            } else settings.weightoverrides[temp_no] = -1.0f;
             
             // add to crafting_allowed
             logger::trace("Crafting");
@@ -348,18 +350,15 @@ namespace Settings
             logger::trace("Effects");
             std::vector<StageEffect> effects;
             if (!stageNode["mgeffect"] || stageNode["mgeffect"].size() == 0) {
-				logger::info("Effects are empty.");
+				logger::info("Effects are empty. Skipping.");
             } else {
                 for (const auto& effectNode : stageNode["mgeffect"]) {
-                    const auto temp_effect_formeditorid = effectNode["FormEditorID"].as<std::string>();
+                    const auto temp_effect_formeditorid =
+                        effectNode["FormEditorID"] && !effectNode["FormEditorID"].IsNull() ? effectNode["FormEditorID"].as<std::string>() : "";
                     const FormID temp_effect_formid =
                         temp_effect_formeditorid.empty()
                             ? 0
                             : Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_effect_formeditorid);
-                    if (temp_effect_formid < 0) {
-                        logger::error("Effect Formid is less than 0.");
-                        return DefaultSettings();
-                    }
                     if (temp_effect_formid>0){
                         const auto temp_magnitude = effectNode["magnitude"].as<float>();
                         const auto temp_duration = effectNode["duration"].as<DurationMGEFF>();
@@ -371,44 +370,37 @@ namespace Settings
         }
         // final formid
         const FormID temp_decayed_id =
-            Utilities::FunctionsSkyrim::GetFormEditorIDFromString(config["finalFormEditorID"].as<std::string>());
-        if (temp_decayed_id < 0) {
-            logger::error("Decayed Formid is less than 0.");
-            return DefaultSettings();
-        }
+            config["finalFormEditorID"] && !config["finalFormEditorID"].IsNull()
+				? Utilities::FunctionsSkyrim::GetFormEditorIDFromString(config["finalFormEditorID"].as<std::string>())
+				: 0;
         settings.decayed_id = temp_decayed_id;
         // delayers
         logger::info("timeModulators");
         for (const auto& modulator : config["timeModulators"]) {
-            const auto temp_formeditorid = modulator["FormEditorID"].as<std::string>();
+            const auto temp_formeditorid = modulator["FormEditorID"] && !modulator["FormEditorID"].IsNull()
+                                               ? modulator["FormEditorID"].as<std::string>()
+                                               : "";
             const FormID temp_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
-            if (temp_formid < 0) {
-                logger::warn("Delayer Formid is less than 0.");
-                continue;
-            }
-            settings.delayers[temp_formid] = modulator["magnitude"].as<float>();
+            settings.delayers[temp_formid] = !modulator["magnitude"].IsNull() ? modulator["magnitude"].as<float>() : 1;
         }
 
         for (const auto& transformer : config["transformers"]) {
-            const auto temp_formeditorid = transformer["FormEditorID"].as<std::string>();
+            const auto temp_formeditorid = transformer["FormEditorID"] &&
+                                           !transformer["FormEditorID"].IsNull() ? transformer["FormEditorID"].as<std::string>() : "";
             const FormID temp_formid = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_formeditorid);
-            if (temp_formid < 0) {
-                logger::warn("Delayer Formid is less than 0.");
-                continue;
-            }
-            const auto temp_finalFormEditorID = transformer["finalFormEditorID"].as<std::string>();
+
+            const auto temp_finalFormEditorID =
+                transformer["finalFormEditorID"] &&
+                !transformer["finalFormEditorID"].IsNull() ? transformer["finalFormEditorID"].as<std::string>() : "";
             const FormID temp_formid2 = Utilities::FunctionsSkyrim::GetFormEditorIDFromString(temp_finalFormEditorID);
-            if (temp_formid2 < 0) {
-                logger::warn("Delayer Formid is less than 0.");
-                continue;
-            }
-            if (!transformer["duration"]) {
+            if (!transformer["duration"] || transformer["duration"].IsNull()) {
 				logger::warn("Duration is missing.");
 				continue;
 			}
             const auto temp_duration = transformer["duration"].as<float>();
             std::vector<StageNo> allowed_stages;
             if (!transformer["allowed_stages"]) {
+                // default is all stages
                 for (const auto& [key, _] : settings.items) {
                     allowed_stages.push_back(key);
                 }
