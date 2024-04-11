@@ -1303,7 +1303,7 @@ public:
 
         UpdateStages(player_ref);
 
-        source->CleanUpData();
+        if (!source->data.empty()) source->CleanUpData();
         //source->PrintData();
         //mutex.unlock();
     }
@@ -1426,7 +1426,7 @@ public:
 
         UpdateStages(player_ref);
 
-        source->CleanUpData();
+        if (!source->data.empty()) source->CleanUpData();
         logger::trace("HandleConsume: updated.");
 
     }
@@ -1755,6 +1755,7 @@ public:
         }
 
         for (auto& src : sources) {
+            if (src.data.empty()) continue;
             src.CleanUpData();
 		}
 
