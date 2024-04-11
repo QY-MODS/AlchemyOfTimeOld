@@ -369,10 +369,15 @@ namespace Settings
             settings.effects[temp_no] = effects;
         }
         // final formid
+        logger::info("terminal item");
         const FormID temp_decayed_id =
             config["finalFormEditorID"] && !config["finalFormEditorID"].IsNull()
 				? Utilities::FunctionsSkyrim::GetFormEditorIDFromString(config["finalFormEditorID"].as<std::string>())
 				: 0;
+        if (!temp_decayed_id) {
+            logger::error("Decayed id is 0.");
+            return DefaultSettings();
+        } else logger::info("Decayed id: {}", temp_decayed_id);
         settings.decayed_id = temp_decayed_id;
         // delayers
         logger::info("timeModulators");
