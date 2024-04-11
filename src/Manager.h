@@ -106,14 +106,14 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         if (!worldobjectsevolve) return;
         _ref_stops_[refid] = stop_t;
         Start();
-        logger::info("Queued WO update for {} with stop time {}", refid, stop_t);
+        logger::trace("Queued WO update for {} with stop time {}", refid, stop_t);
 	}
 
     void RemoveFromWOUpdateQueue(RefID refid) {
 		ENABLE_IF_NOT_UNINSTALLED
 		if (_ref_stops_.contains(refid)) {
 			_ref_stops_.erase(refid);
-			logger::info("Removed from WO update queue: {}", refid);
+			logger::trace("Removed from WO update queue: {}", refid);
 		}
 	}
 
@@ -192,7 +192,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
             }
         }
 
-        logger::info("Source not found for {}", some_form->GetName());
+        logger::trace("Source not found for {}", some_form->GetName());
         return nullptr;
     };
 

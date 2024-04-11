@@ -1188,6 +1188,11 @@ struct Source {
 	}
 
     void PrintData() {
+#ifndef NDEBUG
+#else
+        return;
+#endif  // !NDEBUG
+
         if (init_failed) {
 			logger::critical("PrintData: Initialisation failed.");
 			return;
@@ -1200,13 +1205,16 @@ struct Source {
             for (auto& instance : instances) {
                 logger::info("No: {}, Count: {}, Start time: {}, Delay Mag {}, Delayer {}, isfake {}, istransforming {}, isdecayed {}",
                     instance.no, instance.count, instance.start_time, instance.GetDelayMagnitude(), instance.GetDelayerFormID(), instance.xtra.is_fake, instance.xtra.is_transforming, instance.xtra.is_decayed);
-#ifndef NDEBUG
-                if (n_print>2000) break;
-#else
-                if (n_print>20) break;
-#endif  // !NDEBUG
+                if (n_print>200) {
+                    logger::info("Print limit reached.");
+                    break;
+                }
+                n_print++;
             }
-            n_print++;
+            if (n_print > 200) {
+                logger::info("Print limit reached.");
+                break;
+            }
 		}
     }
 

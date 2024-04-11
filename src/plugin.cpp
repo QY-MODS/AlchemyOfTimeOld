@@ -378,10 +378,10 @@ public:
                     logger::trace("Reference: {}", reference_.native_handle());
                     auto ref_id = Utilities::FunctionsSkyrim::WorldObject::TryToGetRefIDFromHandle(reference_);
                     if (!ref_id) {
-                        logger::info("Could not find reference");
+                        logger::trace("Could not find reference");
                         ref_id = picked_up_refid;
                         if (std::abs(picked_up_time - RE::Calendar::GetSingleton()->GetHoursPassed())>0.001f) {
-                            logger::warn("Picked up time: {}, calendar time: {}", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
+                            logger::warn("Picked up time: {}, calendar time: {}. Was it a book?", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
                         }
                         if (!ref_id) {
                             logger::error("Could not find reference with RefID {}", picked_up_refid);
