@@ -276,6 +276,10 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         }
         else AddItem(inventory_owner, nullptr, new_item, update_count);*/
         if (entry == inventory.end()) logger::error("Item not found in inventory.");
+        else if (entry->second.second->IsQuestObject()) {
+			logger::warn("Item is a quest object.");
+			return;
+		}
         // check if it is hotkeyed
         /*bool is_hotkeyed = false;
         std::uint8_t hotkey;
@@ -303,6 +307,13 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
 
         auto inventory = inventory_owner->GetInventory();
         auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
+        if (entry == inventory.end()) {
+            logger::error("Item not found in inventory.");
+            return;
+        } else if (entry->second.second->IsQuestObject()) {
+            logger::warn("Item is a quest object.");
+			return;
+        }
         bool has_xList = Utilities::FunctionsSkyrim::Inventory::EntryHasXData(entry->second.second.get());
         
         const auto __count = std::min(update_count, entry->second.first);
@@ -439,6 +450,10 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
             if (!item_obj) RaiseMngrErr("Item object is null");
             if (item_obj->GetFormID() == item_id) {
                 auto inv_data = item->second.second.get();
+                if (inv_data->IsQuestObject()) {
+					logger::warn("Item is a quest object.");
+					return ref_handle;
+				}
                 if (!inv_data) RaiseMngrErr("Item data is null");
                 auto asd = inv_data->extraLists;
                 if (!asd || asd->empty()) {
@@ -1496,6 +1511,7 @@ public:
                     continue;
                 }
                 if (stage_formid == src.formid) continue;
+                if (Utilities::FunctionsSkyrim::Inventory::IsQuestItem(stage_formid,player_ref)) continue;
                 const FormFormID temp = {src.formid, stage_formid}; // formid1: source formid, formid2: stage formid
                 if (!handle_crafting_instances.contains(temp)) {
                     const auto stage_bound = st_inst.GetBound();
@@ -1939,7 +1955,7 @@ public:
                 continue;
             }
             if (diff == 0) {
-                logger::warn("HandleLoc: Nothing to remove.");
+                logger::info("HandleLoc: Nothing to remove.");
                 continue;
             }
             for (auto& instance : instances) {

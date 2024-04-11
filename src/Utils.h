@@ -1038,6 +1038,18 @@ namespace Utilities{
             void EquipItem(const FormID formid, bool unequip = false) {
 				EquipItem(GetFormByID<RE::TESBoundObject>(formid), unequip);
 			}
+
+            bool IsQuestItem(const FormID formid, RE::TESObjectREFR* inv_owner) {
+                const auto inventory = inv_owner->GetInventory();
+                const auto item = GetFormByID<RE::TESBoundObject>(formid);
+                if (item) {
+                    const auto it = inventory.find(item);
+                    if (it != inventory.end()) {
+                        if (it->second.second->IsQuestObject()) return true;
+                    }
+                }
+                return false;
+            }
         };
 
         namespace WorldObject {

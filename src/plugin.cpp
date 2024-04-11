@@ -356,6 +356,11 @@ public:
 
         // to player inventory <-
         if (event->newContainer == player_refid) {
+            // check if quest item
+            if (Utilities::FunctionsSkyrim::Inventory::IsQuestItem(event->baseObj,RE::PlayerCharacter::GetSingleton())) {
+                logger::trace("Quest item entered player inventory.");
+                return RE::BSEventNotifyControl::kContinue;
+            }
             logger::trace("Item entered player inventory.");
             if (!event->oldContainer) {
                 if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)) {
