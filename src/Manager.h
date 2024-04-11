@@ -794,7 +794,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         _instance_limit = Settings::nMaxInstances;
 
         if (init_failed) InitFailed();
-        logger::info("Manager initialized.");
+        logger::info("Manager initialized with instance limit {}", _instance_limit);
 
         // add safety check for the sources size say 5 million
     }
