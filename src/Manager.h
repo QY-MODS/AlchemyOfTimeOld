@@ -1339,10 +1339,10 @@ public:
                 logger::warn("HandlePickUp: Not registered world object refid: {}, pickedup_formid: {}", wo_refid,
                              pickedup_formid);
             }
+#endif
             if (!RegisterAndGo(pickedup_formid, count, npc_refid)) {
                 logger::warn("HandlePickUp: RegisterAndGo failed.");
             }
-#endif
             return;
         }
         // so it was registered before
