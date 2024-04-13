@@ -3,6 +3,7 @@
 #include "Utils.h"
 
 using namespace Utilities::Types;
+using namespace Utilities::FunctionsSkyrim::DynamicForm;
 
 namespace Settings
 {
@@ -1590,30 +1591,6 @@ private:
         const auto delayer_best = GetModulatorInInventory(inventory_owner);
         const float __delay = delayer_best == 0 ? 1 : defaultsettings->delayers[delayer_best];
         instance.SetDelay(curr_time, __delay, delayer_best);
-    }
-        
-    template <typename T>
-    const FormID CreateFake(T* real) {
-        logger::trace("CreateFakeContainer");
-        if (!real) {
-			logger::error("Real form is null.");
-			return 0;
-		}
-        T* new_form = nullptr;
-        new_form = real->CreateDuplicateForm(true, (void*)new_form)->As<T>();
-
-        if (!new_form) {
-            logger::error("Failed to create new form.");
-            return 0;
-        }
-        new_form->Copy(real);
-
-        new_form->fullName = real->GetFullName();
-        logger::info("Created form with type: {}, Base ID: {:x}, Ref ID: {:x}, Name: {}",
-                     RE::FormTypeToString(new_form->GetFormType()), new_form->GetFormID(), new_form->GetFormID(),
-                     new_form->GetName());
-
-        return new_form->GetFormID();
     }
    
     [[nodiscard]] const bool CheckIntegrity() {

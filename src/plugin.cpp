@@ -624,8 +624,9 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         auto sources = std::vector<Source>();
         M = Manager::GetSingleton(sources);
     }
-    if (message->type == SKSE::MessagingInterface::kPostLoadGame) {
-        logger::info("Post-load game.");
+    if (message->type == SKSE::MessagingInterface::kNewGame || message->type ==
+        SKSE::MessagingInterface::kPostLoadGame) {
+        logger::info("New or Post-load game.");
         if (Settings::failed_to_load) {
             Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Failed to load settings. Check log for details.");
             M->Uninstall();
