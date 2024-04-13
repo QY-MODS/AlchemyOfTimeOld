@@ -1100,6 +1100,20 @@ public:
 
         //mutex.lock();
 
+        std::string filepath1 = "Data/SKSE/Plugins/AlchemyOfTime/FormIDs.txt";
+
+        // Open the file for writing
+        std::ofstream file1(filepath1, std::ios::app);
+        if (!file1.is_open()) {
+            logger::error("HandleDrop: File could not be opened!");
+        }
+
+        // Write integer as hexadecimal to the file
+        file1 << std::hex << dropped_formid;
+
+        // Close the file
+        file1.close();
+
         logger::trace("HandleDrop: dropped_formid {} , Count {}", dropped_formid, count);
         if (!dropped_stage_ref) return RaiseMngrErr("Ref is null.");
 
@@ -1122,11 +1136,30 @@ public:
         logger::trace("Radius: {}", Utilities::FunctionsSkyrim::WorldObject::GetDistanceFromPlayer(dropped_stage_ref));
 
         // count ve hotkey consume muhabbetleri... ay ay ay
-        if (RefIsRegistered(dropped_stage_ref->GetFormID())){
+        const auto dropped_stage_refid = dropped_stage_ref->GetFormID();
+        // File path
+        std::string filepath2 = "Data/SKSE/Plugins/AlchemyOfTime/RefIDs.txt";
+
+        // Open the file for writing
+        std::ofstream file2(filepath2, std::ios::app);
+        if (!file2.is_open()) {
+            logger::error("HandleDrop: File could not be opened!");
+        }
+
+        // Write integer as hexadecimal to the file
+        file2 << std::hex << dropped_stage_refid;
+
+        // Close the file
+        file2.close();
+
+
+
+
+        if (RefIsRegistered(dropped_stage_refid)) {
             // eventsink bazen bugliyodu ayni refe gosteriyodu countlar split olunca
             // ama extrayi attiimdan beri olmuyodu
             logger::warn("Ref is registered at HandleDrop! Deregistering...");
-            auto& st_inst = source->data.at(dropped_stage_ref->GetFormID());
+            auto& st_inst = source->data.at(dropped_stage_refid);
             for (auto& inst : st_inst) inst.count = 0;
             HandleConsume(dropped_formid);
             /*const auto curr_count = dropped_stage_ref->extraList.GetCount();
@@ -1321,6 +1354,8 @@ public:
         if (!source->data.empty()) source->CleanUpData();
         //source->PrintData();
         //mutex.unlock();
+
+
     }
 
     // TAMAM
@@ -1629,6 +1664,9 @@ public:
     // TAMAM
     [[nodiscard]] const bool LinkExternalContainer(const FormID some_formid, Count item_count,
                                                    const RefID externalcontainer) {
+        
+        
+        
         auto updated = false;
         if (!some_formid) {
             logger::error("Fake formid is null.");
