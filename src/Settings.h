@@ -33,6 +33,7 @@ namespace Settings
     std::map<std::string,std::map<std::string, bool>> INI_settings;
 
     int nMaxInstances = 200000;
+    int nForgettingTime = 2160;  // in hours
 
     /* std::vector<RE::ExtraDataType> xTrack = {
         RE::ExtraDataType::kEnchantment,
@@ -225,6 +226,14 @@ namespace Settings
 
         nMaxInstances = std::min(nMaxInstances, 2000000);
 
+        if (!ini.KeyExists("Other Settings", "nTimeToForgetInDays")) {
+            ini.SetLongValue("Other Settings", "nTimeToForgetInDays", 90);
+            nForgettingTime = 2160;
+        } else
+            nForgettingTime = 24 * ini.GetLongValue("Other Settings", "nTimeToForgetInDays", 90);
+
+        nForgettingTime = std::min(nForgettingTime, 4320);
+
 		ini.SaveFile(INI_path);
     }
 
@@ -378,6 +387,8 @@ namespace Settings
                         const auto temp_duration = effectNode["duration"].as<DurationMGEFF>();
                         effects.push_back(StageEffect(temp_effect_formid, temp_magnitude, temp_duration));
                     } else effects.push_back(StageEffect(temp_effect_formid, 0, 0));
+                    // currently only one allowed
+                    break;
                 }
             }
             settings.effects[temp_no] = effects;
@@ -578,7 +589,6 @@ struct Source {
     std::string editorid="";
     StageDict stages;
     SourceData data; // change this to a map with refid as key and vector of instances as value
-    RE::EffectSetting* empty_mgeff;
     Settings::DefaultSettings* defaultsettings = nullptr; // eigentlich sollte settings heissen
 
     RE::FormType formtype;
@@ -589,8 +599,12 @@ struct Source {
 
     std::vector<StageInstance*> queued_time_modulator_updates;
 
-    Source(const FormID id, const std::string id_str, RE::EffectSetting* e_m, Settings::DefaultSettings* sttngs=nullptr)
-        : formid(id), editorid(id_str), empty_mgeff(e_m), defaultsettings(sttngs) {
+    Source(const FormID id, const std::string id_str, 
+        //RE::EffectSetting* e_m, 
+        Settings::DefaultSettings* sttngs=nullptr)
+        : formid(id), editorid(id_str), 
+        //empty_mgeff(e_m), 
+        defaultsettings(sttngs) {
 
 
         RE::TESForm* form = Utilities::FunctionsSkyrim::GetFormByID(formid, editorid);
@@ -1196,7 +1210,10 @@ struct Source {
                 else if (!stages.count(it->no) || it->xtra.is_decayed) {
 				    logger::trace("Erasing decayed stage instance with no {}", it->no);
                     it = instances.erase(it);
-                }
+                } else if (curr_time - GetDecayTime(*it) > Settings::nForgettingTime) {
+                    logger::trace("Erasing stage instance that has decayed {} days ago", Settings::nForgettingTime/24);
+					it = instances.erase(it);
+				}
                 else {
 				    ++it;
 			    }
@@ -1211,7 +1228,7 @@ struct Source {
                 ++it;
             }
         }
-
+        
         if (!CheckIntegrity()) {
 			logger::critical("CheckIntegrity failed");
 			InitFailed();
@@ -1363,51 +1380,24 @@ private:
     template <typename T>
     void ApplyMGEFFSettings(T* stage_form, std::vector<StageEffect>& settings_effs) {
         RE::BSTArray<RE::Effect*> _effects = Utilities::FunctionsSkyrim::FormTraits<T>::GetEffects(stage_form);
-        std::vector<RE::EffectSetting*> MGEFFs;
-        std::vector<uint32_t*> pMGEFFdurations;
-        std::vector<float*> pMGEFFmagnitudes;
+        std::vector<FormID> MGEFFs;
+        std::vector<uint32_t> pMGEFFdurations;
+        std::vector<float> pMGEFFmagnitudes;
 
         // i need this many empty effects
         int n_empties = static_cast<int>(_effects.size()) - static_cast<int>(settings_effs.size());
         if (n_empties < 0) n_empties = 0;
 
         for (int j = 0; j < settings_effs.size(); j++) {
-            auto fake_mgeff_id = settings_effs[j].beffect;
-            if (!fake_mgeff_id) {
-                MGEFFs.push_back(empty_mgeff);
-                pMGEFFdurations.push_back(nullptr);
-                pMGEFFmagnitudes.push_back(nullptr);
-            } else {
-                RE::EffectSetting* fake_mgeffect =
-                    Utilities::FunctionsSkyrim::GetFormByID<RE::EffectSetting>(fake_mgeff_id);
-                if (settings_effs[j].duration &&
-                    !Utilities::Functions::String::includesString(
-                        std::string(fake_mgeffect->magicItemDescription.c_str()), {"<dur>"}) &&
-                    !fake_mgeffect->data.flags.any(RE::EffectSetting::EffectSettingData::Flag::kNoDuration)) {
-                    auto descr_str = std::string(fake_mgeffect->magicItemDescription.c_str());
-                    descr_str = descr_str.substr(0, descr_str.length() - 1);
-                    RE::EffectSetting* new_form = nullptr;
-                    new_form = fake_mgeffect->CreateDuplicateForm(true, (void*)new_form)->As<RE::EffectSetting>();
-
-                    if (!new_form) {
-                        logger::error("Failed to create new form.");
-                        return;
-                    }
-                    new_form->Copy(fake_mgeffect);
-                    new_form->fullName = fake_mgeffect->GetFullName();
-                    new_form->magicItemDescription = (descr_str + " for <dur> second(s).").c_str();
-                    fake_mgeffect = new_form;
-                }
-                MGEFFs.push_back(fake_mgeffect);
-                pMGEFFdurations.push_back(&settings_effs.at(j).duration);
-                pMGEFFmagnitudes.push_back(&settings_effs.at(j).magnitude);
-            }
+            MGEFFs.push_back(settings_effs[j].beffect);
+            pMGEFFdurations.push_back(settings_effs.at(j).duration);
+            pMGEFFmagnitudes.push_back(settings_effs.at(j).magnitude);
         }
 
         for (int j = 0; j < n_empties; j++) {
-            MGEFFs.push_back(empty_mgeff);
-            pMGEFFdurations.push_back(nullptr);
-            pMGEFFmagnitudes.push_back(nullptr);
+            MGEFFs.push_back(0);
+            pMGEFFdurations.push_back(0);
+            pMGEFFmagnitudes.push_back(0);
         }
         Utilities::FunctionsSkyrim::OverrideMGEFFs(_effects, MGEFFs, pMGEFFdurations, pMGEFFmagnitudes);
         
@@ -1416,10 +1406,10 @@ private:
     template <typename T>
     void GatherStages()  {
         // for now use default stages
-        if (!empty_mgeff) {
+        /*if (!empty_mgeff) {
             logger::error("Empty mgeff is null.");
             return;
-        }
+        }*/
 
         for (auto i = 0; i < defaultsettings->numbers.size(); i++) {
             // create fake form
@@ -1640,26 +1630,22 @@ private:
         return true;
 	}
 
-    [[maybe_unused]] const bool WouldHaveBeenDecayed(StageInstance* st_inst){
-        if (!st_inst) {
-			logger::error("Stage instance is null.");
-			return false;
-		}
-		if (st_inst->xtra.is_decayed) return true;
-        StageNo curr_stageno = st_inst->no;
+    const float GetDecayTime(const StageInstance& st_inst) const {
+
+        const auto slope = st_inst.GetDelaySlope();
+        if (slope <= 0) return -1;
+        StageNo curr_stageno = st_inst.no;
         if (!stages.contains(curr_stageno)) {
             logger::error("Stage {} does not exist.", curr_stageno);
             return true;
         }
-		float diff = st_inst->GetElapsed(RE::Calendar::GetSingleton()->GetHoursPassed());
         const auto last_stage_no = stages.rbegin()->first;
         float total_duration = 0;
         while (curr_stageno <= last_stage_no) {
             total_duration += stages.at(curr_stageno).duration;
             curr_stageno+=1;
 		}
-        if (diff> total_duration) return true;
-		return false;
+        return st_inst.GetHittingTime(total_duration);
     };
 
     void InitFailed(){

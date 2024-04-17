@@ -650,30 +650,23 @@ namespace Utilities{
             func(a_this, a_openType);
         }
 
-        void OverrideMGEFFs(RE::BSTArray<RE::Effect*>& effect_array, std::vector<RE::EffectSetting*> new_effects,
-                            std::vector<uint32_t*> durations, std::vector<float*> magnitudes) {
+        void OverrideMGEFFs(RE::BSTArray<RE::Effect*>& effect_array, std::vector<FormID> new_effects,
+                            std::vector<uint32_t> durations, std::vector<float> magnitudes) {
             
-            const unsigned int n_current_effects = static_cast<unsigned int>(effect_array.size());
-            if (!n_current_effects) {
-				logger::warn("No effects found");
-				return;
-			}
-            const unsigned int n_new_effects = static_cast<unsigned int>(new_effects.size());
-            unsigned int i = 0;
-            while (i<n_new_effects) {
-                if (i < n_current_effects) {
-					if (new_effects[i]) effect_array[i]->baseEffect = new_effects[i];
-                    if (durations[i]) effect_array[i]->effectItem.duration = *durations[i];
-                    if (magnitudes[i]) effect_array[i]->effectItem.magnitude = *magnitudes[i];
-                } else {
-                    effect_array.push_back(effect_array.front());
-                    if (new_effects[i]) effect_array.back()->baseEffect = new_effects[i];
-                    if (durations[i]) effect_array.back()->effectItem.duration = *durations[i];
-                    if (magnitudes[i]) effect_array.back()->effectItem.magnitude = *magnitudes[i];
+            size_t some_index = 0;
+            for (auto* effect : effect_array) {
+                auto* other_eff = GetFormByID<RE::EffectSetting>(new_effects[some_index]);
+                if (!other_eff){
+                    effect->effectItem.duration = 0;
+                    effect->effectItem.magnitude = 0;
                 }
-                i++;
-            }
-            
+                else {
+					effect->baseEffect = other_eff;
+					effect->effectItem.duration = durations[some_index];
+					effect->effectItem.magnitude = magnitudes[some_index];
+				}
+                some_index++;
+			}            
         }
 
         
@@ -1256,13 +1249,13 @@ namespace Utilities{
 				    return;
 			    }
                 a_from->SetObjectReference(a_to);
+                if (!apply_havok) return;
                 SKSE::GetTaskInterface()->AddTask([a_from]() {
 					a_from->Disable();
 					a_from->Enable(false);
 				});
                 /*a_from->Disable();
                 a_from->Enable(false);*/
-                if (!apply_havok) return;
 
                 /*float afX = 100;
                 float afY = 100;
@@ -1796,7 +1789,7 @@ namespace Utilities{
         // SkyrimThiago <3
         // https://github.com/Thiago099/DPF-Dynamic-Persistent-Forms
         namespace DynamicForm {
-            
+
             static void copyBookAppearence(RE::TESForm* source, RE::TESForm* target) {
                 auto* sourceBook = source->As<RE::TESObjectBOOK>();
 
@@ -1911,44 +1904,19 @@ namespace Utilities{
                 copyComponent<RE::TESBipedModelForm>(source, target);
             }
 
-            template <typename T>
+            void ReviveDynamicForm(RE::TESForm* fake, RE::TESForm* base, const FormID setFormID) {
+                fake->Copy(base);
+                auto weaponBaseForm = base->As<RE::TESObjectWEAP>();
 
-            const RE::FormID CreateFake(T* baseForm) {
-                logger::trace("CreateFakeContainer");
+                auto weaponNewForm = fake->As<RE::TESObjectWEAP>();
 
-                if (!baseForm) {
-                    logger::error("Real form is null.");
+                auto bookBaseForm = base->As<RE::TESObjectBOOK>();
 
-                    return 0;
-                }
+                auto bookNewForm = fake->As<RE::TESObjectBOOK>();
 
-                RE::TESForm* new_form = nullptr;
+                auto ammoBaseForm = base->As<RE::TESAmmo>();
 
-                auto factory = RE::IFormFactory::GetFormFactoryByType(baseForm->GetFormType());
-
-                new_form = factory->Create();
-
-                // new_form = baseForm->CreateDuplicateForm(true, (void*)new_form)->As<T>();
-
-                if (!new_form) {
-                    logger::error("Failed to create new form.");
-
-                    return 0;
-                }
-
-                const auto new_formid = new_form->GetFormID();
-
-                auto weaponBaseForm = baseForm->As<RE::TESObjectWEAP>();
-
-                auto weaponNewForm = new_form->As<RE::TESObjectWEAP>();
-
-                auto bookBaseForm = baseForm->As<RE::TESObjectBOOK>();
-
-                auto bookNewForm = new_form->As<RE::TESObjectBOOK>();
-
-                auto ammoBaseForm = baseForm->As<RE::TESAmmo>();
-
-                auto ammoNewForm = new_form->As<RE::TESAmmo>();
+                auto ammoNewForm = fake->As<RE::TESAmmo>();
 
                 if (weaponNewForm && weaponBaseForm) {
                     weaponNewForm->firstPersonModelObject = weaponBaseForm->firstPersonModelObject;
@@ -1998,44 +1966,75 @@ namespace Utilities{
                     ammoNewForm->GetRuntimeData().data.flags = ammoBaseForm->GetRuntimeData().data.flags;
 
                     ammoNewForm->GetRuntimeData().data.projectile = ammoBaseForm->GetRuntimeData().data.projectile;
-
-                } else {
+                }
+                /*else {
                     new_form->Copy(baseForm);
+                }*/
+
+                copyComponent<RE::TESDescription>(base, fake);
+
+                copyComponent<RE::BGSKeywordForm>(base, fake);
+
+                copyComponent<RE::BGSPickupPutdownSounds>(base, fake);
+
+                copyComponent<RE::TESModelTextureSwap>(base, fake);
+
+                copyComponent<RE::TESModel>(base, fake);
+
+                copyComponent<RE::BGSMessageIcon>(base, fake);
+
+                copyComponent<RE::TESIcon>(base, fake);
+
+                copyComponent<RE::TESFullName>(base, fake);
+
+                copyComponent<RE::TESValueForm>(base, fake);
+
+                copyComponent<RE::TESWeightForm>(base, fake);
+
+                copyComponent<RE::BGSDestructibleObjectForm>(base, fake);
+
+                copyComponent<RE::TESEnchantableForm>(base, fake);
+
+                copyComponent<RE::BGSBlockBashData>(base, fake);
+
+                copyComponent<RE::BGSEquipType>(base, fake);
+
+                copyComponent<RE::TESAttackDamageForm>(base, fake);
+
+                copyComponent<RE::TESBipedModelForm>(base, fake);
+
+                if (setFormID != 0) fake->SetFormID(setFormID, false);
+            }
+
+            template <typename T>
+            const RE::FormID CreateFake(T* baseForm, const FormID setFormID = 0) {
+                logger::trace("CreateFakeContainer");
+
+                if (!baseForm) {
+                    logger::error("Real form is null.");
+
+                    return 0;
                 }
 
-                copyComponent<RE::TESDescription>(baseForm, new_form);
+                RE::TESForm* new_form = nullptr;
 
-                copyComponent<RE::BGSKeywordForm>(baseForm, new_form);
+                auto factory = RE::IFormFactory::GetFormFactoryByType(baseForm->GetFormType());
 
-                copyComponent<RE::BGSPickupPutdownSounds>(baseForm, new_form);
+                new_form = factory->Create();
 
-                copyComponent<RE::TESModelTextureSwap>(baseForm, new_form);
+                // new_form = baseForm->CreateDuplicateForm(true, (void*)new_form)->As<T>();
 
-                copyComponent<RE::TESModel>(baseForm, new_form);
+                if (!new_form) {
+                    logger::error("Failed to create new form.");
+                    return 0;
+                }
+                logger::trace("Original form id: {:x}", new_form->GetFormID());
 
-                copyComponent<RE::BGSMessageIcon>(baseForm, new_form);
+                ReviveDynamicForm(new_form, baseForm, setFormID);
 
-                copyComponent<RE::TESIcon>(baseForm, new_form);
+                const auto new_formid = new_form->GetFormID();
 
-                copyComponent<RE::TESFullName>(baseForm, new_form);
-
-                copyComponent<RE::TESValueForm>(baseForm, new_form);
-
-                copyComponent<RE::TESWeightForm>(baseForm, new_form);
-
-                copyComponent<RE::BGSDestructibleObjectForm>(baseForm, new_form);
-
-                copyComponent<RE::TESEnchantableForm>(baseForm, new_form);
-
-                copyComponent<RE::BGSBlockBashData>(baseForm, new_form);
-
-                copyComponent<RE::BGSEquipType>(baseForm, new_form);
-
-                copyComponent<RE::TESAttackDamageForm>(baseForm, new_form);
-
-                copyComponent<RE::TESBipedModelForm>(baseForm, new_form);
-
-                logger::info("Created form with type: {}, Base ID: {:x}, Ref ID: {:x}, Name: {}",
+                logger::trace("Created form with type: {}, Base ID: {:x}, Ref ID: {:x}, Name: {}",
 
                              RE::FormTypeToString(new_form->GetFormType()), new_form->GetFormID(),
                              new_form->GetFormID(),
@@ -2775,6 +2774,7 @@ namespace Utilities{
                  m_Data[lhs] = rhs;
                  logger::info("Loaded data for formid {}, editorid {}, and refid {}", formid, editorid,refid);
              }
+             
              return true;
          }
      };

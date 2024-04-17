@@ -81,7 +81,7 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
         setListenMenu(true);
 	}
 
-    void HandleWO(RE::TESObjectREFR* ref) {
+    void HandleWO(RE::TESObjectREFR* ref) const {
         if (!world_objects_evolve) return;
         if (!ref) return;
         if (ref->IsDisabled() || ref->IsDeleted()) return;
@@ -389,7 +389,13 @@ public:
                             logger::warn("Picked up time: {}, calendar time: {}. Was it a book?", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
                         }
                         if (!ref_id) {
-                            logger::error("Could not find reference with RefID {}", picked_up_refid);
+                            logger::warn("Could not find reference with stored pickedup RefID {}", picked_up_refid);
+                            logger::trace("Registering it...");
+                            if (!M->RegisterAndGo(event->baseObj, event->itemCount, player_refid)) {
+#ifndef NDEBUG
+                                logger::warn("Failed to register item.");
+#endif  // !NDEBUG
+                            }
                             return RE::BSEventNotifyControl::kContinue;
                         }
                     }
@@ -649,6 +655,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         eventSourceHolder->AddEventSink<RE::TESSleepStopEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESWaitStopEvent>(eventSink);
         SKSE::GetCrosshairRefEventSource()->AddEventSink(eventSink);
+        RE::PlayerCharacter::GetSingleton()->AsBGSActorCellEventSource()->AddEventSink(eventSink);
         logger::info("Event sinks added.");
         eventSink->HandleWOsInCell();
     }

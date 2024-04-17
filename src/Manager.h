@@ -8,7 +8,6 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
     //const RefID chest_Refid = 0x0201824C;
 
     RE::TESObjectREFR* player_ref = RE::PlayerCharacter::GetSingleton()->As<RE::TESObjectREFR>();
-    RE::EffectSetting* empty_mgeff = nullptr;
 
     //std::map<RefID,std::set<FormID>> external_favs;
     std::map<FormFormID,std::pair<int,Count>> handle_crafting_instances; // real-stage:added-total before adding (both real)
@@ -140,7 +139,8 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
     [[nodiscard]] Source* _MakeSource(const FormID source_formid, Settings::DefaultSettings* settings) {
         if (!source_formid) return nullptr;
         if (source_formid>=0xFF000000) return nullptr;
-        Source new_source(source_formid, "", empty_mgeff, settings);
+        //Source new_source(source_formid, "", empty_mgeff, settings);
+        Source new_source(source_formid, "", settings);
         if (!new_source.IsHealthy()) return nullptr;
         sources.push_back(new_source);
         return &sources.back();
@@ -786,16 +786,6 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
     void Init() {
 
         bool init_failed = false;
-
-        empty_mgeff = RE::IFormFactory::GetConcreteFormFactoryByType<RE::EffectSetting>()->Create();
-        if (!empty_mgeff) {
-            logger::critical("Failed to create empty mgeff.");
-            init_failed = true;
-        } else {
-            empty_mgeff->magicItemDescription = std::string(" ");
-            empty_mgeff->data.flags.set(RE::EffectSetting::EffectSettingData::Flag::kNoDuration);
-        }
-
 
         po3_use_or_take = Utilities::IsPo3_UoTInstalled();
 
@@ -1492,7 +1482,7 @@ public:
         const auto player_inventory = player_ref->GetInventory();
         for (auto& src : sources) {
             if (src.data.empty()) {
-                logger::warn("HandleCraftingEnter: Source data is empty.");
+                logger::trace("HandleCraftingEnter: Source data is empty.");
                 continue;
             }
             if (!Utilities::Functions::Vector::HasElement<std::string>(q_form_types, src.qFormType)) {
@@ -1732,7 +1722,7 @@ public:
             return false;
         }
         if (sources.empty()) {
-            logger::warn("UpdateStages: Sources is empty.");
+            logger::trace("UpdateStages: Sources is empty.");
             setUpdateIsBusy(false);
             return false;
         }
@@ -1766,7 +1756,7 @@ public:
 			const auto& [formid, count, refid,r_time] = to_register_go.front();
             to_register_go.erase(to_register_go.begin());
             if (!RegisterAndGo(formid, count, refid, r_time)) {
-				logger::warn("UpdateStages: RegisterAndGo failed.");
+				logger::trace("UpdateStages: RegisterAndGo failed.");
 			}
         }
 
@@ -1850,6 +1840,37 @@ public:
         logger::info("--------Sending data---------");
         Print();
         Clear();
+
+        //auto objmngr = RE::BGSCreatedObjectManager::GetSingleton();
+        //for (auto& ptn : objmngr->potions) {
+        //    // logger::info("Potions: {}", ptn.first);
+        //    logger::info("mg item: {}", ptn.second.magicItem->GetName());
+        //    logger::info("recount: {}", ptn.second.refCount);
+        //}
+
+        //for (auto& ptn : objmngr->poisons) {
+        //    // logger::info("Poisons: {} {}", ptn.first);
+        //    logger::info("mg item: {}", ptn.second.magicItem->GetName());
+        //    logger::info("recount: {}", ptn.second.refCount);
+        //}
+
+        //auto& _set = objmngr->queuedDeletes;
+        //for (auto& ptn : _set) {
+        //    logger::info("QueuedDeletes: {}", ptn->GetName());
+        //}
+
+        //auto plyr = RE::PlayerCharacter::GetSingleton();
+        //auto act_eff_list = plyr->GetMiddleHighProcess()->activeEffects;
+        auto act_eff_list = RE::PlayerCharacter::GetSingleton()->AsMagicTarget()->GetActiveEffectList();
+        
+
+        for (auto it = act_eff_list->begin(); it != act_eff_list->end(); ++it) {
+			auto act_eff = *it;
+            logger::info("act eff name {}", act_eff->GetBaseObject()->GetName());
+            logger::info("act eff dur {}", act_eff->duration);
+            logger::info("act eff elapsedSeconds {}", act_eff->elapsedSeconds);
+		}
+
         int n_instances = 0;
         for (auto& src : sources) {
             for (auto& [loc, instances] : src.data) {
@@ -1886,7 +1907,7 @@ public:
         }
 
         if (!loc_ref->HasContainer() && !loc_ref->IsPlayerRef()) {
-            logger::trace("DOes not have container");
+            logger::trace("Does not have container");
             // remove the loc refid key from locs_to_be_handled map
             auto it = locs_to_be_handled.find(loc_refid);
             if (it != locs_to_be_handled.end()) {
@@ -2060,8 +2081,24 @@ public:
 
         // std::lock_guard<std::mutex> lock(mutex);
 
-        if (!empty_mgeff) return RaiseMngrErr("ReceiveData: Empty mgeff not there!");
-        if (m_Data.empty()) return RaiseMngrErr("ReceiveData: Empty m_Data!");
+        /*auto plyr = RE::PlayerCharacter::GetSingleton();
+        auto cstr = plyr->GetMagicCaster(RE::MagicSystem::CastingSource::kInstant);
+        auto mead = RE::TESForm::LookupByID<RE::MagicItem>(0x00034c5d);
+        cstr->CastSpellImmediate(mead, true, plyr, .1f, false, 0.f,nullptr);
+        auto act_eff_list = plyr->AsMagicTarget()->GetActiveEffectList();
+        for (auto it = act_eff_list->begin(); it != act_eff_list->end(); ++it) {
+            auto act_eff = *it;
+            logger::info("act eff name {}", act_eff->GetBaseObject()->GetName());
+            logger::info("act eff dur {}", act_eff->duration);
+            act_eff->elapsedSeconds = 15;
+            logger::info("act eff elapsedSeconds {}", act_eff->elapsedSeconds);
+        }*/
+
+        //if (!empty_mgeff) return RaiseMngrErr("ReceiveData: Empty mgeff not there!");
+        if (m_Data.empty()) {
+            logger::warn("ReceiveData: No data to receive.");
+            return;
+        }
 
         setListenContainerChange(false);
 
@@ -2108,6 +2145,23 @@ public:
             src.PrintData();
         }
     }
+
+   // const std::map<FormID, std::pair<StageNo,float>> GetActiveFakeStageEffElapseds() const {
+   //     const auto& allowed_qform_types = Settings::mgeffs_allowedQFORMS;
+   //     std::map<FormID, std::pair<StageNo,float>> active_fake_stage_eff_dur = {};
+   //     for (const auto& src : sources) {
+   //         if (!Utilities::Functions::Vector::HasElement(allowed_qform_types, src.qFormType)) continue;
+   //         if (src.fake_effects.empty()) continue;
+   //         const std::map<StageNo, std::vector<StageEffect>> def_effs = src.defaultsettings->effects;
+   //         for (const auto& [st_no, st_effects] : def_effs) {
+   //             for (const auto& st_eff:st_effects){
+   //                 if (!Utilities::Functions::Vector::HasElement(src.fake_effects,st_eff.beffect)) continue;
+   //                 active_fake_stage_eff_dur[st_eff.beffect] = {st_no, };
+   //                 
+   //             }
+			//}
+   //     }
+   // }
 
 #undef ENABLE_IF_NOT_UNINSTALLED
 };
