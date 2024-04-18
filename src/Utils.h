@@ -412,13 +412,12 @@ namespace Utilities{
 
         template <class T = RE::TESForm>
         static T* GetFormByID(const RE::FormID id, const std::string& editor_id="") {
-            T* form = RE::TESForm::LookupByID<T>(id);
-            if (form)
-                return form;
-            else if (!editor_id.empty()) {
-                form = RE::TESForm::LookupByEditorID<T>(editor_id);
+            if (!editor_id.empty()) {
+                auto* form = RE::TESForm::LookupByEditorID<T>(editor_id);
                 if (form) return form;
             }
+            T* form = RE::TESForm::LookupByID<T>(id);
+            if (form) return form;
             return nullptr;
         };
 
@@ -2367,13 +2366,13 @@ namespace Utilities{
         };
 
         struct StageUpdate {
-            Stage* oldstage=nullptr;
-            Stage* newstage=nullptr;
+            const Stage* oldstage;
+            const Stage* newstage;
             Count count=0;
             Duration update_time=0;
             bool new_is_fake=false;
 
-            StageUpdate(Stage* old, Stage* new_, Count c, 
+            StageUpdate(const Stage* old, const Stage* new_, Count c, 
                 Duration u_t,
                 bool fake)
 				: oldstage(old), newstage(new_), count(c), 

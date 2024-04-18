@@ -726,7 +726,7 @@ struct Source {
             auto& instances = data[reffid];
             for (auto& instance : instances) {
                 if (instance.xtra.is_decayed) continue;
-                Stage* old_stage = &stages.at(instance.no);
+                const Stage* old_stage = &GetStage(instance.no);
                 Stage* new_stage = nullptr;
                 if (_UpdateStageInstance(instance, curr_time)) {
                     if (instance.xtra.is_transforming){
@@ -738,12 +738,17 @@ struct Source {
 						}
                         new_stage = &transformed_stages[temp_formid];
                     }
-                    else if (instance.xtra.is_decayed || !stages.contains(instance.no)) {
+                    else if (instance.xtra.is_decayed || !IsStageNo(instance.no)) {
                         new_stage = &decayed_stage;
                     }
-                    else new_stage = &stages.at(instance.no);
                     auto is_fake__ = IsFakeStage(instance.no);
-                    updated_instances[reffid].emplace_back(old_stage, new_stage, instance.count, instance.start_time ,is_fake__);
+                    if (!new_stage) {
+                        updated_instances[reffid].emplace_back(old_stage, &GetStage(instance.no), instance.count,
+                                                               instance.start_time, is_fake__);
+                    }
+                    else {
+                        updated_instances[reffid].emplace_back(old_stage, new_stage, instance.count, instance.start_time ,is_fake__);
+                    }
                 }
             }
         }
@@ -759,7 +764,7 @@ struct Source {
         return false;
     }
 
-    const bool IsStageNo(const StageNo no) {
+    const bool IsStageNo(const StageNo no) const {
         if (stages.contains(no)) return true;
         if (fake_stages.contains(no)) return true;
         return false;
@@ -786,7 +791,7 @@ struct Source {
         if (stages.contains(no)) return stages.at(no);
         if (IsFakeStage(no)) {
             if (const auto stage_formid = FetchFake(no); stage_formid != 0) {
-                const auto& fake_stage = stages.at(stage_formid);
+                const auto& fake_stage = stages.at(no);
                 return fake_stage;
             } else {
                 logger::error("Stage {} formid is 0.", no);
@@ -808,7 +813,7 @@ struct Source {
         }
 
         const auto n = stage_instance.no;
-        if (!stages.count(n)) {
+        if (!IsStageNo(n)) {
             logger::error("Stage {} does not exist.", n);
             return false;
         }
@@ -820,7 +825,7 @@ struct Source {
 			logger::error("Location is 0.");
 			return false;
 		}*/
-        if (stage_instance.xtra.form_id != stages.at(n).formid) {
+        if (stage_instance.xtra.form_id != GetStage(n).formid) {
 			logger::error("Formid does not match the stage formid.");
 			return false;
 		}
@@ -832,7 +837,7 @@ struct Source {
 			logger::error("Decayed status is true.");
 			return false;
 		}
-        if (stage_instance.xtra.crafting_allowed != stages.at(n).crafting_allowed) {
+        if (stage_instance.xtra.crafting_allowed != GetStage(n).crafting_allowed) {
 			logger::error("Crafting allowed status does not match the stage crafting allowed status.");
 			return false;
 		}
@@ -858,14 +863,14 @@ struct Source {
             logger::critical("InitInsertInstance: Initialisation failed.");
             return false;
         }
-        if (!stages.count(n)) {
+        if (!IsStageNo(n)) {
 			logger::error("Stage {} does not exist.", n);
 			return false;
 		}
         StageInstance new_instance(t_0, n, c);
-        new_instance.xtra.form_id = stages.at(n).formid;
-        new_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages.at(n).GetBound());
-        new_instance.xtra.crafting_allowed = stages.at(n).crafting_allowed;
+        new_instance.xtra.form_id = GetStage(n).formid;
+        new_instance.xtra.editor_id = clib_util::editorID::get_editorID(GetStage(n).GetBound());
+        new_instance.xtra.crafting_allowed = GetStage(n).crafting_allowed;
         if (IsFakeStage(n)) new_instance.xtra.is_fake = true;
 
         return InsertNewInstance(new_instance,l);
@@ -1148,11 +1153,11 @@ struct Source {
             return 0;
         }
         if (st_inst->xtra.is_decayed) return 0;
-        if (!stages.contains(st_inst->no)) {
+        if (!IsStageNo(st_inst->no)) {
             logger::error("Stage {} does not exist.", st_inst->no);
             return 0;
         }
-        const auto stage_duration = stages.at(st_inst->no).duration;
+        const auto stage_duration = GetStage(st_inst->no).duration;
         return st_inst->GetHittingTime(stage_duration);
     }
 
@@ -1178,6 +1183,7 @@ struct Source {
         //logger::trace("Size before cleanup: {}", data.size());
         // if there are instances with same stage no and location, and start_time, merge them
         
+        logger::trace("Cleaning up data: Deleting locs with empty vector of instances.");
         for (auto it = data.begin(); it != data.end();) {
             if (it->second.empty()) {
                 logger::trace("Erasing key from data: {}", it->first);
@@ -1187,27 +1193,34 @@ struct Source {
             }
         }
 
+        
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+        logger::trace("Cleaning up data: Merging instances which are AlmostSameExceptCount.");
         for (auto& [_, instances] : data) {
             if (instances.empty()) continue;
-            for (auto it = instances.begin(); it != instances.end(); ++it) {
-                for (auto it2 = it; it2 != instances.end(); ++it2) {
-				    if (it == it2) continue;
-                    if (it2->count <= 0) continue;
-                    if (it->AlmostSameExceptCount(*it2, curr_time)) {
-                        logger::trace("Merging stage instances with count {} and {}", it->count, it2->count);
-					    it->count += it2->count;
-					    it2->count = 0;
-				    }
-			    }
-		    }
+            if (instances.size() > 1) {
+                for (auto it = instances.begin(); it+1 != instances.end(); ++it) {
+                    size_t ind = 1;
+                    for (auto it2 = it + ind; it2 != instances.end(); it2 = it + ind) {
+					    ++ind;
+				        if (it == it2) continue;
+                        if (it2->count <= 0) continue;
+                        if (it->AlmostSameExceptCount(*it2, curr_time)) {
+                            logger::trace("Merging stage instances with count {} and {}", it->count, it2->count);
+					        it->count += it2->count;
+					        it2->count = 0;
+				        }
+			        }
+		        }
+            }
 		    // erase instances with count <= 0
+            logger::trace("Cleaning up data: Erasing instances with count <= 0.");
             for (auto it = instances.begin(); it != instances.end();) {
 			    if (it->count <= 0) {
 				    logger::trace("Erasing stage instance with count {}", it->count);
                     it = instances.erase(it);
                 } 
-                else if (!stages.count(it->no) || it->xtra.is_decayed) {
+                else if (!IsStageNo(it->no) || it->xtra.is_decayed) {
 				    logger::trace("Erasing decayed stage instance with no {}", it->no);
                     it = instances.erase(it);
                 } else if (curr_time - GetDecayTime(*it) > Settings::nForgettingTime) {
@@ -1215,11 +1228,13 @@ struct Source {
 					it = instances.erase(it);
 				}
                 else {
+                    logger::trace("Not erasing stage instance with count {}", it->count);
 				    ++it;
 			    }
 		    }
         }
         
+        logger::trace("Cleaning up data: Deleting locs with empty vector of instances 2.");
         for (auto it = data.begin(); it != data.end();) {
             if (it->second.empty()) {
                 logger::trace("Erasing key from data: {} 2", it->first);
@@ -1235,6 +1250,7 @@ struct Source {
         }
 
         //logger::trace("Size after cleanup: {}", data.size());
+        logger::trace("Cleaning up data: Done.");
 	}
 
     void PrintData() {
@@ -1300,19 +1316,19 @@ private:
             return false;
         }
         if (st_inst.xtra.is_decayed) return false;  // decayed
-        else if (st_inst.xtra.is_transforming){
+        else if (st_inst.xtra.is_transforming) {
             logger::trace("Transforming stage found.");
             const auto transformer_form_id = st_inst.GetDelayerFormID();
             if (!defaultsettings->transformers.contains(transformer_form_id)) {
 				logger::error("Transformer Formid {} not found in default settings.", transformer_form_id);
                 st_inst.RemoveTransform(curr_time);
 			} else {
-                const auto transform_properties = defaultsettings->transformers[transformer_form_id];
+                const auto& transform_properties = defaultsettings->transformers[transformer_form_id];
                 const auto trnsfrm_duration = std::get<1>(transform_properties);
                 const auto trnsfrm_elapsed = st_inst.GetTransformElapsed(curr_time);
                 if (trnsfrm_elapsed >= trnsfrm_duration) {
-                    logger::trace("Transform duration exceeded.");
-                    const auto transformed_stage = transformed_stages[transformer_form_id];
+                    logger::trace("Transform duration {} h exceeded.", trnsfrm_duration);
+                    const auto& transformed_stage = transformed_stages[transformer_form_id];
                     st_inst.xtra.form_id = transformed_stage.formid;
                     st_inst.SetNewStart(curr_time, trnsfrm_elapsed - trnsfrm_duration);
                     return true;
@@ -1320,7 +1336,7 @@ private:
             }
 
         }
-        if (!stages.count(st_inst.no)) {
+        if (!IsStageNo(st_inst.no)) {
             logger::trace("Stage {} does not exist.", st_inst.no);
 			return false;
 		}
@@ -1331,29 +1347,30 @@ private:
         
         float diff = st_inst.GetElapsed(curr_time);
         bool updated = false;
-        logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,stages.at(st_inst.no).duration);
+        logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,
+                      GetStage(st_inst.no).duration);
         
         while (diff < 0) {
             if (st_inst.no > 0) {
-                if (!stages.count(st_inst.no - 1)) {
+                if (!IsStageNo(st_inst.no - 1)) {
                     logger::critical("Stage {} does not exist.", st_inst.no - 1);
                     return false;
 			    }
                 st_inst.no--;
                 logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no - 1);
-			    diff += stages.at(st_inst.no).duration;
+                diff += GetStage(st_inst.no).duration;
                 updated = true;
             } else {
                 diff = 0;
                 break;
             }
         }
-        while (diff > stages.at(st_inst.no).duration) {
+        while (diff > GetStage(st_inst.no).duration) {
             logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no + 1);
-            diff -= stages.at(st_inst.no).duration;
+            diff -= GetStage(st_inst.no).duration;
 			st_inst.no++;
             updated = true;
-            if (!stages.count(st_inst.no)) {
+            if (!IsStageNo(st_inst.no)) {
 			    logger::trace("Decayed");
                 st_inst.xtra.is_decayed= true;
                 st_inst.xtra.form_id = decayed_stage.formid;
@@ -1371,10 +1388,10 @@ private:
                 st_inst.xtra.crafting_allowed = false;
             } 
             else {
-                st_inst.xtra.form_id = stages.at(st_inst.no).formid;
-                st_inst.xtra.editor_id = clib_util::editorID::get_editorID(stages.at(st_inst.no).GetBound());
+                st_inst.xtra.form_id = GetStage(st_inst.no).formid;
+                st_inst.xtra.editor_id = clib_util::editorID::get_editorID(GetStage(st_inst.no).GetBound());
                 st_inst.xtra.is_fake = IsFakeStage(st_inst.no);
-                st_inst.xtra.crafting_allowed = stages.at(st_inst.no).crafting_allowed;
+                st_inst.xtra.crafting_allowed = GetStage(st_inst.no).crafting_allowed;
             }
             // as long as the delay start was before the ueberschreitung time this will work,
             // the delay start cant be strictly after the ueberschreitung time bcs we call update when a new delay
@@ -1557,7 +1574,7 @@ private:
             return false;
         }
 
-        std::vector<StageNo> st_numbers_check;
+        std::set<StageNo> st_numbers_check;
         for (auto& [st_no,stage_tmp]: stages) {
             
             if (!stage_tmp.CheckIntegrity()) {
@@ -1572,22 +1589,30 @@ private:
 				return false;
 			}
 
-            st_numbers_check.push_back(st_no);
+            st_numbers_check.insert(st_no);
         }
         for (auto st_no : fake_stages) {
-            st_numbers_check.push_back(st_no);
+            st_numbers_check.insert(st_no);
         }
 
-        if (st_numbers_check.empty()) return false;
+        if (st_numbers_check.empty()) {
+            logger::error("No stages found.");
+            return false;
+        }
             
         // stages must have keys [0,...,n-1]
-        std::sort(st_numbers_check.begin(), st_numbers_check.end());
-        if (st_numbers_check[0] != 0) {
+        const auto st_numbers_check_vector = std::vector<StageNo>(st_numbers_check.begin(), st_numbers_check.end());
+        //std::sort(st_numbers_check_vector.begin(), st_numbers_check_vector.end());
+        if (st_numbers_check_vector[0] != 0) {
 			logger::error("Stage 0 does not exist.");
 			return false;
 		}
-        for (size_t i = 1; i < st_numbers_check.size(); i++) {
-            if (st_numbers_check[i] != st_numbers_check[i - 1] + 1) {
+        for (size_t i = 1; i < st_numbers_check_vector.size(); i++) {
+            if (st_numbers_check_vector[i] != st_numbers_check_vector[i - 1] + 1) {
+                logger::error("Stages are not incremented by 1:");
+                for (auto st_no : st_numbers_check_vector) {
+					logger::error("Stage {}", st_no);
+				}
                 return false;
             }
         }
@@ -1595,19 +1620,19 @@ private:
         return true;
 	}
 
-    const float GetDecayTime(const StageInstance& st_inst) const {
+    const float GetDecayTime(const StageInstance& st_inst) {
 
         const auto slope = st_inst.GetDelaySlope();
         if (slope <= 0) return -1;
         StageNo curr_stageno = st_inst.no;
-        if (!stages.contains(curr_stageno)) {
+        if (!IsStageNo(curr_stageno)) {
             logger::error("Stage {} does not exist.", curr_stageno);
             return true;
         }
-        const auto last_stage_no = stages.rbegin()->first;
+        const auto last_stage_no = GetLastStageNo();
         float total_duration = 0;
         while (curr_stageno <= last_stage_no) {
-            total_duration += stages.at(curr_stageno).duration;
+            total_duration += GetStage(curr_stageno).duration;
             curr_stageno+=1;
 		}
         return st_inst.GetHittingTime(total_duration);
@@ -1665,7 +1690,11 @@ private:
     template <typename T>
     const FormID FetchFake(const StageNo st_no) {
 
-        const FormID new_formid = DFT->Create<T>(Utilities::FunctionsSkyrim::GetFormByID<T>(0, editorid),0);
+        if (editorid.empty()) {
+			logger::error("Editorid is empty.");
+			return 0;
+		}
+        const FormID new_formid = DFT->Create<T>(0, editorid, 0);
 
         if (const auto stage_form = Utilities::FunctionsSkyrim::GetFormByID<T>(new_formid)) {
             RegisterStage(new_formid, st_no);
@@ -1728,21 +1757,28 @@ private:
         FormID new_formid = 0;
 
         switch (formtype) {
-            case RE::FormType::AlchemyItem:
-                new_formid = FetchFake<RE::AlchemyItem>(st_no);
             case RE::FormType::Armor:
                 new_formid = FetchFake<RE::TESObjectARMO>(st_no);
+                break;
+            case RE::FormType::AlchemyItem:
+                new_formid = FetchFake<RE::AlchemyItem>(st_no);
+                break;
             case RE::FormType::Book:
                 new_formid = FetchFake<RE::TESObjectBOOK>(st_no);
+                break;
             case RE::FormType::Ingredient:
                 new_formid = FetchFake<RE::IngredientItem>(st_no);
+                break;
             case RE::FormType::Misc:
                 new_formid = FetchFake<RE::TESObjectMISC>(st_no);
+                break;
             case RE::FormType::Weapon:
                 new_formid = FetchFake<RE::TESObjectWEAP>(st_no);
+                break;
             default:
                 logger::error("Form type not found.");
                 new_formid = 0;
+                break;
         }
 
         if (!new_formid) {
@@ -1751,5 +1787,23 @@ private:
         }
 
         return new_formid;
+    }
+
+    const StageNo GetLastStageNo() {
+        std::set<StageNo> stage_numbers;
+        for (const auto& [key, value] : stages) {
+			stage_numbers.insert(key);
+		}
+        for (const auto& stage_no : fake_stages) {
+            stage_numbers.insert(stage_no);
+        }
+        if (stage_numbers.empty()) {
+            logger::error("No stages found.");
+            InitFailed();
+			return 0;
+        }
+        // return maximum of the set
+        return *stage_numbers.rbegin();
+
     }
 };

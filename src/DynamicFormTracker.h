@@ -4,6 +4,8 @@ class DynamicFormTracker {
     
     std::map<std::pair<FormID, std::string>, std::set<FormID>> forms;
 
+    std::mutex mutex;
+
 
 public:
     static DynamicFormTracker* GetSingleton() {
@@ -12,11 +14,15 @@ public:
     }
 
     template <typename T>
-    const RE::FormID Create(T* baseForm, const RE::FormID setFormID = 0) {
-        logger::trace("CreateFakeContainer");
+    const RE::FormID Create(const FormID baseFormID,const std::string baseEditorID, const RE::FormID setFormID = 0) {
+
+        //std::lock_guard<std::mutex> lock(mutex);
+        logger::trace("Creating dynamic form for baseFormID: {:x}, baseEditorID: {}", baseFormID, baseEditorID);
+
+        T* baseForm = Utilities::FunctionsSkyrim::GetFormByID<T>(baseFormID, baseEditorID);
 
         if (!baseForm) {
-            logger::error("Real form is null.");
+            logger::error("Real form is null for baseFormID {} and baseEditorID {}", baseFormID, baseEditorID);
             return 0;
         }
 

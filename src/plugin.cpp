@@ -26,6 +26,7 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
     RE::UI* ui = RE::UI::GetSingleton();
 
     bool listen_menu = true;
+    bool listen_cellchange = true;
 
     FormID consume_equipped_id;  // set in equip event only when equipped and used in container event (consume)
     float consume_equipped_t;
@@ -43,6 +44,16 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
     void setListenMenu(bool val) { 
         std::lock_guard<std::mutex> lock(mutex);
         listen_menu = val; 
+    }
+
+    void setListenCellChange(bool val) { 
+		std::lock_guard<std::mutex> lock(mutex);
+		listen_cellchange = val; 
+	}
+
+    [[nodiscard]] bool getListenCellChange() {
+        std::lock_guard<std::mutex> lock(mutex);
+        return listen_cellchange;
     }
 
     [[nodiscard]] bool getListenMenu() { 
@@ -592,6 +603,7 @@ public:
 
     // https:  // github.com/SeaSparrowOG/RainExtinguishesFires/blob/c1aee0045aeb987b2f70e495b301c3ae8bd7b3a3/src/loadEventManager.cpp#L15
     RE::BSEventNotifyControl ProcessEvent(const RE::BGSActorCellEvent* a_event, RE::BSTEventSource<RE::BGSActorCellEvent>*) {
+        if (!getListenCellChange()) return RE::BSEventNotifyControl::kContinue;
         if (!a_event) return RE::BSEventNotifyControl::kContinue;
         auto eventActorHandle = a_event->actor;
         auto eventActorPtr = eventActorHandle ? eventActorHandle.get() : nullptr;
@@ -607,8 +619,10 @@ public:
 
         if (a_event->flags.any(RE::BGSActorCellEvent::CellFlag::kEnter)) {
             logger::trace("Player entered cell: {}", cell->GetName());
+            setListenCellChange(false);
             M->ClearWOUpdateQueue();
             HandleWOsInCell();
+            setListenCellChange(true);
         }
 
         return RE::BSEventNotifyControl::kContinue;

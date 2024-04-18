@@ -135,7 +135,15 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         return &sources.back();
     }
 
+    void CleanUpSourceData(Source* src){
+        if (!src) return;
+        setListenWOUpdate(false);
+        src->CleanUpData();
+        setListenWOUpdate(true);
+    }
+
     [[nodiscard]] Source* GetSource(const FormID some_formid) {
+        std::lock_guard<std::mutex> lock(mutex);
         if (!some_formid) return nullptr;
         const auto some_form = Utilities::FunctionsSkyrim::GetFormByID(some_formid);
         if (!some_form) {
@@ -873,17 +881,17 @@ public:
     }
 
     [[nodiscard]] const bool getListenContainerChange() {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        std::lock_guard<std::mutex> lock(mutex);
         return listen_container_change;
     }
 
     [[nodiscard]] const bool getPO3UoTInstalled() {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        std::lock_guard<std::mutex> lock(mutex);
         return po3_use_or_take;
     }
 
     [[nodiscard]] const bool getUninstalled() {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        std::lock_guard<std::mutex> lock(mutex);
         return isUninstalled;
     }
 
@@ -911,6 +919,7 @@ public:
     // giris noktasi
     [[nodiscard]] const bool RegisterAndGo(const FormID some_formid, const Count count, const RefID location_refid,
                                 Duration register_time = 0) {
+
         if (!some_formid) {
             logger::warn("Formid is null.");
             return false;
@@ -1084,7 +1093,7 @@ public:
             return;
         }
         
-        source->CleanUpData(); // to ausschliessen decayed items
+        CleanUpSourceData(source); // to ausschliessen decayed items
         //source->PrintData();
         // print radius just for testing
         logger::trace("Radius: {}", Utilities::FunctionsSkyrim::WorldObject::GetDistanceFromPlayer(dropped_stage_ref));
@@ -1286,7 +1295,7 @@ public:
 
         UpdateStages(player_ref);
 
-        if (!source->data.empty()) source->CleanUpData();
+        if (!source->data.empty()) CleanUpSourceData(source);
         //source->PrintData();
         //mutex.unlock();
     }
@@ -1328,7 +1337,7 @@ public:
         ApplyEvolutionInInventory(source->qFormType, npc_ref, count, pickedup_formid, instance_formid);
         if (eat && npc_refid == player_refid) RE::ActorEquipManager::GetSingleton()->EquipObject(RE::PlayerCharacter::GetSingleton(), 
             instance_bound,nullptr, count);
-        else source->CleanUpData();
+        else CleanUpSourceData(source);
 
         UpdateStages(npc_ref);
 
@@ -1409,7 +1418,7 @@ public:
 
         UpdateStages(player_ref);
 
-        if (!source->data.empty()) source->CleanUpData();
+        if (!source->data.empty()) CleanUpSourceData(source);
         logger::trace("HandleConsume: updated.");
 
     }
@@ -1623,7 +1632,7 @@ public:
                 logger::warn("LinkExternalContainer: Rest count: {}", rest_);
                 if (!RegisterAndGo(some_formid, rest_, externalcontainer)) logger::warn("LinkExternalContainer: RegisterAndGo failed.");
             }
-            source->CleanUpData();
+            CleanUpSourceData(source);
         } else if (!RegisterAndGo(some_formid, item_count, externalcontainer)) {
 #ifndef NDEBUG
             logger::warn("LinkExternalContainer: RegisterAndGo failed.");
@@ -1665,7 +1674,7 @@ public:
                 if (!RegisterAndGo(some_formid, rest_, player_refid))
                     logger::warn("UnLinkExternalContainer: RegisterAndGo failed.");
             }
-            source->CleanUpData();
+            CleanUpSourceData(source);
         } else if (!RegisterAndGo(some_formid, count, player_refid)) {
             logger::warn("UnLinkExternalContainer: RegisterAndGo failed.");
         }
@@ -1740,7 +1749,7 @@ public:
 
         for (auto& src : sources) {
             if (src.data.empty()) continue;
-            src.CleanUpData();
+            CleanUpSourceData(&src);
 		}
 
 #ifndef NDEBUG
@@ -1844,6 +1853,7 @@ public:
 
         for (auto it = act_eff_list->begin(); it != act_eff_list->end(); ++it) {
 			auto act_eff = *it;
+            logger::info("act eff spell {}", act_eff->spell->GetName());
             logger::info("act eff name {}", act_eff->GetBaseObject()->GetName());
             logger::info("act eff dur {}", act_eff->duration);
             logger::info("act eff elapsedSeconds {}", act_eff->elapsedSeconds);
