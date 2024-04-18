@@ -626,6 +626,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
             Utilities::MsgBoxesNotifs::Windows::Po3ErrMsg();
             return;
         }
+        DFT = DynamicFormTracker::GetSingleton();
         Settings::LoadSettings();
         auto sources = std::vector<Source>();
         M = Manager::GetSingleton(sources);

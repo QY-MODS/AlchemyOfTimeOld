@@ -1,9 +1,8 @@
 #pragma once
 #include "SimpleIni.h"
-#include "Utils.h"
+#include "DynamicFormTracker.h"
 
 using namespace Utilities::Types;
-using namespace Utilities::FunctionsSkyrim::DynamicForm;
 
 namespace Settings
 {
@@ -584,21 +583,15 @@ namespace Settings
 }
 
 struct Source {
-    
-    FormID formid=0;
-    std::string editorid="";
-    StageDict stages;
-    SourceData data; // change this to a map with refid as key and vector of instances as value
-    Settings::DefaultSettings* defaultsettings = nullptr; // eigentlich sollte settings heissen
 
-    RE::FormType formtype;
+    SourceData data;  // change this to a map with refid as key and vector of instances as value
+
+    FormID formid = 0;
+    std::string editorid = "";
+    Settings::DefaultSettings* defaultsettings = nullptr;  // eigentlich sollte settings heissen
     std::string qFormType;
-    std::vector<StageNo> fake_stages = {};
-    Stage decayed_stage;
-    std::map<FormID,Stage> transformed_stages;
 
-    std::vector<StageInstance*> queued_time_modulator_updates;
-
+    
     Source(const FormID id, const std::string id_str, 
         //RE::EffectSetting* e_m, 
         Settings::DefaultSettings* sttngs=nullptr)
@@ -648,59 +641,32 @@ struct Source {
 
         formtype = form->GetFormType();
 
-        //make sure the keys in stages are 0 to length-1 with increment 1
-        if (stages.size() == 0) {
-            // get stages
+        if (stages.size() > 0) {
+            logger::error("Stages shouldnt be already populated.");
+            InitFailed();
+            return;
+        }
+        // get stages
             
-            // POPULATE THIS
-            if (qFormType == "FOOD") {
-                if (formtype == RE::FormType::AlchemyItem) GatherStages<RE::AlchemyItem>();
-			    else if (formtype == RE::FormType::Ingredient) GatherStages<RE::IngredientItem>();
-            }
-            else if (qFormType == "INGR") GatherStages<RE::IngredientItem>();
-            else if (qFormType == "MEDC") GatherStages<RE::AlchemyItem>();
-			else if (qFormType == "POSN") GatherStages<RE::AlchemyItem>();
-			else if (qFormType == "ARMO") GatherStages<RE::TESObjectARMO>();
-			else if (qFormType == "WEAP") GatherStages<RE::TESObjectWEAP>();
-			else if (qFormType == "SCRL") GatherStages<RE::ScrollItem>();
-			else if (qFormType == "BOOK") GatherStages<RE::TESObjectBOOK>();
-			else if (qFormType == "SLGM") GatherStages<RE::TESSoulGem>();
-			else if (qFormType == "MISC") GatherStages<RE::TESObjectMISC>();
-			else {
-				logger::error("QFormType is not one of the predefined types.");
-				InitFailed();
-				return;
-			}
+        // POPULATE THIS
+        if (qFormType == "FOOD") {
+            if (formtype == RE::FormType::AlchemyItem) GatherStages<RE::AlchemyItem>();
+			else if (formtype == RE::FormType::Ingredient) GatherStages<RE::IngredientItem>();
         }
-        else {
-            // check if formids exist in the game
-            for (auto& [key, value] : stages) {
-                if (!Utilities::FunctionsSkyrim::GetFormByID(value.formid, "")) {
-                    if (!Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType)) {
-                        logger::warn("Formid {} for stage {} does not exist and fakes not allowed for {}", value.formid,
-                                     key, qFormType);
-                        InitFailed();
-                        return;
-                    }
-                    // make one and replace formid
-					logger::warn("Formid {} for stage {} does not exist.", value.formid, key);
-                    if (formtype == RE::FormType::AlchemyItem) value.formid = CreateFake<RE::AlchemyItem>(form->As<RE::AlchemyItem>());
-                    else if (formtype == RE::FormType::Ingredient) value.formid = CreateFake<RE::IngredientItem>(form->As<RE::IngredientItem>());
-                    //else if (formtype == RE::FormType::magi) value.formid = CreateFake<RE::MagicItem>(form->As<RE::MagicItem>());
-					else {
-                        logger::error("Formtype is not one of the predefined types.");
-						InitFailed();
-						return;
-					}
-                    if (!value.formid) {
-                        logger::error("Formid could not be created.");
-                        InitFailed();
-                        return;
-                    }
-                    fake_stages.push_back(key);
-				}
-			}
-        }
+        else if (qFormType == "INGR") GatherStages<RE::IngredientItem>();
+        else if (qFormType == "MEDC") GatherStages<RE::AlchemyItem>();
+		else if (qFormType == "POSN") GatherStages<RE::AlchemyItem>();
+		else if (qFormType == "ARMO") GatherStages<RE::TESObjectARMO>();
+		else if (qFormType == "WEAP") GatherStages<RE::TESObjectWEAP>();
+		else if (qFormType == "SCRL") GatherStages<RE::ScrollItem>();
+		else if (qFormType == "BOOK") GatherStages<RE::TESObjectBOOK>();
+		else if (qFormType == "SLGM") GatherStages<RE::TESSoulGem>();
+		else if (qFormType == "MISC") GatherStages<RE::TESObjectMISC>();
+		else {
+			logger::error("QFormType is not one of the predefined types.");
+			InitFailed();
+			return;
+		}
 
         // decayed stage
         decayed_stage = GetFinalStage();
@@ -785,19 +751,53 @@ struct Source {
         return updated_instances;
     }
 
-    [[nodiscard]] const bool IsFakeStage(const StageNo no) const {
-        return Utilities::Functions::Vector::HasElement<StageNo>(fake_stages, no);
+    // daha once yaratilmis bi stage olmasi gerekiyo
+    const bool IsStage(const FormID some_formid) {
+        for (const auto& [_, stage] : stages) {
+            if (stage.formid == some_formid) return true;
+        }
+        return false;
     }
 
-    [[nodiscard]] const StageNo* GetStageNo(const FormID formid_) {
-        if (init_failed) {
-            logger::critical("GetStageNo: Initialisation failed.");
-            return nullptr;
-        }
+    const bool IsStageNo(const StageNo no) {
+        if (stages.contains(no)) return true;
+        if (fake_stages.contains(no)) return true;
+        return false;
+	}
+
+    [[nodiscard]] const bool IsFakeStage(const StageNo no) const {
+        auto it = fake_stages.find(no);
+        return it != fake_stages.end();
+    }
+
+    // assumes that the formid exists as a stage!
+    [[nodiscard]] const StageNo GetStageNo(const FormID formid_) {
         for (auto& [key, value] : stages) {
-            if (value.formid == formid_) return &key;
+            if (value.formid == formid_) return key;
         }
-        return nullptr;
+        return 0;
+    }
+
+    const Stage& GetStage(const StageNo no) {
+        if (!IsStageNo(no)) {
+            logger::error("Stage {} not found.", no);
+            return {};
+		}
+        if (stages.contains(no)) return stages.at(no);
+        if (IsFakeStage(no)) {
+            if (const auto stage_formid = FetchFake(no); stage_formid != 0) {
+                const auto& fake_stage = stages.at(stage_formid);
+                return fake_stage;
+            } else {
+                logger::error("Stage {} formid is 0.", no);
+                return {};
+            }
+
+        }
+        else {
+            logger::error("Stage {} not found.", no);
+            return {};
+        }
     }
 
     [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance, const RefID loc) { 
@@ -1283,8 +1283,15 @@ struct Source {
 
 private:
 
+    RE::FormType formtype;
+    std::set<StageNo> fake_stages;
+    Stage decayed_stage;
+    std::map<FormID, Stage> transformed_stages;
+
+    std::vector<StageInstance*> queued_time_modulator_updates;
     bool init_failed = false;
-    
+
+    StageDict stages;
 
     // counta karismiyor
     [[nodiscard]] const bool _UpdateStageInstance(StageInstance& st_inst, const float curr_time) {
@@ -1411,84 +1418,29 @@ private:
             return;
         }*/
 
-        for (auto i = 0; i < defaultsettings->numbers.size(); i++) {
-            // create fake form
-            auto source_item = GetBoundObject()->As<T>();
-            FormID stage_formid; // not really always fake?
-            if (!defaultsettings->items[i]) {
-                if (i==0) stage_formid = formid;
-                else if (Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType))
+        for (StageNo stage_no: defaultsettings->numbers) {
+            const auto stage_formid = defaultsettings->items[stage_no];
+            if (!stage_formid && stage_no != 0) {
+                if (Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType))
                 {
-                    logger::info("No ID given. creating copy item for this type {}", qFormType);
-                    stage_formid = CreateFake(source_item);
-                    fake_stages.push_back(defaultsettings->numbers[i]);
+                    fake_stages.insert(stage_no);
+                    continue;
                 }
                 else {
                     logger::critical("No ID given and copy items not allowed for this type {}", qFormType);
 					return;
                 }
-            } 
-            else {
-                auto temp_form = Utilities::FunctionsSkyrim::GetFormByID<T>(defaultsettings->items[i], "");
-                stage_formid = temp_form ? temp_form->GetFormID() : 0;
-            }
-            if (!stage_formid) {
-                logger::error("Could not create copy form for stage {}", i);
-                return;
-            }
-            // or if this stage_formid is already in the stages return error
-            for (auto& [key, value] : stages) {
-                if (stage_formid == value.formid) {
-                    logger::error("stage_formid is already in the stages.");
-                    return;
-                }
-            }
-            if (stage_formid == formid && i!=0) {
-                // not allowed. if you want to go back to beginning use decayed stage
-                logger::error("Formid of non initial stage is equal to source formid.");
-                /*stage_formid = CreateFake(source_item);
-                fake_stages.push_back(defaultsettings->numbers[i]);*/
-            }
-            const auto duration = defaultsettings->durations[i];
-            const StageName& name = defaultsettings->stage_names[i];
-
-            Stage stage(stage_formid, duration, i, name, defaultsettings->crafting_allowed[i],
-                        defaultsettings->effects[i]);
-            if (!stages.insert({i, stage}).second) {
-                logger::error("Could not insert stage");
-                return;
             }
 
-            auto stage_form = Utilities::FunctionsSkyrim::GetFormByID<T>(stage_formid);
-            if (!stage_form) {
-                logger::error("Fake form is null.");
-                return;
-            }
-            if (Utilities::Functions::Vector::HasElement<StageNo>(fake_stages, i)) {
-                // Update name of the fake form
-                if (!name.empty()) {
-                    stage_form->fullName = std::string(stage_form->fullName.c_str()) + " (" + name + ")";
-                    logger::info("Updated name of fake form to {}", name);
-                }
-                // Update value of the fake form
-                const auto temp_value = defaultsettings->costoverrides[i];
-                if (temp_value >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(stage_form, temp_value);
-                // Update weight of the fake form
-                const auto temp_weight = defaultsettings->weightoverrides[i];
-                if (temp_weight >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetWeight(stage_form, temp_weight);
-            }
-
-            if (defaultsettings->effects[i].empty()) continue;
-
-            // change mgeff of fake form
-
-            if (!Utilities::Functions::Vector::HasElement<std::string>(Settings::mgeffs_allowedQFORMS, qFormType)) {
-                logger::trace("MGEFF not available for this form type {}", qFormType);
-                return;
-            }
-
-            ApplyMGEFFSettings(stage_form, defaultsettings->effects[i]);
-
+            if (stage_no == 0) RegisterStage(formid, stage_no);
+			else {
+                const auto stage_form = Utilities::FunctionsSkyrim::GetFormByID(stage_formid, "");
+				if (!stage_form) {
+                    logger::error("Stage form {} not found.", stage_formid);
+					continue;
+				}
+                RegisterStage(stage_formid, stage_no);
+			}
         }
     }
     
@@ -1590,43 +1542,56 @@ private:
 			return false;
 		}
 
+        if (formid == 0 || stages.empty() || qFormType.empty()) {
+			logger::error("One of the members is empty.");
+			return false;
+		}
+
         if (!GetBoundObject()) {
 			logger::error("Formid {} does not exist.", formid);
 			return false;
 		}
 
-        if (formid == 0 || stages.empty() || qFormType.empty()) {
-			logger::error("One of the members is empty.");
-			return false;
-		}
-        // stages must have keys [0,...,n-1]
-        for (auto i = 0; i < stages.size(); i++) {
-            if (!stages.count(i)) {
-                logger::error("Key {} not found in stages.", i);
-                return false;
-            }
-            // ayni formid olmicak
-            /*if (stages[i].formid == formid) {
-                logger::error("Formid {} is the same as the source formid.", formid);
-				return false;
-            }*/
-            if (!stages.at(i).CheckIntegrity()) {
-                logger::error("Stage {} integrity check failed. FormID", i, stages.at(i).formid);
-				return false;
-			}
-            // also need to check if qformtype is the same as source's qformtype
-            const auto stage_formid = stages.at(i).formid;
-            const auto stage_qformtype = Settings::GetQFormType(stage_formid);
-            if (stage_qformtype != qFormType) {
-				logger::error("Stage {} qformtype is not the same as the source qformtype.", i);
-				return false;
-			}
-        }
-
 		if (!defaultsettings->CheckIntegrity()) {
             logger::error("Default settings integrity check failed.");
             return false;
         }
+
+        std::vector<StageNo> st_numbers_check;
+        for (auto& [st_no,stage_tmp]: stages) {
+            
+            if (!stage_tmp.CheckIntegrity()) {
+                logger::error("Stage no {} integrity check failed. FormID {}", st_no, stage_tmp.formid);
+				return false;
+			}
+            // also need to check if qformtype is the same as source's qformtype
+            const auto stage_formid = stage_tmp.formid;
+            const auto stage_qformtype = Settings::GetQFormType(stage_formid);
+            if (stage_qformtype != qFormType) {
+                logger::error("Stage {} qformtype is not the same as the source qformtype.", st_no);
+				return false;
+			}
+
+            st_numbers_check.push_back(st_no);
+        }
+        for (auto st_no : fake_stages) {
+            st_numbers_check.push_back(st_no);
+        }
+
+        if (st_numbers_check.empty()) return false;
+            
+        // stages must have keys [0,...,n-1]
+        std::sort(st_numbers_check.begin(), st_numbers_check.end());
+        if (st_numbers_check[0] != 0) {
+			logger::error("Stage 0 does not exist.");
+			return false;
+		}
+        for (size_t i = 1; i < st_numbers_check.size(); i++) {
+            if (st_numbers_check[i] != st_numbers_check[i - 1] + 1) {
+                return false;
+            }
+        }
+
         return true;
 	}
 
@@ -1654,5 +1619,137 @@ private:
         logger::error("Initialisation failed.");
         Reset();
         init_failed = true;
+    }
+
+    void RegisterStage(const FormID stage_formid,const StageNo stage_no){
+        if (!Utilities::Functions::Vector::HasElement<StageNo>(defaultsettings->numbers,stage_no)) {
+			logger::error("Stage {} not found in default settings.", stage_no);
+			return;
+		}
+        for (auto& [key, value] : stages) {
+            if (stage_formid == value.formid) {
+                logger::error("stage_formid is already in the stages.");
+                return;
+            }
+        }
+        if (stage_formid == formid && stage_no != 0) {
+            // not allowed. if you want to go back to beginning use decayed stage
+            logger::error("Formid of non initial stage is equal to source formid.");
+            return;
+        }
+
+        if (!stage_formid) {
+            logger::error("Could not create copy form for stage {}", stage_no);
+            return;
+        }
+
+        auto stage_form = Utilities::FunctionsSkyrim::GetFormByID(stage_formid);
+        if (!stage_form) {
+            logger::error("Could not create copy form for stage {}", stage_no);
+            return;
+        }
+
+        const auto duration = defaultsettings->durations[stage_no];
+        const StageName& name = defaultsettings->stage_names[stage_no];
+
+        // create stage
+        Stage stage(stage_formid, duration, stage_no, name, defaultsettings->crafting_allowed[stage_no],
+                    defaultsettings->effects[stage_no]);
+        if (!stages.insert({stage_no, stage}).second) {
+            logger::error("Could not insert stage");
+            return;
+        }
+    
+    }
+
+    template <typename T>
+    const FormID FetchFake(const StageNo st_no) {
+
+        const FormID new_formid = DFT->Create<T>(Utilities::FunctionsSkyrim::GetFormByID<T>(0, editorid),0);
+
+        if (const auto stage_form = Utilities::FunctionsSkyrim::GetFormByID<T>(new_formid)) {
+            RegisterStage(new_formid, st_no);
+            if (auto it = stages.find(st_no); it == stages.end()) {
+                logger::error("Stage {} not found in stages.", st_no);
+                DFT->Delete({formid,editorid},new_formid);
+                return 0;
+            }
+
+            // Update name of the fake form
+            if (!stages.contains(st_no)) {
+				logger::error("Stage {} does not exist.", st_no);
+				DFT->Delete({formid,editorid},new_formid);
+				return 0;
+			}
+            const auto& name = stages.at(st_no).name;
+            if (!name.empty()) {
+                stage_form->fullName = std::string(stage_form->fullName.c_str()) + " (" + name + ")";
+                logger::info("Updated name of fake form to {}", name);
+            }
+
+            // Update value of the fake form
+            const auto temp_value = defaultsettings->costoverrides[st_no];
+            if (temp_value >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(stage_form, temp_value);
+            // Update weight of the fake form
+            const auto temp_weight = defaultsettings->weightoverrides[st_no];
+            if (temp_weight >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetWeight(stage_form, temp_weight);
+
+            if (!defaultsettings->effects[st_no].empty() &&
+                Utilities::Functions::Vector::HasElement<std::string>(Settings::mgeffs_allowedQFORMS, qFormType)) {
+                // change mgeff of fake form
+                ApplyMGEFFSettings(stage_form, defaultsettings->effects[st_no]);
+            }
+
+        } else {
+			logger::error("Could not create copy form for source {}", editorid);
+            DFT->Delete({formid,editorid},new_formid);
+			return 0;
+		}
+     
+        return new_formid;
+
+	}
+
+    // also registers to stages
+    const FormID FetchFake(const StageNo st_no) {
+        if (!GetBoundObject()) {
+            logger::error("Could not get bound object", formid);
+            return 0;
+        }
+        if (editorid.empty()) {
+            logger::error("Editorid is empty.");
+            return 0;
+        }
+        if (!Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType)) {
+            logger::error("Fake not allowed for this form type {}", qFormType);
+            return 0;
+        }
+
+        FormID new_formid = 0;
+
+        switch (formtype) {
+            case RE::FormType::AlchemyItem:
+                new_formid = FetchFake<RE::AlchemyItem>(st_no);
+            case RE::FormType::Armor:
+                new_formid = FetchFake<RE::TESObjectARMO>(st_no);
+            case RE::FormType::Book:
+                new_formid = FetchFake<RE::TESObjectBOOK>(st_no);
+            case RE::FormType::Ingredient:
+                new_formid = FetchFake<RE::IngredientItem>(st_no);
+            case RE::FormType::Misc:
+                new_formid = FetchFake<RE::TESObjectMISC>(st_no);
+            case RE::FormType::Weapon:
+                new_formid = FetchFake<RE::TESObjectWEAP>(st_no);
+            default:
+                logger::error("Form type not found.");
+                new_formid = 0;
+        }
+
+        if (!new_formid) {
+            logger::error("Could not create copy form for source {}", editorid);
+            return 0;
+        }
+
+        return new_formid;
     }
 };
