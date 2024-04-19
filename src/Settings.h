@@ -9,8 +9,9 @@ namespace Settings
 
     bool failed_to_load = false;
 
-    constexpr std::uint32_t kSerializationVersion = 626;
+    constexpr std::uint32_t kSerializationVersion = 627;
     constexpr std::uint32_t kDataKey = 'QAOT';
+    constexpr std::uint32_t kDFDataKey = 'DAOT';
 
     
     // INI
@@ -1432,11 +1433,6 @@ private:
 
     template <typename T>
     void GatherStages()  {
-        // for now use default stages
-        /*if (!empty_mgeff) {
-            logger::error("Empty mgeff is null.");
-            return;
-        }*/
 
         for (StageNo stage_no: defaultsettings->numbers) {
             const auto stage_formid = defaultsettings->items[stage_no];
@@ -1650,10 +1646,7 @@ private:
     }
 
     void RegisterStage(const FormID stage_formid,const StageNo stage_no){
-        if (!Utilities::Functions::Vector::HasElement<StageNo>(defaultsettings->numbers,stage_no)) {
-			logger::error("Stage {} not found in default settings.", stage_no);
-			return;
-		}
+
         for (auto& [key, value] : stages) {
             if (stage_formid == value.formid) {
                 logger::error("stage_formid is already in the stages.");
@@ -1697,7 +1690,7 @@ private:
 			logger::error("Editorid is empty.");
 			return 0;
 		}
-        const FormID new_formid = DFT->Fetch<T>(formid, editorid, static_cast<uint32_t>(st_no));
+        const FormID new_formid = DFT->FetchCreate<T>(formid, editorid, static_cast<uint32_t>(st_no));
 
         if (const auto stage_form = Utilities::FunctionsSkyrim::GetFormByID<T>(new_formid)) {
             RegisterStage(new_formid, st_no);
