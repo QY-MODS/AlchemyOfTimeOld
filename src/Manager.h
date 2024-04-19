@@ -1822,6 +1822,18 @@ public:
         logger::info("Manager reset.");
     }
 
+    void HandleFormDelete(const FormID a_refid){
+        ENABLE_IF_NOT_UNINSTALLED
+        std::lock_guard<std::mutex> lock(mutex);
+        logger::info("HandleFormDelete: Formid {}", a_refid);
+        for (auto& src : sources) {
+			if (src.data.contains(a_refid)) {
+				src.data.erase(a_refid);
+				logger::info("HandleFormDelete: Form deleted from source data.");
+			}
+		}
+    }
+
     void SendData() {
         ENABLE_IF_NOT_UNINSTALLED
         // std::lock_guard<std::mutex> lock(mutex);

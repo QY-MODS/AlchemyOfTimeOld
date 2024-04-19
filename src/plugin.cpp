@@ -14,7 +14,8 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
                      public RE::BSTEventSink<RE::InputEvent*>,
                      public RE::BSTEventSink<RE::TESSleepStopEvent>,
                      public RE::BSTEventSink<RE::TESWaitStopEvent>,
-                     public RE::BSTEventSink<RE::BGSActorCellEvent> {
+                     public RE::BSTEventSink<RE::BGSActorCellEvent>,
+                     public RE::BSTEventSink<RE::TESFormDeleteEvent> {
 
     OurEventSink() = default;
     OurEventSink(const OurEventSink&) = delete;
@@ -635,6 +636,16 @@ public:
         return RE::BSEventNotifyControl::kContinue;
 	
     }
+
+    RE::BSEventNotifyControl ProcessEvent(const RE::TESFormDeleteEvent* a_event,
+                                          RE::BSTEventSource<RE::TESFormDeleteEvent>*) {
+        if (!a_event) return RE::BSEventNotifyControl::kContinue;
+        if (!a_event->formID) return RE::BSEventNotifyControl::kContinue;
+    	if (M->RefIsRegistered(a_event->formID)) {
+			M->HandleFormDelete(a_event->formID);
+		}
+        return RE::BSEventNotifyControl::kContinue;
+    }
 };
 
 
@@ -676,6 +687,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
 #endif
         eventSourceHolder->AddEventSink<RE::TESSleepStopEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESWaitStopEvent>(eventSink);
+        eventSourceHolder->AddEventSink<RE::TESFormDeleteEvent>(eventSink);
         SKSE::GetCrosshairRefEventSource()->AddEventSink(eventSink);
         RE::PlayerCharacter::GetSingleton()->AsBGSActorCellEventSource()->AddEventSink(eventSink);
         logger::info("Event sinks added.");
