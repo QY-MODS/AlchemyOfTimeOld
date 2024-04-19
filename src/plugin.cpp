@@ -347,7 +347,14 @@ public:
         if (event->oldContainer==event->newContainer) return RE::BSEventNotifyControl::kContinue;
 
 
-        if (!Settings::IsItem(event->baseObj)) return RE::BSEventNotifyControl::kContinue;
+        if (!Settings::IsItem(event->baseObj)) {
+        	logger::trace("Not an item.");
+            if (event->oldContainer == player_refid || event->newContainer == player_refid) {
+                M->UpdateStages(event->oldContainer);
+                M->UpdateStages(event->newContainer);
+            }
+            return RE::BSEventNotifyControl::kContinue;
+        }
 
         if (event->oldContainer != player_refid && event->newContainer != player_refid && event->reference &&
             M->RefIsRegistered(Utilities::FunctionsSkyrim::WorldObject::TryToGetRefIDFromHandle(event->reference)) &&
@@ -389,7 +396,7 @@ public:
 #endif  // !NDEBUG
                     }
                 }
-                else { // demek ki world object
+                else { // demek ki world object ya da gaipten geldi
                     auto reference_ = event->reference;
                     logger::trace("Reference: {}", reference_.native_handle());
                     auto ref_id = Utilities::FunctionsSkyrim::WorldObject::TryToGetRefIDFromHandle(reference_);

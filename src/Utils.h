@@ -421,6 +421,14 @@ namespace Utilities{
             return nullptr;
         };
 
+        const std::string GetEditorID(const FormID a_formid) {
+            if (const auto form = RE::TESForm::LookupByID(a_formid)) {
+                return clib_util::editorID::get_editorID(form);
+            } else {
+                return "";
+            }
+        }
+
         FormID GetFormEditorIDFromString(const std::string formEditorId) {
             logger::trace("Getting formid from editorid: {}", formEditorId);
             if (Utilities::Functions::isValidHexWithLength7or8(formEditorId.c_str())) {
@@ -2457,7 +2465,7 @@ namespace Utilities{
     }
 
     bool write_string(SKSE::SerializationInterface* a_intfc, const std::string& a_str) {
-        auto encodedStr = Functions::String::encodeString(a_str);
+        const auto encodedStr = Functions::String::encodeString(a_str);
         // i first need the size to know no of iterations
         const auto size = encodedStr.size();
         if (!a_intfc->WriteRecordData(size)) {

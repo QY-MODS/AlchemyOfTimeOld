@@ -1743,7 +1743,7 @@ public:
 			const auto& [formid, count, refid,r_time] = to_register_go.front();
             to_register_go.erase(to_register_go.begin());
             if (!RegisterAndGo(formid, count, refid, r_time)) {
-				logger::trace("UpdateStages: RegisterAndGo failed.");
+                logger::trace("UpdateStages: RegisterAndGo failed for form {} and loc {}.", formid,refid);
 			}
         }
 
@@ -1768,6 +1768,7 @@ public:
             logger::critical("UpdateStages: loc_refid is null.");
             return false;
         }
+
         auto loc_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(loc_refid);
         if (!loc_ref) {
             logger::critical("UpdateStages: loc_ref is null.");

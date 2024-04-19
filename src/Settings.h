@@ -1183,7 +1183,7 @@ struct Source {
         //logger::trace("Size before cleanup: {}", data.size());
         // if there are instances with same stage no and location, and start_time, merge them
         
-        logger::trace("Cleaning up data: Deleting locs with empty vector of instances.");
+        //logger::trace("Cleaning up data: Deleting locs with empty vector of instances.");
         for (auto it = data.begin(); it != data.end();) {
             if (it->second.empty()) {
                 logger::trace("Erasing key from data: {}", it->first);
@@ -1195,7 +1195,7 @@ struct Source {
 
         
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
-        logger::trace("Cleaning up data: Merging instances which are AlmostSameExceptCount.");
+        //logger::trace("Cleaning up data: Merging instances which are AlmostSameExceptCount.");
         for (auto& [_, instances] : data) {
             if (instances.empty()) continue;
             if (instances.size() > 1) {
@@ -1214,7 +1214,7 @@ struct Source {
 		        }
             }
 		    // erase instances with count <= 0
-            logger::trace("Cleaning up data: Erasing instances with count <= 0.");
+            //logger::trace("Cleaning up data: Erasing instances with count <= 0.");
             for (auto it = instances.begin(); it != instances.end();) {
 			    if (it->count <= 0) {
 				    logger::trace("Erasing stage instance with count {}", it->count);
@@ -1228,13 +1228,13 @@ struct Source {
 					it = instances.erase(it);
 				}
                 else {
-                    logger::trace("Not erasing stage instance with count {}", it->count);
+                    //logger::trace("Not erasing stage instance with count {}", it->count);
 				    ++it;
 			    }
 		    }
         }
         
-        logger::trace("Cleaning up data: Deleting locs with empty vector of instances 2.");
+        //logger::trace("Cleaning up data: Deleting locs with empty vector of instances 2.");
         for (auto it = data.begin(); it != data.end();) {
             if (it->second.empty()) {
                 logger::trace("Erasing key from data: {} 2", it->first);
@@ -1332,6 +1332,9 @@ private:
                     st_inst.xtra.form_id = transformed_stage.formid;
                     st_inst.SetNewStart(curr_time, trnsfrm_elapsed - trnsfrm_duration);
                     return true;
+                } else {
+                    logger::trace("Transform duration {} h not exceeded.", trnsfrm_duration);
+                    return false;
                 }
             }
 
@@ -1495,7 +1498,7 @@ private:
         const FormID transformer_best = GetTransformerInInventory(inventory_owner);
         if (transformer_best) {
             logger::trace("Transformer found: {}", transformer_best);
-            const auto allowed_stages = std::get<2>(defaultsettings->transformers[transformer_best]);
+            const auto& allowed_stages = std::get<2>(defaultsettings->transformers[transformer_best]);
             for (auto& instance : data[loc]) {
 				if (instance.count <= 0) continue;
                 if (Utilities::Functions::Vector::HasElement<StageNo>(allowed_stages, instance.no)){
@@ -1532,7 +1535,7 @@ private:
         // first check for transformer
         const auto transformer_best = GetTransformerInInventory(inventory_owner);
         if (transformer_best) {
-            const auto allowed_stages = std::get<2>(defaultsettings->transformers[transformer_best]);
+            const auto& allowed_stages = std::get<2>(defaultsettings->transformers[transformer_best]);
             if (Utilities::Functions::Vector::HasElement<StageNo>(allowed_stages, instance.no)) {
                 logger::trace("Setting transform to {} for instance with no {} bcs of form with id {}", transformer_best, instance.no, transformer_best);
                 instance.SetTransform(curr_time, transformer_best);
@@ -1694,20 +1697,20 @@ private:
 			logger::error("Editorid is empty.");
 			return 0;
 		}
-        const FormID new_formid = DFT->Create<T>(0, editorid, 0);
+        const FormID new_formid = DFT->Fetch<T>(formid, editorid, static_cast<uint32_t>(st_no));
 
         if (const auto stage_form = Utilities::FunctionsSkyrim::GetFormByID<T>(new_formid)) {
             RegisterStage(new_formid, st_no);
             if (auto it = stages.find(st_no); it == stages.end()) {
                 logger::error("Stage {} not found in stages.", st_no);
-                DFT->Delete({formid,editorid},new_formid);
+                DFT->Delete(new_formid);
                 return 0;
             }
 
             // Update name of the fake form
             if (!stages.contains(st_no)) {
 				logger::error("Stage {} does not exist.", st_no);
-				DFT->Delete({formid,editorid},new_formid);
+				DFT->Delete(new_formid);
 				return 0;
 			}
             const auto& name = stages.at(st_no).name;
@@ -1731,7 +1734,7 @@ private:
 
         } else {
 			logger::error("Could not create copy form for source {}", editorid);
-            DFT->Delete({formid,editorid},new_formid);
+            DFT->Delete(new_formid);
 			return 0;
 		}
      
