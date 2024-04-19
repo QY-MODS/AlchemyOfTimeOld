@@ -10,6 +10,7 @@ class DynamicFormTracker {
 
 
     std::mutex mutex;
+    bool block_create = false;
 
 
     void ReviveDynamicForm(RE::TESForm* fake, RE::TESForm* base, const FormID setFormID) {
@@ -117,6 +118,7 @@ class DynamicFormTracker {
 
     template <typename T>
     const FormID Create(T* baseForm, const RE::FormID setFormID = 0) {
+        if (block_create) return 0;
 
         //std::lock_guard<std::mutex> lock(mutex);
 
@@ -165,6 +167,13 @@ class DynamicFormTracker {
             _delete({base_formid, base_editorid}, new_formid);
             return 0;
         };
+
+        if (new_formid >= 0xFF3DFFFF){
+            logger::critical("Dynamic FormID limit reached!!!!!!");
+            block_create = true;
+			_delete({base_formid, base_editorid}, new_formid);
+			return 0;
+        }
 
         return new_formid;
     }
