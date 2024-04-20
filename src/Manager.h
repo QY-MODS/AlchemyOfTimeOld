@@ -45,6 +45,8 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
 
     std::vector<std::tuple<FormID, Count, RefID, Duration>> to_register_go;
 
+    std::set<FormID> do_not_register;
+
 
 
 #define ENABLE_IF_NOT_UNINSTALLED if (isUninstalled) return;
@@ -956,6 +958,10 @@ public:
             RaiseMngrErr("Location refid is null.");
             return false;
         }
+        if (do_not_register.contains(some_formid)) {
+			logger::trace("Formid is in do not register list.");
+			return false;
+		}
 
         if (GetNInstances() > _instance_limit) {
             logger::warn("Instance limit reached.");
@@ -974,10 +980,13 @@ public:
         // make new registry
         auto src = ForceGetSource(some_formid);  // also saves it to sources if it was created new
         if (!src) {
-            RaiseMngrErr("Register: Source is null.");
+            //RaiseMngrErr("Register: Source is null.");
+            logger::trace("Register: Source is null.");
+            do_not_register.insert(some_formid);
             return false;
         } else if (!src->IsStage(some_formid)){
             logger::critical("Register: some_formid is not a stage.");
+            //do_not_register.insert(some_formid);
 			return false;
         }
 
@@ -1769,7 +1778,9 @@ public:
     bool UpdateStages(RefID loc_refid) {
         logger::trace("Manager: Updating stages for loc_refid {}.",loc_refid);
         if (!loc_refid) {
+#ifndef NDEBUG
             logger::critical("UpdateStages: loc_refid is null.");
+#endif
             return false;
         }
 

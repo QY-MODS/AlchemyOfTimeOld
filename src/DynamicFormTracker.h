@@ -591,6 +591,10 @@ public:
         logger::info("Number of dynamic forms received: {}", n_fakes);
         logger::info("Number of active effects received: {}", n_act_effs);
         // need to check if formids and editorids are valid
+#ifndef NDEBUG
+        Print();
+#endif  // !NDEBUG
+
         logger::info("--------Data received (DFT) ---------");
 
 	};
@@ -603,7 +607,16 @@ public:
 		deleted_forms.clear();
 		act_effs.clear();
         block_create = false;
-	}
+	};
+
+    void Print() {
+        for (const auto& [base, formset] : forms) {
+			logger::info("---------------------Base formid: {:x}, EditorID: {}---------------------", base.first, base.second);
+			for (const auto _formid : formset) {
+				logger::info("Dynamic formid: {:x} with name: {}", _formid, Utilities::FunctionsSkyrim::GetFormByID(_formid)->GetName());
+			}
+		}
+    }
 
     void ApplyMissingActiveEffects() {
 

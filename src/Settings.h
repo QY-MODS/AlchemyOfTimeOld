@@ -284,7 +284,13 @@ namespace Settings
         }
 
         std::string form_string = std::string(form->GetName());
+        std::string form_editorid = clib_util::editorID::get_editorID(form);
         
+        if (!form_editorid.empty() && Utilities::Functions::String::includesWord(form_editorid, Settings::exclude_list[type])) {
+			logger::trace("Form is in exclude list.form_editorid: {}", form_editorid);
+			return true;
+		}
+
         /*const auto exlude_list = LoadExcludeList(postfix);*/
         if (Utilities::Functions::String::includesWord(form_string, Settings::exclude_list[type])) {
             logger::trace("Form is in exclude list.form_string: {}", form_string);
