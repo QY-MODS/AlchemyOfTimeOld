@@ -1,17 +1,17 @@
 #pragma once
 #include "SimpleIni.h"
-#include "Utils.h"
+#include "DynamicFormTracker.h"
 
 using namespace Utilities::Types;
-using namespace Utilities::FunctionsSkyrim::DynamicForm;
 
 namespace Settings
 {
 
     bool failed_to_load = false;
 
-    constexpr std::uint32_t kSerializationVersion = 626;
+    constexpr std::uint32_t kSerializationVersion = 627;
     constexpr std::uint32_t kDataKey = 'QAOT';
+    constexpr std::uint32_t kDFDataKey = 'DAOT';
 
     
     // INI
@@ -284,7 +284,13 @@ namespace Settings
         }
 
         std::string form_string = std::string(form->GetName());
+        std::string form_editorid = clib_util::editorID::get_editorID(form);
         
+        if (!form_editorid.empty() && Utilities::Functions::String::includesWord(form_editorid, Settings::exclude_list[type])) {
+			logger::trace("Form is in exclude list.form_editorid: {}", form_editorid);
+			return true;
+		}
+
         /*const auto exlude_list = LoadExcludeList(postfix);*/
         if (Utilities::Functions::String::includesWord(form_string, Settings::exclude_list[type])) {
             logger::trace("Form is in exclude list.form_string: {}", form_string);
@@ -584,21 +590,15 @@ namespace Settings
 }
 
 struct Source {
-    
-    FormID formid=0;
-    std::string editorid="";
-    StageDict stages;
-    SourceData data; // change this to a map with refid as key and vector of instances as value
-    Settings::DefaultSettings* defaultsettings = nullptr; // eigentlich sollte settings heissen
 
-    RE::FormType formtype;
+    SourceData data;  // change this to a map with refid as key and vector of instances as value
+
+    FormID formid = 0;
+    std::string editorid = "";
+    Settings::DefaultSettings* defaultsettings = nullptr;  // eigentlich sollte settings heissen
     std::string qFormType;
-    std::vector<StageNo> fake_stages = {};
-    Stage decayed_stage;
-    std::map<FormID,Stage> transformed_stages;
 
-    std::vector<StageInstance*> queued_time_modulator_updates;
-
+    
     Source(const FormID id, const std::string id_str, 
         //RE::EffectSetting* e_m, 
         Settings::DefaultSettings* sttngs=nullptr)
@@ -648,59 +648,32 @@ struct Source {
 
         formtype = form->GetFormType();
 
-        //make sure the keys in stages are 0 to length-1 with increment 1
-        if (stages.size() == 0) {
-            // get stages
+        if (stages.size() > 0) {
+            logger::error("Stages shouldnt be already populated.");
+            InitFailed();
+            return;
+        }
+        // get stages
             
-            // POPULATE THIS
-            if (qFormType == "FOOD") {
-                if (formtype == RE::FormType::AlchemyItem) GatherStages<RE::AlchemyItem>();
-			    else if (formtype == RE::FormType::Ingredient) GatherStages<RE::IngredientItem>();
-            }
-            else if (qFormType == "INGR") GatherStages<RE::IngredientItem>();
-            else if (qFormType == "MEDC") GatherStages<RE::AlchemyItem>();
-			else if (qFormType == "POSN") GatherStages<RE::AlchemyItem>();
-			else if (qFormType == "ARMO") GatherStages<RE::TESObjectARMO>();
-			else if (qFormType == "WEAP") GatherStages<RE::TESObjectWEAP>();
-			else if (qFormType == "SCRL") GatherStages<RE::ScrollItem>();
-			else if (qFormType == "BOOK") GatherStages<RE::TESObjectBOOK>();
-			else if (qFormType == "SLGM") GatherStages<RE::TESSoulGem>();
-			else if (qFormType == "MISC") GatherStages<RE::TESObjectMISC>();
-			else {
-				logger::error("QFormType is not one of the predefined types.");
-				InitFailed();
-				return;
-			}
+        // POPULATE THIS
+        if (qFormType == "FOOD") {
+            if (formtype == RE::FormType::AlchemyItem) GatherStages<RE::AlchemyItem>();
+			else if (formtype == RE::FormType::Ingredient) GatherStages<RE::IngredientItem>();
         }
-        else {
-            // check if formids exist in the game
-            for (auto& [key, value] : stages) {
-                if (!Utilities::FunctionsSkyrim::GetFormByID(value.formid, "")) {
-                    if (!Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType)) {
-                        logger::warn("Formid {} for stage {} does not exist and fakes not allowed for {}", value.formid,
-                                     key, qFormType);
-                        InitFailed();
-                        return;
-                    }
-                    // make one and replace formid
-					logger::warn("Formid {} for stage {} does not exist.", value.formid, key);
-                    if (formtype == RE::FormType::AlchemyItem) value.formid = CreateFake<RE::AlchemyItem>(form->As<RE::AlchemyItem>());
-                    else if (formtype == RE::FormType::Ingredient) value.formid = CreateFake<RE::IngredientItem>(form->As<RE::IngredientItem>());
-                    //else if (formtype == RE::FormType::magi) value.formid = CreateFake<RE::MagicItem>(form->As<RE::MagicItem>());
-					else {
-                        logger::error("Formtype is not one of the predefined types.");
-						InitFailed();
-						return;
-					}
-                    if (!value.formid) {
-                        logger::error("Formid could not be created.");
-                        InitFailed();
-                        return;
-                    }
-                    fake_stages.push_back(key);
-				}
-			}
-        }
+        else if (qFormType == "INGR") GatherStages<RE::IngredientItem>();
+        else if (qFormType == "MEDC") GatherStages<RE::AlchemyItem>();
+		else if (qFormType == "POSN") GatherStages<RE::AlchemyItem>();
+		else if (qFormType == "ARMO") GatherStages<RE::TESObjectARMO>();
+		else if (qFormType == "WEAP") GatherStages<RE::TESObjectWEAP>();
+		else if (qFormType == "SCRL") GatherStages<RE::ScrollItem>();
+		else if (qFormType == "BOOK") GatherStages<RE::TESObjectBOOK>();
+		else if (qFormType == "SLGM") GatherStages<RE::TESSoulGem>();
+		else if (qFormType == "MISC") GatherStages<RE::TESObjectMISC>();
+		else {
+			logger::error("QFormType is not one of the predefined types.");
+			InitFailed();
+			return;
+		}
 
         // decayed stage
         decayed_stage = GetFinalStage();
@@ -760,7 +733,7 @@ struct Source {
             auto& instances = data[reffid];
             for (auto& instance : instances) {
                 if (instance.xtra.is_decayed) continue;
-                Stage* old_stage = &stages.at(instance.no);
+                const Stage* old_stage = &GetStage(instance.no);
                 Stage* new_stage = nullptr;
                 if (_UpdateStageInstance(instance, curr_time)) {
                     if (instance.xtra.is_transforming){
@@ -772,12 +745,17 @@ struct Source {
 						}
                         new_stage = &transformed_stages[temp_formid];
                     }
-                    else if (instance.xtra.is_decayed || !stages.contains(instance.no)) {
+                    else if (instance.xtra.is_decayed || !IsStageNo(instance.no)) {
                         new_stage = &decayed_stage;
                     }
-                    else new_stage = &stages.at(instance.no);
                     auto is_fake__ = IsFakeStage(instance.no);
-                    updated_instances[reffid].emplace_back(old_stage, new_stage, instance.count, instance.start_time ,is_fake__);
+                    if (!new_stage) {
+                        updated_instances[reffid].emplace_back(old_stage, &GetStage(instance.no), instance.count,
+                                                               instance.start_time, is_fake__);
+                    }
+                    else {
+                        updated_instances[reffid].emplace_back(old_stage, new_stage, instance.count, instance.start_time ,is_fake__);
+                    }
                 }
             }
         }
@@ -785,19 +763,53 @@ struct Source {
         return updated_instances;
     }
 
-    [[nodiscard]] const bool IsFakeStage(const StageNo no) const {
-        return Utilities::Functions::Vector::HasElement<StageNo>(fake_stages, no);
+    // daha once yaratilmis bi stage olmasi gerekiyo
+    const bool IsStage(const FormID some_formid) {
+        for (const auto& [_, stage] : stages) {
+            if (stage.formid == some_formid) return true;
+        }
+        return false;
     }
 
-    [[nodiscard]] const StageNo* GetStageNo(const FormID formid_) {
-        if (init_failed) {
-            logger::critical("GetStageNo: Initialisation failed.");
-            return nullptr;
-        }
+    const bool IsStageNo(const StageNo no) const {
+        if (stages.contains(no)) return true;
+        if (fake_stages.contains(no)) return true;
+        return false;
+	}
+
+    [[nodiscard]] const bool IsFakeStage(const StageNo no) const {
+        auto it = fake_stages.find(no);
+        return it != fake_stages.end();
+    }
+
+    // assumes that the formid exists as a stage!
+    [[nodiscard]] const StageNo GetStageNo(const FormID formid_) {
         for (auto& [key, value] : stages) {
-            if (value.formid == formid_) return &key;
+            if (value.formid == formid_) return key;
         }
-        return nullptr;
+        return 0;
+    }
+
+    const Stage& GetStage(const StageNo no) {
+        if (!IsStageNo(no)) {
+            logger::error("Stage {} not found.", no);
+            return {};
+		}
+        if (stages.contains(no)) return stages.at(no);
+        if (IsFakeStage(no)) {
+            if (const auto stage_formid = FetchFake(no); stage_formid != 0) {
+                const auto& fake_stage = stages.at(no);
+                return fake_stage;
+            } else {
+                logger::error("Stage {} formid is 0.", no);
+                return {};
+            }
+
+        }
+        else {
+            logger::error("Stage {} not found.", no);
+            return {};
+        }
     }
 
     [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance, const RefID loc) { 
@@ -808,7 +820,7 @@ struct Source {
         }
 
         const auto n = stage_instance.no;
-        if (!stages.count(n)) {
+        if (!IsStageNo(n)) {
             logger::error("Stage {} does not exist.", n);
             return false;
         }
@@ -820,7 +832,7 @@ struct Source {
 			logger::error("Location is 0.");
 			return false;
 		}*/
-        if (stage_instance.xtra.form_id != stages.at(n).formid) {
+        if (stage_instance.xtra.form_id != GetStage(n).formid) {
 			logger::error("Formid does not match the stage formid.");
 			return false;
 		}
@@ -832,7 +844,7 @@ struct Source {
 			logger::error("Decayed status is true.");
 			return false;
 		}
-        if (stage_instance.xtra.crafting_allowed != stages.at(n).crafting_allowed) {
+        if (stage_instance.xtra.crafting_allowed != GetStage(n).crafting_allowed) {
 			logger::error("Crafting allowed status does not match the stage crafting allowed status.");
 			return false;
 		}
@@ -858,14 +870,14 @@ struct Source {
             logger::critical("InitInsertInstance: Initialisation failed.");
             return false;
         }
-        if (!stages.count(n)) {
+        if (!IsStageNo(n)) {
 			logger::error("Stage {} does not exist.", n);
 			return false;
 		}
         StageInstance new_instance(t_0, n, c);
-        new_instance.xtra.form_id = stages.at(n).formid;
-        new_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages.at(n).GetBound());
-        new_instance.xtra.crafting_allowed = stages.at(n).crafting_allowed;
+        new_instance.xtra.form_id = GetStage(n).formid;
+        new_instance.xtra.editor_id = clib_util::editorID::get_editorID(GetStage(n).GetBound());
+        new_instance.xtra.crafting_allowed = GetStage(n).crafting_allowed;
         if (IsFakeStage(n)) new_instance.xtra.is_fake = true;
 
         return InsertNewInstance(new_instance,l);
@@ -1148,11 +1160,11 @@ struct Source {
             return 0;
         }
         if (st_inst->xtra.is_decayed) return 0;
-        if (!stages.contains(st_inst->no)) {
+        if (!IsStageNo(st_inst->no)) {
             logger::error("Stage {} does not exist.", st_inst->no);
             return 0;
         }
-        const auto stage_duration = stages.at(st_inst->no).duration;
+        const auto stage_duration = GetStage(st_inst->no).duration;
         return st_inst->GetHittingTime(stage_duration);
     }
 
@@ -1178,6 +1190,7 @@ struct Source {
         //logger::trace("Size before cleanup: {}", data.size());
         // if there are instances with same stage no and location, and start_time, merge them
         
+        //logger::trace("Cleaning up data: Deleting locs with empty vector of instances.");
         for (auto it = data.begin(); it != data.end();) {
             if (it->second.empty()) {
                 logger::trace("Erasing key from data: {}", it->first);
@@ -1187,27 +1200,34 @@ struct Source {
             }
         }
 
+        
         const auto curr_time = RE::Calendar::GetSingleton()->GetHoursPassed();
+        //logger::trace("Cleaning up data: Merging instances which are AlmostSameExceptCount.");
         for (auto& [_, instances] : data) {
             if (instances.empty()) continue;
-            for (auto it = instances.begin(); it != instances.end(); ++it) {
-                for (auto it2 = it; it2 != instances.end(); ++it2) {
-				    if (it == it2) continue;
-                    if (it2->count <= 0) continue;
-                    if (it->AlmostSameExceptCount(*it2, curr_time)) {
-                        logger::trace("Merging stage instances with count {} and {}", it->count, it2->count);
-					    it->count += it2->count;
-					    it2->count = 0;
-				    }
-			    }
-		    }
+            if (instances.size() > 1) {
+                for (auto it = instances.begin(); it+1 != instances.end(); ++it) {
+                    size_t ind = 1;
+                    for (auto it2 = it + ind; it2 != instances.end(); it2 = it + ind) {
+					    ++ind;
+				        if (it == it2) continue;
+                        if (it2->count <= 0) continue;
+                        if (it->AlmostSameExceptCount(*it2, curr_time)) {
+                            logger::trace("Merging stage instances with count {} and {}", it->count, it2->count);
+					        it->count += it2->count;
+					        it2->count = 0;
+				        }
+			        }
+		        }
+            }
 		    // erase instances with count <= 0
+            //logger::trace("Cleaning up data: Erasing instances with count <= 0.");
             for (auto it = instances.begin(); it != instances.end();) {
 			    if (it->count <= 0) {
 				    logger::trace("Erasing stage instance with count {}", it->count);
                     it = instances.erase(it);
                 } 
-                else if (!stages.count(it->no) || it->xtra.is_decayed) {
+                else if (!IsStageNo(it->no) || it->xtra.is_decayed) {
 				    logger::trace("Erasing decayed stage instance with no {}", it->no);
                     it = instances.erase(it);
                 } else if (curr_time - GetDecayTime(*it) > Settings::nForgettingTime) {
@@ -1215,11 +1235,13 @@ struct Source {
 					it = instances.erase(it);
 				}
                 else {
+                    //logger::trace("Not erasing stage instance with count {}", it->count);
 				    ++it;
 			    }
 		    }
         }
         
+        //logger::trace("Cleaning up data: Deleting locs with empty vector of instances 2.");
         for (auto it = data.begin(); it != data.end();) {
             if (it->second.empty()) {
                 logger::trace("Erasing key from data: {} 2", it->first);
@@ -1235,6 +1257,7 @@ struct Source {
         }
 
         //logger::trace("Size after cleanup: {}", data.size());
+        logger::trace("Cleaning up data: Done.");
 	}
 
     void PrintData() {
@@ -1283,8 +1306,15 @@ struct Source {
 
 private:
 
+    RE::FormType formtype;
+    std::set<StageNo> fake_stages;
+    Stage decayed_stage;
+    std::map<FormID, Stage> transformed_stages;
+
+    std::vector<StageInstance*> queued_time_modulator_updates;
     bool init_failed = false;
-    
+
+    StageDict stages;
 
     // counta karismiyor
     [[nodiscard]] const bool _UpdateStageInstance(StageInstance& st_inst, const float curr_time) {
@@ -1293,27 +1323,30 @@ private:
             return false;
         }
         if (st_inst.xtra.is_decayed) return false;  // decayed
-        else if (st_inst.xtra.is_transforming){
+        else if (st_inst.xtra.is_transforming) {
             logger::trace("Transforming stage found.");
             const auto transformer_form_id = st_inst.GetDelayerFormID();
             if (!defaultsettings->transformers.contains(transformer_form_id)) {
 				logger::error("Transformer Formid {} not found in default settings.", transformer_form_id);
                 st_inst.RemoveTransform(curr_time);
 			} else {
-                const auto transform_properties = defaultsettings->transformers[transformer_form_id];
+                const auto& transform_properties = defaultsettings->transformers[transformer_form_id];
                 const auto trnsfrm_duration = std::get<1>(transform_properties);
                 const auto trnsfrm_elapsed = st_inst.GetTransformElapsed(curr_time);
                 if (trnsfrm_elapsed >= trnsfrm_duration) {
-                    logger::trace("Transform duration exceeded.");
-                    const auto transformed_stage = transformed_stages[transformer_form_id];
+                    logger::trace("Transform duration {} h exceeded.", trnsfrm_duration);
+                    const auto& transformed_stage = transformed_stages[transformer_form_id];
                     st_inst.xtra.form_id = transformed_stage.formid;
                     st_inst.SetNewStart(curr_time, trnsfrm_elapsed - trnsfrm_duration);
                     return true;
+                } else {
+                    logger::trace("Transform duration {} h not exceeded.", trnsfrm_duration);
+                    return false;
                 }
             }
 
         }
-        if (!stages.count(st_inst.no)) {
+        if (!IsStageNo(st_inst.no)) {
             logger::trace("Stage {} does not exist.", st_inst.no);
 			return false;
 		}
@@ -1324,29 +1357,30 @@ private:
         
         float diff = st_inst.GetElapsed(curr_time);
         bool updated = false;
-        logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,stages.at(st_inst.no).duration);
+        logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,
+                      GetStage(st_inst.no).duration);
         
         while (diff < 0) {
             if (st_inst.no > 0) {
-                if (!stages.count(st_inst.no - 1)) {
+                if (!IsStageNo(st_inst.no - 1)) {
                     logger::critical("Stage {} does not exist.", st_inst.no - 1);
                     return false;
 			    }
                 st_inst.no--;
                 logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no - 1);
-			    diff += stages.at(st_inst.no).duration;
+                diff += GetStage(st_inst.no).duration;
                 updated = true;
             } else {
                 diff = 0;
                 break;
             }
         }
-        while (diff > stages.at(st_inst.no).duration) {
+        while (diff > GetStage(st_inst.no).duration) {
             logger::trace("Updating stage {} to {}", st_inst.no, st_inst.no + 1);
-            diff -= stages.at(st_inst.no).duration;
+            diff -= GetStage(st_inst.no).duration;
 			st_inst.no++;
             updated = true;
-            if (!stages.count(st_inst.no)) {
+            if (!IsStageNo(st_inst.no)) {
 			    logger::trace("Decayed");
                 st_inst.xtra.is_decayed= true;
                 st_inst.xtra.form_id = decayed_stage.formid;
@@ -1364,10 +1398,10 @@ private:
                 st_inst.xtra.crafting_allowed = false;
             } 
             else {
-                st_inst.xtra.form_id = stages.at(st_inst.no).formid;
-                st_inst.xtra.editor_id = clib_util::editorID::get_editorID(stages.at(st_inst.no).GetBound());
+                st_inst.xtra.form_id = GetStage(st_inst.no).formid;
+                st_inst.xtra.editor_id = clib_util::editorID::get_editorID(GetStage(st_inst.no).GetBound());
                 st_inst.xtra.is_fake = IsFakeStage(st_inst.no);
-                st_inst.xtra.crafting_allowed = stages.at(st_inst.no).crafting_allowed;
+                st_inst.xtra.crafting_allowed = GetStage(st_inst.no).crafting_allowed;
             }
             // as long as the delay start was before the ueberschreitung time this will work,
             // the delay start cant be strictly after the ueberschreitung time bcs we call update when a new delay
@@ -1405,90 +1439,30 @@ private:
 
     template <typename T>
     void GatherStages()  {
-        // for now use default stages
-        /*if (!empty_mgeff) {
-            logger::error("Empty mgeff is null.");
-            return;
-        }*/
 
-        for (auto i = 0; i < defaultsettings->numbers.size(); i++) {
-            // create fake form
-            auto source_item = GetBoundObject()->As<T>();
-            FormID stage_formid; // not really always fake?
-            if (!defaultsettings->items[i]) {
-                if (i==0) stage_formid = formid;
-                else if (Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType))
+        for (StageNo stage_no: defaultsettings->numbers) {
+            const auto stage_formid = defaultsettings->items[stage_no];
+            if (!stage_formid && stage_no != 0) {
+                if (Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType))
                 {
-                    logger::info("No ID given. creating copy item for this type {}", qFormType);
-                    stage_formid = CreateFake(source_item);
-                    fake_stages.push_back(defaultsettings->numbers[i]);
+                    fake_stages.insert(stage_no);
+                    continue;
                 }
                 else {
                     logger::critical("No ID given and copy items not allowed for this type {}", qFormType);
 					return;
                 }
-            } 
-            else {
-                auto temp_form = Utilities::FunctionsSkyrim::GetFormByID<T>(defaultsettings->items[i], "");
-                stage_formid = temp_form ? temp_form->GetFormID() : 0;
-            }
-            if (!stage_formid) {
-                logger::error("Could not create copy form for stage {}", i);
-                return;
-            }
-            // or if this stage_formid is already in the stages return error
-            for (auto& [key, value] : stages) {
-                if (stage_formid == value.formid) {
-                    logger::error("stage_formid is already in the stages.");
-                    return;
-                }
-            }
-            if (stage_formid == formid && i!=0) {
-                // not allowed. if you want to go back to beginning use decayed stage
-                logger::error("Formid of non initial stage is equal to source formid.");
-                /*stage_formid = CreateFake(source_item);
-                fake_stages.push_back(defaultsettings->numbers[i]);*/
-            }
-            const auto duration = defaultsettings->durations[i];
-            const StageName& name = defaultsettings->stage_names[i];
-
-            Stage stage(stage_formid, duration, i, name, defaultsettings->crafting_allowed[i],
-                        defaultsettings->effects[i]);
-            if (!stages.insert({i, stage}).second) {
-                logger::error("Could not insert stage");
-                return;
             }
 
-            auto stage_form = Utilities::FunctionsSkyrim::GetFormByID<T>(stage_formid);
-            if (!stage_form) {
-                logger::error("Fake form is null.");
-                return;
-            }
-            if (Utilities::Functions::Vector::HasElement<StageNo>(fake_stages, i)) {
-                // Update name of the fake form
-                if (!name.empty()) {
-                    stage_form->fullName = std::string(stage_form->fullName.c_str()) + " (" + name + ")";
-                    logger::info("Updated name of fake form to {}", name);
-                }
-                // Update value of the fake form
-                const auto temp_value = defaultsettings->costoverrides[i];
-                if (temp_value >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(stage_form, temp_value);
-                // Update weight of the fake form
-                const auto temp_weight = defaultsettings->weightoverrides[i];
-                if (temp_weight >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetWeight(stage_form, temp_weight);
-            }
-
-            if (defaultsettings->effects[i].empty()) continue;
-
-            // change mgeff of fake form
-
-            if (!Utilities::Functions::Vector::HasElement<std::string>(Settings::mgeffs_allowedQFORMS, qFormType)) {
-                logger::trace("MGEFF not available for this form type {}", qFormType);
-                return;
-            }
-
-            ApplyMGEFFSettings(stage_form, defaultsettings->effects[i]);
-
+            if (stage_no == 0) RegisterStage(formid, stage_no);
+			else {
+                const auto stage_form = Utilities::FunctionsSkyrim::GetFormByID(stage_formid, "");
+				if (!stage_form) {
+                    logger::error("Stage form {} not found.", stage_formid);
+					continue;
+				}
+                RegisterStage(stage_formid, stage_no);
+			}
         }
     }
     
@@ -1526,7 +1500,7 @@ private:
         const FormID transformer_best = GetTransformerInInventory(inventory_owner);
         if (transformer_best) {
             logger::trace("Transformer found: {}", transformer_best);
-            const auto allowed_stages = std::get<2>(defaultsettings->transformers[transformer_best]);
+            const auto& allowed_stages = std::get<2>(defaultsettings->transformers[transformer_best]);
             for (auto& instance : data[loc]) {
 				if (instance.count <= 0) continue;
                 if (Utilities::Functions::Vector::HasElement<StageNo>(allowed_stages, instance.no)){
@@ -1563,7 +1537,7 @@ private:
         // first check for transformer
         const auto transformer_best = GetTransformerInInventory(inventory_owner);
         if (transformer_best) {
-            const auto allowed_stages = std::get<2>(defaultsettings->transformers[transformer_best]);
+            const auto& allowed_stages = std::get<2>(defaultsettings->transformers[transformer_best]);
             if (Utilities::Functions::Vector::HasElement<StageNo>(allowed_stages, instance.no)) {
                 logger::trace("Setting transform to {} for instance with no {} bcs of form with id {}", transformer_best, instance.no, transformer_best);
                 instance.SetTransform(curr_time, transformer_best);
@@ -1590,59 +1564,80 @@ private:
 			return false;
 		}
 
+        if (formid == 0 || stages.empty() || qFormType.empty()) {
+			logger::error("One of the members is empty.");
+			return false;
+		}
+
         if (!GetBoundObject()) {
 			logger::error("Formid {} does not exist.", formid);
 			return false;
 		}
 
-        if (formid == 0 || stages.empty() || qFormType.empty()) {
-			logger::error("One of the members is empty.");
-			return false;
-		}
-        // stages must have keys [0,...,n-1]
-        for (auto i = 0; i < stages.size(); i++) {
-            if (!stages.count(i)) {
-                logger::error("Key {} not found in stages.", i);
-                return false;
-            }
-            // ayni formid olmicak
-            /*if (stages[i].formid == formid) {
-                logger::error("Formid {} is the same as the source formid.", formid);
-				return false;
-            }*/
-            if (!stages.at(i).CheckIntegrity()) {
-                logger::error("Stage {} integrity check failed. FormID", i, stages.at(i).formid);
-				return false;
-			}
-            // also need to check if qformtype is the same as source's qformtype
-            const auto stage_formid = stages.at(i).formid;
-            const auto stage_qformtype = Settings::GetQFormType(stage_formid);
-            if (stage_qformtype != qFormType) {
-				logger::error("Stage {} qformtype is not the same as the source qformtype.", i);
-				return false;
-			}
-        }
-
 		if (!defaultsettings->CheckIntegrity()) {
             logger::error("Default settings integrity check failed.");
             return false;
         }
+
+        std::set<StageNo> st_numbers_check;
+        for (auto& [st_no,stage_tmp]: stages) {
+            
+            if (!stage_tmp.CheckIntegrity()) {
+                logger::error("Stage no {} integrity check failed. FormID {}", st_no, stage_tmp.formid);
+				return false;
+			}
+            // also need to check if qformtype is the same as source's qformtype
+            const auto stage_formid = stage_tmp.formid;
+            const auto stage_qformtype = Settings::GetQFormType(stage_formid);
+            if (stage_qformtype != qFormType) {
+                logger::error("Stage {} qformtype is not the same as the source qformtype.", st_no);
+				return false;
+			}
+
+            st_numbers_check.insert(st_no);
+        }
+        for (auto st_no : fake_stages) {
+            st_numbers_check.insert(st_no);
+        }
+
+        if (st_numbers_check.empty()) {
+            logger::error("No stages found.");
+            return false;
+        }
+            
+        // stages must have keys [0,...,n-1]
+        const auto st_numbers_check_vector = std::vector<StageNo>(st_numbers_check.begin(), st_numbers_check.end());
+        //std::sort(st_numbers_check_vector.begin(), st_numbers_check_vector.end());
+        if (st_numbers_check_vector[0] != 0) {
+			logger::error("Stage 0 does not exist.");
+			return false;
+		}
+        for (size_t i = 1; i < st_numbers_check_vector.size(); i++) {
+            if (st_numbers_check_vector[i] != st_numbers_check_vector[i - 1] + 1) {
+                logger::error("Stages are not incremented by 1:");
+                for (auto st_no : st_numbers_check_vector) {
+					logger::error("Stage {}", st_no);
+				}
+                return false;
+            }
+        }
+
         return true;
 	}
 
-    const float GetDecayTime(const StageInstance& st_inst) const {
+    const float GetDecayTime(const StageInstance& st_inst) {
 
         const auto slope = st_inst.GetDelaySlope();
         if (slope <= 0) return -1;
         StageNo curr_stageno = st_inst.no;
-        if (!stages.contains(curr_stageno)) {
+        if (!IsStageNo(curr_stageno)) {
             logger::error("Stage {} does not exist.", curr_stageno);
             return true;
         }
-        const auto last_stage_no = stages.rbegin()->first;
+        const auto last_stage_no = GetLastStageNo();
         float total_duration = 0;
         while (curr_stageno <= last_stage_no) {
-            total_duration += stages.at(curr_stageno).duration;
+            total_duration += GetStage(curr_stageno).duration;
             curr_stageno+=1;
 		}
         return st_inst.GetHittingTime(total_duration);
@@ -1654,5 +1649,165 @@ private:
         logger::error("Initialisation failed.");
         Reset();
         init_failed = true;
+    }
+
+    void RegisterStage(const FormID stage_formid,const StageNo stage_no){
+
+        for (auto& [key, value] : stages) {
+            if (stage_formid == value.formid) {
+                logger::error("stage_formid is already in the stages.");
+                return;
+            }
+        }
+        if (stage_formid == formid && stage_no != 0) {
+            // not allowed. if you want to go back to beginning use decayed stage
+            logger::error("Formid of non initial stage is equal to source formid.");
+            return;
+        }
+
+        if (!stage_formid) {
+            logger::error("Could not create copy form for stage {}", stage_no);
+            return;
+        }
+
+        auto stage_form = Utilities::FunctionsSkyrim::GetFormByID(stage_formid);
+        if (!stage_form) {
+            logger::error("Could not create copy form for stage {}", stage_no);
+            return;
+        }
+
+        const auto duration = defaultsettings->durations[stage_no];
+        const StageName& name = defaultsettings->stage_names[stage_no];
+
+        // create stage
+        Stage stage(stage_formid, duration, stage_no, name, defaultsettings->crafting_allowed[stage_no],
+                    defaultsettings->effects[stage_no]);
+        if (!stages.insert({stage_no, stage}).second) {
+            logger::error("Could not insert stage");
+            return;
+        }
+    
+    }
+
+    template <typename T>
+    const FormID FetchFake(const StageNo st_no) {
+
+        if (editorid.empty()) {
+			logger::error("Editorid is empty.");
+			return 0;
+		}
+        const FormID new_formid = DFT->FetchCreate<T>(formid, editorid, static_cast<uint32_t>(st_no));
+
+        if (const auto stage_form = Utilities::FunctionsSkyrim::GetFormByID<T>(new_formid)) {
+            RegisterStage(new_formid, st_no);
+            if (auto it = stages.find(st_no); it == stages.end()) {
+                logger::error("Stage {} not found in stages.", st_no);
+                DFT->Delete(new_formid);
+                return 0;
+            }
+
+            // Update name of the fake form
+            if (!stages.contains(st_no)) {
+				logger::error("Stage {} does not exist.", st_no);
+				DFT->Delete(new_formid);
+				return 0;
+			}
+            const auto& name = stages.at(st_no).name;
+            const auto og_name = RE::TESForm::LookupByID(formid)->GetName();
+            const auto new_name = std::string(og_name) + " (" + name + ")";
+            if (!name.empty() && std::strcmp(stage_form->fullName.c_str(), new_name.c_str()) != 0) {
+                stage_form->fullName = new_name;
+                logger::info("Updated name of fake form to {}", name);
+            }
+
+            // Update value of the fake form
+            const auto temp_value = defaultsettings->costoverrides[st_no];
+            if (temp_value >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetValue(stage_form, temp_value);
+            // Update weight of the fake form
+            const auto temp_weight = defaultsettings->weightoverrides[st_no];
+            if (temp_weight >= 0) Utilities::FunctionsSkyrim::FormTraits<T>::SetWeight(stage_form, temp_weight);
+
+            if (!defaultsettings->effects[st_no].empty() &&
+                Utilities::Functions::Vector::HasElement<std::string>(Settings::mgeffs_allowedQFORMS, qFormType)) {
+                // change mgeff of fake form
+                ApplyMGEFFSettings(stage_form, defaultsettings->effects[st_no]);
+            }
+
+        } else {
+			logger::error("Could not create copy form for source {}", editorid);
+            DFT->Delete(new_formid);
+			return 0;
+		}
+     
+        return new_formid;
+
+	}
+
+    // also registers to stages
+    const FormID FetchFake(const StageNo st_no) {
+        if (!GetBoundObject()) {
+            logger::error("Could not get bound object", formid);
+            return 0;
+        }
+        if (editorid.empty()) {
+            logger::error("Editorid is empty.");
+            return 0;
+        }
+        if (!Utilities::Functions::Vector::HasElement(Settings::fakes_allowedQFORMS, qFormType)) {
+            logger::error("Fake not allowed for this form type {}", qFormType);
+            return 0;
+        }
+
+        FormID new_formid = 0;
+
+        switch (formtype) {
+            case RE::FormType::Armor:
+                new_formid = FetchFake<RE::TESObjectARMO>(st_no);
+                break;
+            case RE::FormType::AlchemyItem:
+                new_formid = FetchFake<RE::AlchemyItem>(st_no);
+                break;
+            case RE::FormType::Book:
+                new_formid = FetchFake<RE::TESObjectBOOK>(st_no);
+                break;
+            case RE::FormType::Ingredient:
+                new_formid = FetchFake<RE::IngredientItem>(st_no);
+                break;
+            case RE::FormType::Misc:
+                new_formid = FetchFake<RE::TESObjectMISC>(st_no);
+                break;
+            case RE::FormType::Weapon:
+                new_formid = FetchFake<RE::TESObjectWEAP>(st_no);
+                break;
+            default:
+                logger::error("Form type not found.");
+                new_formid = 0;
+                break;
+        }
+
+        if (!new_formid) {
+            logger::error("Could not create copy form for source {}", editorid);
+            return 0;
+        }
+
+        return new_formid;
+    }
+
+    const StageNo GetLastStageNo() {
+        std::set<StageNo> stage_numbers;
+        for (const auto& [key, value] : stages) {
+			stage_numbers.insert(key);
+		}
+        for (const auto& stage_no : fake_stages) {
+            stage_numbers.insert(stage_no);
+        }
+        if (stage_numbers.empty()) {
+            logger::error("No stages found.");
+            InitFailed();
+			return 0;
+        }
+        // return maximum of the set
+        return *stage_numbers.rbegin();
+
     }
 };

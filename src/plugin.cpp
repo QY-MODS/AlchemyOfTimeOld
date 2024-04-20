@@ -14,7 +14,8 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
                      public RE::BSTEventSink<RE::InputEvent*>,
                      public RE::BSTEventSink<RE::TESSleepStopEvent>,
                      public RE::BSTEventSink<RE::TESWaitStopEvent>,
-                     public RE::BSTEventSink<RE::BGSActorCellEvent> {
+                     public RE::BSTEventSink<RE::BGSActorCellEvent>,
+                     public RE::BSTEventSink<RE::TESFormDeleteEvent> {
 
     OurEventSink() = default;
     OurEventSink(const OurEventSink&) = delete;
@@ -26,6 +27,7 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
     RE::UI* ui = RE::UI::GetSingleton();
 
     bool listen_menu = true;
+    bool listen_cellchange = true;
 
     FormID consume_equipped_id;  // set in equip event only when equipped and used in container event (consume)
     float consume_equipped_t;
@@ -43,6 +45,16 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
     void setListenMenu(bool val) { 
         std::lock_guard<std::mutex> lock(mutex);
         listen_menu = val; 
+    }
+
+    void setListenCellChange(bool val) { 
+		std::lock_guard<std::mutex> lock(mutex);
+		listen_cellchange = val; 
+	}
+
+    [[nodiscard]] bool getListenCellChange() {
+        std::lock_guard<std::mutex> lock(mutex);
+        return listen_cellchange;
     }
 
     [[nodiscard]] bool getListenMenu() { 
@@ -336,7 +348,14 @@ public:
         if (event->oldContainer==event->newContainer) return RE::BSEventNotifyControl::kContinue;
 
 
-        if (!Settings::IsItem(event->baseObj)) return RE::BSEventNotifyControl::kContinue;
+        if (!Settings::IsItem(event->baseObj)) {
+        	logger::trace("Not an item.");
+            if (event->oldContainer == player_refid || event->newContainer == player_refid) {
+                M->UpdateStages(event->oldContainer);
+                M->UpdateStages(event->newContainer);
+            }
+            return RE::BSEventNotifyControl::kContinue;
+        }
 
         if (event->oldContainer != player_refid && event->newContainer != player_refid && event->reference &&
             M->RefIsRegistered(Utilities::FunctionsSkyrim::WorldObject::TryToGetRefIDFromHandle(event->reference)) &&
@@ -378,7 +397,7 @@ public:
 #endif  // !NDEBUG
                     }
                 }
-                else { // demek ki world object
+                else { // demek ki world object ya da gaipten geldi
                     auto reference_ = event->reference;
                     logger::trace("Reference: {}", reference_.native_handle());
                     auto ref_id = Utilities::FunctionsSkyrim::WorldObject::TryToGetRefIDFromHandle(reference_);
@@ -592,6 +611,7 @@ public:
 
     // https:  // github.com/SeaSparrowOG/RainExtinguishesFires/blob/c1aee0045aeb987b2f70e495b301c3ae8bd7b3a3/src/loadEventManager.cpp#L15
     RE::BSEventNotifyControl ProcessEvent(const RE::BGSActorCellEvent* a_event, RE::BSTEventSource<RE::BGSActorCellEvent>*) {
+        if (!getListenCellChange()) return RE::BSEventNotifyControl::kContinue;
         if (!a_event) return RE::BSEventNotifyControl::kContinue;
         auto eventActorHandle = a_event->actor;
         auto eventActorPtr = eventActorHandle ? eventActorHandle.get() : nullptr;
@@ -607,12 +627,22 @@ public:
 
         if (a_event->flags.any(RE::BGSActorCellEvent::CellFlag::kEnter)) {
             logger::trace("Player entered cell: {}", cell->GetName());
+            setListenCellChange(false);
             M->ClearWOUpdateQueue();
             HandleWOsInCell();
+            setListenCellChange(true);
         }
 
         return RE::BSEventNotifyControl::kContinue;
 	
+    }
+
+    RE::BSEventNotifyControl ProcessEvent(const RE::TESFormDeleteEvent* a_event,
+                                          RE::BSTEventSource<RE::TESFormDeleteEvent>*) {
+        if (!a_event) return RE::BSEventNotifyControl::kContinue;
+        if (!a_event->formID) return RE::BSEventNotifyControl::kContinue;
+		M->HandleFormDelete(a_event->formID);
+        return RE::BSEventNotifyControl::kContinue;
     }
 };
 
@@ -626,6 +656,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
             Utilities::MsgBoxesNotifs::Windows::Po3ErrMsg();
             return;
         }
+        DFT = DynamicFormTracker::GetSingleton();
         Settings::LoadSettings();
         auto sources = std::vector<Source>();
         M = Manager::GetSingleton(sources);
@@ -654,6 +685,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
 #endif
         eventSourceHolder->AddEventSink<RE::TESSleepStopEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESWaitStopEvent>(eventSink);
+        eventSourceHolder->AddEventSink<RE::TESFormDeleteEvent>(eventSink);
         SKSE::GetCrosshairRefEventSource()->AddEventSink(eventSink);
         RE::PlayerCharacter::GetSingleton()->AsBGSActorCellEventSource()->AddEventSink(eventSink);
         logger::info("Event sinks added.");
@@ -669,6 +701,10 @@ void SaveCallback(SKSE::SerializationInterface* serializationInterface) {
     if (!M->Save(serializationInterface, Settings::kDataKey, Settings::kSerializationVersion)) {
         logger::critical("Failed to save Data");
     }
+    DFT->SendData();
+    if (!DFT->Save(serializationInterface, Settings::kDFDataKey, Settings::kSerializationVersion)) {
+		logger::critical("Failed to save Data");
+	}
 }
 
 void LoadCallback(SKSE::SerializationInterface* serializationInterface) {
@@ -679,16 +715,26 @@ void LoadCallback(SKSE::SerializationInterface* serializationInterface) {
 
 
     M->Reset();
+    DFT->Reset();
 
     std::uint32_t type;
     std::uint32_t version;
     std::uint32_t length;
 
-    bool cosave_found = false;
+    unsigned int cosave_found = 0;
     while (serializationInterface->GetNextRecordInfo(type, version, length)) {
         auto temp = Utilities::DecodeTypeCode(type);
 
-        if (version != Settings::kSerializationVersion) {
+
+        if (version == Settings::kSerializationVersion-1){
+            logger::info("Older version of Alchemy of Time detected.");
+            /*Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("You are using an older"
+                " version of Alchemy of Time (AoT). Versions older than 0.1.4 are unfortunately not supported."
+                "Please roll back to a save game where AoT was not installed or AoT version is 0.1.4 or newer.");*/
+            //continue;
+            cosave_found = 1; // DFT is not saved in older versions
+        }
+        else if (version != Settings::kSerializationVersion) {
             logger::critical("Loaded data has incorrect version. Recieved ({}) - Expected ({}) for Data Key ({})",
                              version, Settings::kSerializationVersion, temp);
             continue;
@@ -696,12 +742,13 @@ void LoadCallback(SKSE::SerializationInterface* serializationInterface) {
         switch (type) {
             case Settings::kDataKey: {
                 logger::trace("Loading Record: {} - Version: {} - Length: {}", temp, version, length);
-                if (!M->Load(serializationInterface)) {
-                    logger::critical("Failed to Load Data");
-                }
-                else {
-					cosave_found = true;
-				}
+                if (!M->Load(serializationInterface)) logger::critical("Failed to Load Data for Manager");
+                else cosave_found++;
+            } break;
+            case Settings::kDFDataKey: {
+				logger::trace("Loading Record: {} - Version: {} - Length: {}", temp, version, length);
+				if (!DFT->Load(serializationInterface)) logger::critical("Failed to Load Data for DFT");
+				else cosave_found++;
             } break;
             default:
                 logger::critical("Unrecognized Record Type: {}", temp);
@@ -709,11 +756,12 @@ void LoadCallback(SKSE::SerializationInterface* serializationInterface) {
         }
     }
 
-    if (cosave_found) {
+    if (cosave_found==2) {
         logger::info("Receiving Data.");
+		DFT->ReceiveData();
         M->ReceiveData();
         logger::info("Data loaded from skse co-save.");
-	} else logger::info("No cosave data found.");
+    } else logger::info("No cosave data found.");
 
     block_eventsinks = false;
 

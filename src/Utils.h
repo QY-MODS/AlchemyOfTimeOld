@@ -19,7 +19,7 @@
 #include <fstream>
 
 
-namespace Utilities{
+namespace Utilities {
 
     const auto mod_name = static_cast<std::string>(SKSE::PluginDeclaration::GetSingleton()->GetName());
     constexpr auto po3path = "Data/SKSE/Plugins/po3_Tweaks.dll";
@@ -401,27 +401,33 @@ namespace Utilities{
     namespace FunctionsSkyrim {
 
         RE::TESForm* GetFormByID(const RE::FormID id, const std::string& editor_id="") {
-            auto form = RE::TESForm::LookupByID(id);
-            if (form)
-                return form;
-            else if (!editor_id.empty()) {
-                form = RE::TESForm::LookupByEditorID(editor_id);
+            if (!editor_id.empty()) {
+                auto* form = RE::TESForm::LookupByEditorID(editor_id);
                 if (form) return form;
             }
+            auto form = RE::TESForm::LookupByID(id);
+            if (form) return form;
             return nullptr;
         };
 
         template <class T = RE::TESForm>
         static T* GetFormByID(const RE::FormID id, const std::string& editor_id="") {
-            T* form = RE::TESForm::LookupByID<T>(id);
-            if (form)
-                return form;
-            else if (!editor_id.empty()) {
-                form = RE::TESForm::LookupByEditorID<T>(editor_id);
+            if (!editor_id.empty()) {
+                auto* form = RE::TESForm::LookupByEditorID<T>(editor_id);
                 if (form) return form;
             }
+            T* form = RE::TESForm::LookupByID<T>(id);
+            if (form) return form;
             return nullptr;
         };
+
+        const std::string GetEditorID(const FormID a_formid) {
+            if (const auto form = RE::TESForm::LookupByID(a_formid)) {
+                return clib_util::editorID::get_editorID(form);
+            } else {
+                return "";
+            }
+        }
 
         FormID GetFormEditorIDFromString(const std::string formEditorId) {
             logger::trace("Getting formid from editorid: {}", formEditorId);
@@ -1790,6 +1796,8 @@ namespace Utilities{
         // https://github.com/Thiago099/DPF-Dynamic-Persistent-Forms
         namespace DynamicForm {
 
+            const bool IsDynamicFormID(const FormID a_formID) { return a_formID >= 0xFF000000; }
+
             static void copyBookAppearence(RE::TESForm* source, RE::TESForm* target) {
                 auto* sourceBook = source->As<RE::TESObjectBOOK>();
 
@@ -1904,145 +1912,6 @@ namespace Utilities{
                 copyComponent<RE::TESBipedModelForm>(source, target);
             }
 
-            void ReviveDynamicForm(RE::TESForm* fake, RE::TESForm* base, const FormID setFormID) {
-                fake->Copy(base);
-                auto weaponBaseForm = base->As<RE::TESObjectWEAP>();
-
-                auto weaponNewForm = fake->As<RE::TESObjectWEAP>();
-
-                auto bookBaseForm = base->As<RE::TESObjectBOOK>();
-
-                auto bookNewForm = fake->As<RE::TESObjectBOOK>();
-
-                auto ammoBaseForm = base->As<RE::TESAmmo>();
-
-                auto ammoNewForm = fake->As<RE::TESAmmo>();
-
-                if (weaponNewForm && weaponBaseForm) {
-                    weaponNewForm->firstPersonModelObject = weaponBaseForm->firstPersonModelObject;
-
-                    weaponNewForm->weaponData = weaponBaseForm->weaponData;
-
-                    weaponNewForm->criticalData = weaponBaseForm->criticalData;
-
-                    weaponNewForm->attackSound = weaponBaseForm->attackSound;
-
-                    weaponNewForm->attackSound2D = weaponBaseForm->attackSound2D;
-
-                    weaponNewForm->attackSound = weaponBaseForm->attackSound;
-
-                    weaponNewForm->attackFailSound = weaponBaseForm->attackFailSound;
-
-                    weaponNewForm->idleSound = weaponBaseForm->idleSound;
-
-                    weaponNewForm->equipSound = weaponBaseForm->equipSound;
-
-                    weaponNewForm->unequipSound = weaponBaseForm->unequipSound;
-
-                    weaponNewForm->soundLevel = weaponBaseForm->soundLevel;
-
-                    weaponNewForm->impactDataSet = weaponBaseForm->impactDataSet;
-
-                    weaponNewForm->templateWeapon = weaponBaseForm->templateWeapon;
-
-                    weaponNewForm->embeddedNode = weaponBaseForm->embeddedNode;
-
-                } else if (bookBaseForm && bookNewForm) {
-                    bookNewForm->data.flags = bookBaseForm->data.flags;
-
-                    bookNewForm->data.teaches.spell = bookBaseForm->data.teaches.spell;
-
-                    bookNewForm->data.teaches.actorValueToAdvance = bookBaseForm->data.teaches.actorValueToAdvance;
-
-                    bookNewForm->data.type = bookBaseForm->data.type;
-
-                    bookNewForm->inventoryModel = bookBaseForm->inventoryModel;
-
-                    bookNewForm->itemCardDescription = bookBaseForm->itemCardDescription;
-
-                } else if (ammoBaseForm && ammoNewForm) {
-                    ammoNewForm->GetRuntimeData().data.damage = ammoBaseForm->GetRuntimeData().data.damage;
-
-                    ammoNewForm->GetRuntimeData().data.flags = ammoBaseForm->GetRuntimeData().data.flags;
-
-                    ammoNewForm->GetRuntimeData().data.projectile = ammoBaseForm->GetRuntimeData().data.projectile;
-                }
-                /*else {
-                    new_form->Copy(baseForm);
-                }*/
-
-                copyComponent<RE::TESDescription>(base, fake);
-
-                copyComponent<RE::BGSKeywordForm>(base, fake);
-
-                copyComponent<RE::BGSPickupPutdownSounds>(base, fake);
-
-                copyComponent<RE::TESModelTextureSwap>(base, fake);
-
-                copyComponent<RE::TESModel>(base, fake);
-
-                copyComponent<RE::BGSMessageIcon>(base, fake);
-
-                copyComponent<RE::TESIcon>(base, fake);
-
-                copyComponent<RE::TESFullName>(base, fake);
-
-                copyComponent<RE::TESValueForm>(base, fake);
-
-                copyComponent<RE::TESWeightForm>(base, fake);
-
-                copyComponent<RE::BGSDestructibleObjectForm>(base, fake);
-
-                copyComponent<RE::TESEnchantableForm>(base, fake);
-
-                copyComponent<RE::BGSBlockBashData>(base, fake);
-
-                copyComponent<RE::BGSEquipType>(base, fake);
-
-                copyComponent<RE::TESAttackDamageForm>(base, fake);
-
-                copyComponent<RE::TESBipedModelForm>(base, fake);
-
-                if (setFormID != 0) fake->SetFormID(setFormID, false);
-            }
-
-            template <typename T>
-            const RE::FormID CreateFake(T* baseForm, const FormID setFormID = 0) {
-                logger::trace("CreateFakeContainer");
-
-                if (!baseForm) {
-                    logger::error("Real form is null.");
-
-                    return 0;
-                }
-
-                RE::TESForm* new_form = nullptr;
-
-                auto factory = RE::IFormFactory::GetFormFactoryByType(baseForm->GetFormType());
-
-                new_form = factory->Create();
-
-                // new_form = baseForm->CreateDuplicateForm(true, (void*)new_form)->As<T>();
-
-                if (!new_form) {
-                    logger::error("Failed to create new form.");
-                    return 0;
-                }
-                logger::trace("Original form id: {:x}", new_form->GetFormID());
-
-                ReviveDynamicForm(new_form, baseForm, setFormID);
-
-                const auto new_formid = new_form->GetFormID();
-
-                logger::trace("Created form with type: {}, Base ID: {:x}, Ref ID: {:x}, Name: {}",
-
-                             RE::FormTypeToString(new_form->GetFormType()), new_form->GetFormID(),
-                             new_form->GetFormID(),
-
-                             new_form->GetName());
-
-                return new_formid;
-            }
         };
 
     };
@@ -2505,13 +2374,13 @@ namespace Utilities{
         };
 
         struct StageUpdate {
-            Stage* oldstage=nullptr;
-            Stage* newstage=nullptr;
+            const Stage* oldstage;
+            const Stage* newstage;
             Count count=0;
             Duration update_time=0;
             bool new_is_fake=false;
 
-            StageUpdate(Stage* old, Stage* new_, Count c, 
+            StageUpdate(const Stage* old, const Stage* new_, Count c, 
                 Duration u_t,
                 bool fake)
 				: oldstage(old), newstage(new_), count(c), 
@@ -2522,7 +2391,17 @@ namespace Utilities{
         using SourceData = std::map<RefID,std::vector<StageInstance>>;
         using SaveDataLHS = std::pair<FormEditorID,RefID>;
         using SaveDataRHS = std::vector<StageInstancePlain>;
+        
+        struct DFSaveData {
+            FormID dyn_formid = 0;
+            std::pair<bool, uint32_t> custom_id = {false, 0};
+            float acteff_elapsed = -1.f;
+        };
+        using DFSaveDataLHS = std::pair<FormID,std::string>;
+        using DFSaveDataRHS = std::vector<DFSaveData>;
+
     };
+        
 
     // https://github.com/ozooma10/OSLAroused-SKSE/blob/master/src/Utilities/Ticker.h
     class Ticker {
@@ -2596,7 +2475,7 @@ namespace Utilities{
     }
 
     bool write_string(SKSE::SerializationInterface* a_intfc, const std::string& a_str) {
-        auto encodedStr = Functions::String::encodeString(a_str);
+        const auto encodedStr = Functions::String::encodeString(a_str);
         // i first need the size to know no of iterations
         const auto size = encodedStr.size();
         if (!a_intfc->WriteRecordData(size)) {
@@ -2779,6 +2658,115 @@ namespace Utilities{
          }
      };
 
+    class DFSaveLoadData : public BaseData<Types::DFSaveDataLHS, Types::DFSaveDataRHS> {
+     public:
+         void DumpToLog() override {
+             // nothing for now
+         }
 
-}
-    
+         [[nodiscard]] bool Save(SKSE::SerializationInterface* serializationInterface) override {
+             assert(serializationInterface);
+             Locker locker(m_Lock);
+
+             const auto numRecords = m_Data.size();
+             if (!serializationInterface->WriteRecordData(numRecords)) {
+                 logger::error("Failed to save {} data records", numRecords);
+                 return false;
+             }
+
+             for (const auto& [lhs, rhs] : m_Data) {
+                 // we serialize formid, editorid, and refid separately
+                 std::uint32_t formid = lhs.first;
+                 logger::trace("Formid:{}", formid);
+                 if (!serializationInterface->WriteRecordData(formid)) {
+                     logger::error("Failed to save formid");
+                     return false;
+                 }
+
+                 const std::string editorid = lhs.second;
+                 logger::trace("Editorid:{}", editorid);
+                 write_string(serializationInterface, editorid);
+
+                 // save the number of rhs records
+                 const auto numRhsRecords = rhs.size();
+                 if (!serializationInterface->WriteRecordData(numRhsRecords)) {
+                     logger::error("Failed to save the size {} of rhs records", numRhsRecords);
+                     return false;
+                 }
+
+                 for (const auto& rhs_ : rhs) {
+                     logger::trace("size of rhs_: {}", sizeof(rhs_));
+                     if (!serializationInterface->WriteRecordData(rhs_)) {
+                         logger::error("Failed to save data");
+                         return false;
+                     }
+                 }
+             }
+             return true;
+         }
+
+         [[nodiscard]] bool Save(SKSE::SerializationInterface* serializationInterface, std::uint32_t type,
+                                 std::uint32_t version) override {
+             if (!serializationInterface->OpenRecord(type, version)) {
+                 logger::error("Failed to open record for Data Serialization!");
+                 return false;
+             }
+
+             return Save(serializationInterface);
+         }
+
+         [[nodiscard]] bool Load(SKSE::SerializationInterface* serializationInterface) override {
+             assert(serializationInterface);
+
+             std::size_t recordDataSize;
+             serializationInterface->ReadRecordData(recordDataSize);
+             logger::info("Loading data from serialization interface with size: {}", recordDataSize);
+
+             Locker locker(m_Lock);
+             m_Data.clear();
+
+             logger::trace("Loading data from serialization interface.");
+             for (auto i = 0; i < recordDataSize; i++) {
+                 Types::DFSaveDataRHS rhs;
+
+                 std::uint32_t formid = 0;
+                 logger::trace("ReadRecordData:{}", serializationInterface->ReadRecordData(formid));
+                 if (!serializationInterface->ResolveFormID(formid, formid)) {
+                     logger::error("Failed to resolve form ID, 0x{:X}.", formid);
+                     continue;
+                 }
+
+                 std::string editorid;
+                 if (!read_string(serializationInterface, editorid)) {
+                     logger::error("Failed to read editorid");
+                     return false;
+                 }
+
+                 logger::trace("Formid:{}", formid);
+                 logger::trace("Editorid:{}", editorid);
+
+                 Types::DFSaveDataLHS lhs({formid, editorid});
+                 logger::trace("Reading value...");
+
+                 std::size_t rhsSize = 0;
+                 logger::trace("ReadRecordData: {}", serializationInterface->ReadRecordData(rhsSize));
+                 logger::trace("rhsSize: {}", rhsSize);
+
+                 for (auto j = 0; j < rhsSize; j++) {
+                     Types::DFSaveData rhs_;
+                     logger::trace("ReadRecordData: {}", serializationInterface->ReadRecordData(rhs_));
+                     logger::trace(
+                         "rhs_ content: dyn_formid: {}, customid_bool: {},"
+                         "customid: {}, acteff_elapsed: {}",
+                         rhs_.dyn_formid, rhs_.custom_id.first, rhs_.custom_id.second, rhs_.acteff_elapsed);
+                     rhs.push_back(rhs_);
+                 }
+
+                 m_Data[lhs] = rhs;
+                 logger::info("Loaded data for formid {}, editorid {}", formid, editorid);
+             }
+
+             return true;
+         }
+     };
+};

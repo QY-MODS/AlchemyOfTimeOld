@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Settings.h"
-#include "Utils.h"
 
 class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
     
@@ -45,6 +44,8 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
     bool update_is_busy = false;
 
     std::vector<std::tuple<FormID, Count, RefID, Duration>> to_register_go;
+
+    std::set<FormID> do_not_register;
 
 
 
@@ -116,16 +117,6 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
 		}
 	}
 
-
-    [[nodiscard]] const bool IsStage(FormID some_formid, Source* source) {
-        for (auto& [st_no, stage] : source->stages) {
-            if (stage.formid == some_formid) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     [[nodiscard]] const unsigned int GetNInstances() {
         unsigned int n = 0;
         for (auto& src : sources) {
@@ -138,7 +129,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
 
     [[nodiscard]] Source* _MakeSource(const FormID source_formid, Settings::DefaultSettings* settings) {
         if (!source_formid) return nullptr;
-        if (source_formid>=0xFF000000) return nullptr;
+        if (Utilities::FunctionsSkyrim::DynamicForm::IsDynamicFormID(source_formid)) return nullptr;
         //Source new_source(source_formid, "", empty_mgeff, settings);
         Source new_source(source_formid, "", settings);
         if (!new_source.IsHealthy()) return nullptr;
@@ -146,7 +137,15 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         return &sources.back();
     }
 
+    void CleanUpSourceData(Source* src){
+        if (!src) return;
+        setListenWOUpdate(false);
+        src->CleanUpData();
+        setListenWOUpdate(true);
+    }
+
     [[nodiscard]] Source* GetSource(const FormID some_formid) {
+        std::lock_guard<std::mutex> lock(mutex);
         if (!some_formid) return nullptr;
         const auto some_form = Utilities::FunctionsSkyrim::GetFormByID(some_formid);
         if (!some_form) {
@@ -156,15 +155,14 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         // maybe it already exists
         for (auto& src : sources) {
             if (!src.IsHealthy()) continue;
-            if (src.formid == some_formid) {
-                return &src;
-            }
-            for (auto& [st_no, stage] : src.stages) {
-                if (stage.formid == some_formid) {
-                    return &src;
-                }
-            }
+            if (src.IsStage(some_formid)) return &src;
         }
+
+        if (Utilities::FunctionsSkyrim::DynamicForm::IsDynamicFormID(some_formid)){
+            logger::trace("GetSource DynamicFormID: {}", some_formid);
+            return nullptr;
+        }
+
         // doesnt exist so we make new
         // registered stageler arasinda deil. yani fake de deil
         // custom stage mi deil mi onu anlamam lazim
@@ -196,16 +194,28 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         return nullptr;
     };
 
-    [[nodiscard]] const StageNo GetStageNoFromSource(Source* src,const FormID stage_id) {
-        logger::trace("GetStageNoFromSource");
-        StageNo stage_no=0; // doesnt matter
+    [[nodiscard]] Source* ForceGetSource(const FormID some_formid) {
+        auto src = GetSource(some_formid);  // also saves it to sources if it was created new
+        // can be null if it is not a custom stage and not registered before
         if (!src) {
-            RaiseMngrErr("Source is null.");
-            return stage_no;
+            logger::trace("No existing source and no custom settings found for the formid {}", some_formid);
+            const auto qform_type = Settings::GetQFormType(some_formid);
+            if (!Settings::IsItem(some_formid, qform_type, true)) {
+                logger::trace("Not an item.");
+                return nullptr;
+            } else if (!Settings::defaultsettings.contains(qform_type)) {
+                logger::trace("No default settings found for the qform_type {}", qform_type);
+                return nullptr;
+            } else if (!Settings::defaultsettings[qform_type].IsHealthy()) {
+                logger::trace("Default settings not loaded for the qform_type {}", qform_type);
+                return nullptr;
+            } else {
+                logger::trace("Creating new source for the formid {}", some_formid);
+                src = _MakeSource(some_formid,
+                                  nullptr);  // stage item olarak dusunulduyse, custom a baslangic itemi olarak koymali
+            }
         }
-        if (auto p_stage_no = src->GetStageNo(stage_id)) stage_no = *p_stage_no;
-        else RaiseMngrErr("Stage not found.");
-        return stage_no;
+        return src;
     }
 
     [[nodiscard]] StageInstance* GetWOStageInstance(RefID wo_refid) {
@@ -401,7 +411,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         Utilities::FunctionsSkyrim::WorldObject::SwapObjects(wo_ref, stage_bound);
     }
 
-    void ApplyStageInWorld(RE::TESObjectREFR* wo_ref, Stage& stage, RE::TESBoundObject* source_bound = nullptr) {
+    void ApplyStageInWorld(RE::TESObjectREFR* wo_ref, const Stage& stage, RE::TESBoundObject* source_bound = nullptr) {
         if (!source_bound) _ApplyStageInWorld_Custom(wo_ref, stage.GetBound());
         else {
             Utilities::FunctionsSkyrim::WorldObject::SwapObjects(wo_ref, source_bound);
@@ -725,11 +735,11 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
             }
             if (!src.data.contains(inventory_owner_refid)) continue;
             for (auto& st_inst : src.data.at(inventory_owner_refid)) {
-                if (st_inst.xtra.is_decayed || !src.stages.contains(st_inst.no)) continue;
+                if (st_inst.xtra.is_decayed || !src.IsStageNo(st_inst.no)) continue;
                 if (all_time_modulators.contains(st_inst.xtra.form_id)) {
                     const auto delay_slope = st_inst.GetDelaySlope();
                     if (delay_slope == 0) continue;
-                    const auto schranke = delay_slope > 0 ? src.stages.at(st_inst.no).duration : 0.f;
+                    const auto schranke = delay_slope > 0 ? src.GetStage(st_inst.no).duration : 0.f;
                     logger::trace("getting hitting time for {} with source formid {}", st_inst.xtra.form_id, src.formid);
                     const auto hitting_time = st_inst.GetHittingTime(schranke);
                     if (hitting_time<=0) {
@@ -897,17 +907,17 @@ public:
     }
 
     [[nodiscard]] const bool getListenContainerChange() {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        std::lock_guard<std::mutex> lock(mutex);
         return listen_container_change;
     }
 
     [[nodiscard]] const bool getPO3UoTInstalled() {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        std::lock_guard<std::mutex> lock(mutex);
         return po3_use_or_take;
     }
 
     [[nodiscard]] const bool getUninstalled() {
-        std::lock_guard<std::mutex> lock(mutex);  // Lock the mutex
+        std::lock_guard<std::mutex> lock(mutex);
         return isUninstalled;
     }
 
@@ -935,6 +945,7 @@ public:
     // giris noktasi
     [[nodiscard]] const bool RegisterAndGo(const FormID some_formid, const Count count, const RefID location_refid,
                                 Duration register_time = 0) {
+
         if (!some_formid) {
             logger::warn("Formid is null.");
             return false;
@@ -947,6 +958,10 @@ public:
             RaiseMngrErr("Location refid is null.");
             return false;
         }
+        if (do_not_register.contains(some_formid)) {
+			logger::trace("Formid is in do not register list.");
+			return false;
+		}
 
         if (GetNInstances() > _instance_limit) {
             logger::warn("Instance limit reached.");
@@ -955,7 +970,7 @@ public:
                             "skse co-save sizes.",
                             _instance_limit));
         }
-        if (some_formid >= 0xFF000000){
+        if (Utilities::FunctionsSkyrim::DynamicForm::IsDynamicFormID(some_formid)) {
             logger::trace("Skipping fake form at source creation.");
             return false;
         }
@@ -963,33 +978,19 @@ public:
         logger::trace("Registering new instance.Formid {} , Count {} , Location refid {}, register_time {}",
                       some_formid, count, location_refid, register_time);
         // make new registry
-        auto src = GetSource(some_formid);  // also saves it to sources if it was created new
-        // can be null if it is not a custom stage and not registered before
-        
+        auto src = ForceGetSource(some_formid);  // also saves it to sources if it was created new
         if (!src) {
-            logger::trace("No existing source and no custom settings found for the formid {}", some_formid);
-            const auto qform_type = Settings::GetQFormType(some_formid);
-            if (!Settings::IsItem(some_formid, qform_type, true)) {
-                logger::trace("Cannot register bcs Not an item.");
-                return false;
-            }
-            else if (!Settings::defaultsettings.contains(qform_type)){
-                logger::trace("Cannot register bcs No default settings found for the qform_type {}", qform_type);
-                return false;
-            } else if (!Settings::defaultsettings[qform_type].IsHealthy()) {
-                logger::trace("Cannot register bcs Default settings not loaded for the qform_type {}", qform_type);
-                return false;
-            } else {
-                logger::trace("Creating new source for the formid {}", some_formid);
-                src = _MakeSource(some_formid,nullptr);  // stage item olarak dusunulduyse, custom a baslangic itemi olarak koymali
-            }
-        }
-        if (!src) {
-            RaiseMngrErr("Register: Source is null.");
+            //RaiseMngrErr("Register: Source is null.");
+            logger::trace("Register: Source is null.");
+            do_not_register.insert(some_formid);
             return false;
+        } else if (!src->IsStage(some_formid)){
+            logger::critical("Register: some_formid is not a stage.");
+            //do_not_register.insert(some_formid);
+			return false;
         }
 
-        const auto stage_no = src->formid == some_formid ? 0 : GetStageNoFromSource(src, some_formid);
+        const auto stage_no = src->formid == some_formid ? 0 : src->GetStageNo(some_formid);
         auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(location_refid);
         if (!ref) {
             RaiseMngrErr("Register: Ref is null.");
@@ -1004,7 +1005,7 @@ public:
                 RaiseMngrErr("Register: InsertNewInstance failed 1.");
                 return false;
             }
-            const auto stage_formid = src->stages.at(stage_no).formid;
+            const auto stage_formid = src->GetStage(stage_no).formid;
             // to change from the source form to the stage form
             ApplyEvolutionInInventory(src->qFormType,ref, count, some_formid, stage_formid);
         } 
@@ -1015,10 +1016,10 @@ public:
                 return false;
             }
             auto bound =  src->IsFakeStage(stage_no) ? src->GetBoundObject() : nullptr;
-            for (const auto& [no,stg] : src->stages) {
+            /*for (const auto& [no,stg] : src->stages) {
 				logger::trace("Stage no {} formid {}, is fake {}",stg.no,stg.formid,src->IsFakeStage(stg.no));
-			}
-            ApplyStageInWorld(ref, src->stages.at(stage_no), bound);
+			}*/
+            ApplyStageInWorld(ref, src->GetStage(stage_no), bound);
         }
 
         UpdateStages(location_refid);
@@ -1100,13 +1101,12 @@ public:
         } else if (!source->IsHealthy()) {
 			logger::warn("HandleDrop: Source is not healthy!");
 			return;
-		}
-        else if (source->formid == dropped_formid && !IsStage(dropped_formid, source)) {
-            logger::warn("HandleDrop: Source same formid as dropped one and it is not a stage form! Can be bcs the item's evolution did not start yet.");
+		} else if (!source->IsStage(dropped_formid)) {
+            logger::warn("HandleDrop: Dropped form is not a stage.");
             return;
         }
         
-        source->CleanUpData(); // to ausschliessen decayed items
+        CleanUpSourceData(source); // to ausschliessen decayed items
         //source->PrintData();
         // print radius just for testing
         logger::trace("Radius: {}", Utilities::FunctionsSkyrim::WorldObject::GetDistanceFromPlayer(dropped_stage_ref));
@@ -1211,7 +1211,7 @@ public:
                         return RaiseMngrErr("HandleDrop: InsertNewInstance failed.");
                     }
                     auto bound = new_instance.xtra.is_fake ? source->GetBoundObject() : nullptr;
-                    ApplyStageInWorld(dropped_stage_ref, source->stages.at(new_instance.no), bound);
+                    ApplyStageInWorld(dropped_stage_ref, source->GetStage(new_instance.no), bound);
                     handled_first_stack = true;
                     // queue wo update
                     QueueWOUpdate(dropped_stage_ref->GetFormID(), hitting_time);
@@ -1227,7 +1227,7 @@ public:
                     if (!source->InsertNewInstance(new_instance, new_ref->GetFormID())) {
                         return RaiseMngrErr("HandleDrop: InsertNewInstance failed.");
                     }
-                    if (new_instance.xtra.is_fake) _ApplyStageInWorld_Fake(new_ref, source->stages.at(new_instance.no).GetExtraText());
+                    if (new_instance.xtra.is_fake) _ApplyStageInWorld_Fake(new_ref, source->GetStage(new_instance.no).GetExtraText());
                     // queue wo update
                     QueueWOUpdate(new_ref->GetFormID(), hitting_time);
                 }
@@ -1259,14 +1259,14 @@ public:
                     if (!source->MoveInstance(player_refid, dropped_stage_ref->GetFormID(), instance)) {
                         return RaiseMngrErr("HandleDrop: MoveInstance failed.");
                     }
-                    ApplyStageInWorld(dropped_stage_ref, source->stages.at(temp_stage_no), bound);
+                    ApplyStageInWorld(dropped_stage_ref, source->GetStage(temp_stage_no), bound);
                     handled_first_stack = true;
 
                 } 
                 else {
                     logger::trace("SADSJFHOADF 4");
                     const auto temp_is_fake = instance->xtra.is_fake;
-                    const char* extra_text = temp_is_fake ? source->stages.at(instance->no).GetExtraText() : nullptr;
+                    const char* extra_text = temp_is_fake ? source->GetStage(instance->no).GetExtraText() : nullptr;
                     const auto bound_to_drop = temp_is_fake ? source->GetBoundObject() : instance->GetBound();
                     auto new_ref =
                         Utilities::FunctionsSkyrim::WorldObject::DropObjectIntoTheWorld(bound_to_drop, instance->count);
@@ -1293,7 +1293,7 @@ public:
                 logger::error("HandleDrop: New ref is null.");
                 return;
             }
-            const auto __stage_no = GetStageNoFromSource(source, dropped_formid);
+            const auto __stage_no = source->GetStageNo(dropped_formid);
             if (!source->InitInsertInstanceWO(__stage_no, count, new_ref->GetFormID(),RE::Calendar::GetSingleton()->GetHoursPassed())) {
                 return RaiseMngrErr("HandleDrop: InsertNewInstance failed 2.");
             }
@@ -1308,7 +1308,7 @@ public:
 
         UpdateStages(player_ref);
 
-        if (!source->data.empty()) source->CleanUpData();
+        if (!source->data.empty()) CleanUpSourceData(source);
         //source->PrintData();
         //mutex.unlock();
     }
@@ -1350,7 +1350,7 @@ public:
         ApplyEvolutionInInventory(source->qFormType, npc_ref, count, pickedup_formid, instance_formid);
         if (eat && npc_refid == player_refid) RE::ActorEquipManager::GetSingleton()->EquipObject(RE::PlayerCharacter::GetSingleton(), 
             instance_bound,nullptr, count);
-        else source->CleanUpData();
+        else CleanUpSourceData(source);
 
         UpdateStages(npc_ref);
 
@@ -1371,8 +1371,8 @@ public:
             logger::warn("HandleConsume:Source not found.");
             return;
         }
-        if (stage_formid == source->formid && !IsStage(stage_formid, source)) {
-            logger::warn("HandleConsume:Formid is the same as the source formid.");
+        if (!source->IsStage(stage_formid)) {
+            logger::trace("HandleConsume:Formid is not a registered stage.");
             return;
         }
 
@@ -1431,7 +1431,7 @@ public:
 
         UpdateStages(player_ref);
 
-        if (!source->data.empty()) source->CleanUpData();
+        if (!source->data.empty()) CleanUpSourceData(source);
         logger::trace("HandleConsume: updated.");
 
     }
@@ -1593,7 +1593,7 @@ public:
         if (!ref->HasContainer()) return false;
         const auto src = GetSource(stage_formid);
         if (!src) return false;
-        if (src->formid==stage_formid && !IsStage(stage_formid,src)) return false;
+        if (!src->IsStage(stage_formid)) return false;
         if (src->data.contains(refid)) return true;
         return false;
     }
@@ -1645,7 +1645,7 @@ public:
                 logger::warn("LinkExternalContainer: Rest count: {}", rest_);
                 if (!RegisterAndGo(some_formid, rest_, externalcontainer)) logger::warn("LinkExternalContainer: RegisterAndGo failed.");
             }
-            source->CleanUpData();
+            CleanUpSourceData(source);
         } else if (!RegisterAndGo(some_formid, item_count, externalcontainer)) {
 #ifndef NDEBUG
             logger::warn("LinkExternalContainer: RegisterAndGo failed.");
@@ -1687,7 +1687,7 @@ public:
                 if (!RegisterAndGo(some_formid, rest_, player_refid))
                     logger::warn("UnLinkExternalContainer: RegisterAndGo failed.");
             }
-            source->CleanUpData();
+            CleanUpSourceData(source);
         } else if (!RegisterAndGo(some_formid, count, player_refid)) {
             logger::warn("UnLinkExternalContainer: RegisterAndGo failed.");
         }
@@ -1756,13 +1756,13 @@ public:
 			const auto& [formid, count, refid,r_time] = to_register_go.front();
             to_register_go.erase(to_register_go.begin());
             if (!RegisterAndGo(formid, count, refid, r_time)) {
-				logger::trace("UpdateStages: RegisterAndGo failed.");
+                logger::trace("UpdateStages: RegisterAndGo failed for form {} and loc {}.", formid,refid);
 			}
         }
 
         for (auto& src : sources) {
             if (src.data.empty()) continue;
-            src.CleanUpData();
+            CleanUpSourceData(&src);
 		}
 
 #ifndef NDEBUG
@@ -1778,9 +1778,12 @@ public:
     bool UpdateStages(RefID loc_refid) {
         logger::trace("Manager: Updating stages for loc_refid {}.",loc_refid);
         if (!loc_refid) {
+#ifndef NDEBUG
             logger::critical("UpdateStages: loc_refid is null.");
+#endif
             return false;
         }
+
         auto loc_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(loc_refid);
         if (!loc_ref) {
             logger::critical("UpdateStages: loc_ref is null.");
@@ -1834,42 +1837,24 @@ public:
         logger::info("Manager reset.");
     }
 
+    void HandleFormDelete(const FormID a_refid){
+        ENABLE_IF_NOT_UNINSTALLED
+        for (auto& src : sources) {
+			if (src.data.contains(a_refid)) {
+                logger::info("HandleFormDelete: Formid {}", a_refid);
+				for (auto& st_inst : src.data[a_refid]) {
+                    st_inst.count = 0;
+				}
+			}
+		}
+    }
+
     void SendData() {
         ENABLE_IF_NOT_UNINSTALLED
         // std::lock_guard<std::mutex> lock(mutex);
         logger::info("--------Sending data---------");
         Print();
         Clear();
-
-        //auto objmngr = RE::BGSCreatedObjectManager::GetSingleton();
-        //for (auto& ptn : objmngr->potions) {
-        //    // logger::info("Potions: {}", ptn.first);
-        //    logger::info("mg item: {}", ptn.second.magicItem->GetName());
-        //    logger::info("recount: {}", ptn.second.refCount);
-        //}
-
-        //for (auto& ptn : objmngr->poisons) {
-        //    // logger::info("Poisons: {} {}", ptn.first);
-        //    logger::info("mg item: {}", ptn.second.magicItem->GetName());
-        //    logger::info("recount: {}", ptn.second.refCount);
-        //}
-
-        //auto& _set = objmngr->queuedDeletes;
-        //for (auto& ptn : _set) {
-        //    logger::info("QueuedDeletes: {}", ptn->GetName());
-        //}
-
-        //auto plyr = RE::PlayerCharacter::GetSingleton();
-        //auto act_eff_list = plyr->GetMiddleHighProcess()->activeEffects;
-        auto act_eff_list = RE::PlayerCharacter::GetSingleton()->AsMagicTarget()->GetActiveEffectList();
-        
-
-        for (auto it = act_eff_list->begin(); it != act_eff_list->end(); ++it) {
-			auto act_eff = *it;
-            logger::info("act eff name {}", act_eff->GetBaseObject()->GetName());
-            logger::info("act eff dur {}", act_eff->duration);
-            logger::info("act eff elapsedSeconds {}", act_eff->elapsedSeconds);
-		}
 
         int n_instances = 0;
         for (auto& src : sources) {
@@ -1886,7 +1871,7 @@ public:
                     rhs.push_back(st_inst.GetPlain());
                     n_instances++;
                 }
-                SetData(lhs, rhs);
+                if (!rhs.empty()) SetData(lhs, rhs);
             }
         }
         logger::info("Data sent. Number of instances: {}", n_instances);
@@ -1916,54 +1901,33 @@ public:
             return;
         }
 
+        const auto loc_inventory_temp = loc_ref->GetInventory();
+        for (const auto& [bound, entry] : loc_inventory_temp) {
+            if (bound && Utilities::FunctionsSkyrim::DynamicForm::IsDynamicFormID(bound->GetFormID()) &&
+                std::strlen(bound->GetName()) == 0) {
+                RemoveItemReverse(loc_ref, nullptr, bound->GetFormID(), std::max(1, entry.first),
+                                  RE::ITEM_REMOVE_REASON::kRemove);
+            }
+		}
+
 
         // handle discrepancies in inventory vs registries
         std::map<FormID,std::vector<StageInstance*>> formid_instances_map = {};
         std::map<FormID, Count> total_registry_counts = {};
-        std::map<FormID, Count> total_fake_registry_counts = {};
         for (auto& src : sources) {
             if (src.data.empty()) continue;
             if (!src.data.contains(loc_refid)) continue;
             for (auto& st_inst : src.data[loc_refid]) { // bu liste onceski savele ayni deil cunku source.datayi _registeratreceivedata deistirdi
+                if (st_inst.xtra.is_decayed) continue;
+                if (st_inst.count<=0) continue;
                 const auto temp_formid = st_inst.xtra.form_id;
                 formid_instances_map[temp_formid].push_back(&st_inst);
                 if (!total_registry_counts.contains(temp_formid))
                     total_registry_counts[temp_formid] = st_inst.count;
                 else total_registry_counts[temp_formid] += st_inst.count;
-                if (st_inst.xtra.is_fake) {
-                    if (!total_fake_registry_counts.contains(temp_formid))
-                        total_fake_registry_counts[temp_formid] = st_inst.count;
-                    else total_fake_registry_counts[temp_formid] += st_inst.count;
-                }
-            }
-        }
-
-        // onceki sessiondan kalan fakeleri yok et
-        for (const auto fake_formid : locs_to_be_handled[loc_refid]) {
-            // resolve the fake formid in inventory
-            auto* fake_form = RE::TESForm::LookupByID<RE::TESBoundObject>(fake_formid);
-            if (!fake_form) {
-                logger::warn("Fake form is null.");
-                continue;
-            }
-            Utilities::FunctionsSkyrim::Inventory::RemoveAll(fake_form, loc_ref);
-            if (!total_registry_counts.contains(fake_formid)) {
-                logger::info("HandleLoc: Deleting fake formid {}.", fake_formid);
-                fake_form->SetDelete(true);
             }
         }
         
-        // I add the fakes but not the reals. if there are discrepancies in the reals, I reflect that in the registries in the next step
-        for (const auto& [formid_, count] : total_fake_registry_counts) {
-            if (count == 0) continue;
-            const auto bound = Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid_);
-            if (!bound) {
-                logger::warn("HandleLoc: Bound is null.");
-                continue;
-            }
-            AddItem(loc_ref, nullptr, formid_, count);
-        }
-
         // for every formid, handle the discrepancies
         const auto loc_inventory = loc_ref->GetInventory(); // formids are unique so i can pull it out of for-loop
         for (auto& [formid, instances] : formid_instances_map) {
@@ -1980,7 +1944,12 @@ public:
                 continue;
             }
             for (auto& instance : instances) {
-                if (diff <= instance->count) {
+                if (const auto bound = Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid);
+                    bound && instance->xtra.is_fake) {
+                    AddItem(loc_ref, nullptr, formid, diff);
+                    break;
+                }
+                else if (diff <= instance->count) {
                     instance->count -= diff;
                     break;
                 }
@@ -2027,39 +1996,24 @@ public:
 
         logger::trace("Registering new instance.Formid {} , Count {} , Location refid {}", source_formid, count, loc);
         // make new registry
-        auto src = GetSource(source_formid);  // also saves it to sources if it was created new
-        // can be null if it is not a custom stage and not registered before
+        
+        auto* src = ForceGetSource(source_formid);
         if (!src) {
-            logger::trace("No existing source and no custom settings found for the formid {}", source_formid);
-            const auto qform_type = Settings::GetQFormType(source_formid);
-            if (!Settings::IsItem(source_formid, qform_type, true)) {
-                logger::trace("Not an item.");
-                return nullptr;
-            } else if (!Settings::defaultsettings.contains(qform_type)) {
-                logger::trace("No default settings found for the qform_type {}", qform_type);
-                return nullptr;
-            } else if (!Settings::defaultsettings[qform_type].IsHealthy()) {
-                logger::trace("Default settings not loaded for the qform_type {}", qform_type);
-                return nullptr;
-            } else {
-                logger::trace("Creating new source for the formid {}", source_formid);
-                src = _MakeSource(source_formid,
-                                  nullptr);  // stage item olarak dusunulduyse, custom a baslangic itemi olarak koymali
-            }
-        }
-        if (!src) return nullptr;
+			logger::warn("Source could not be obtained.");
+			return nullptr;
+		}
         
         const auto stage_no = st_plain.no;
-        auto& stages = src->stages;
-        if (!stages.contains(stage_no)) {
+        if (!src->IsStageNo(stage_no)) {
             logger::warn("Stage not found.");
             return nullptr;
         }
 
         StageInstance new_instance(st_plain.start_time, stage_no, st_plain.count);
-        new_instance.xtra.form_id = stages[stage_no].formid;
-        new_instance.xtra.editor_id = clib_util::editorID::get_editorID(stages[stage_no].GetBound());
-        new_instance.xtra.crafting_allowed = stages[stage_no].crafting_allowed;
+        const auto& stage_temp = src->GetStage(stage_no);
+        new_instance.xtra.form_id = stage_temp.formid;
+        new_instance.xtra.editor_id = clib_util::editorID::get_editorID(stage_temp.GetBound());
+        new_instance.xtra.crafting_allowed = stage_temp.crafting_allowed;
         if (src->IsFakeStage(stage_no)) new_instance.xtra.is_fake = true;
 
         new_instance.SetDelay(st_plain);
@@ -2080,39 +2034,68 @@ public:
         logger::info("--------Receiving data---------");
 
         // std::lock_guard<std::mutex> lock(mutex);
+        
+        if (DFT->GetNDeleted() > 0) {
+            logger::critical("ReceiveData: Deleted forms exist.");
+            return RaiseMngrErr("ReceiveData: Deleted forms exist.");
+		}
 
-        /*auto plyr = RE::PlayerCharacter::GetSingleton();
-        auto cstr = plyr->GetMagicCaster(RE::MagicSystem::CastingSource::kInstant);
-        auto mead = RE::TESForm::LookupByID<RE::MagicItem>(0x00034c5d);
-        cstr->CastSpellImmediate(mead, true, plyr, .1f, false, 0.f,nullptr);
-        auto act_eff_list = plyr->AsMagicTarget()->GetActiveEffectList();
-        for (auto it = act_eff_list->begin(); it != act_eff_list->end(); ++it) {
-            auto act_eff = *it;
-            logger::info("act eff name {}", act_eff->GetBaseObject()->GetName());
-            logger::info("act eff dur {}", act_eff->duration);
-            act_eff->elapsedSeconds = 15;
-            logger::info("act eff elapsedSeconds {}", act_eff->elapsedSeconds);
-        }*/
 
-        //if (!empty_mgeff) return RaiseMngrErr("ReceiveData: Empty mgeff not there!");
         if (m_Data.empty()) {
             logger::warn("ReceiveData: No data to receive.");
             return;
         }
 
-        setListenContainerChange(false);
+        // I need to deal with the fake forms from last session
+        // trying to make sure that the fake forms in bank will be used when needed
+        const auto source_forms = DFT->GetSourceForms();
+        for (const auto& [source_formid, source_editorid] : source_forms) {
+            if (auto* source_temp = ForceGetSource(source_formid); // DFT nin receive datasinda editorid ile formid nin uyusmasini garantiledim
+                source_temp && source_temp->IsHealthy() && source_temp->formid == source_formid) {
+                StageNo stage_no_temp = 0;
+                while (source_temp->IsStageNo(stage_no_temp)) {
+                    // making sure that there will be a matching fake in the bank when requested later
+                    // if there are more fake stages than in the bank, np
+                    // if other way around, the unused fakes in the bank will be deleted
+                    if (source_temp->IsFakeStage(stage_no_temp)) {
+                        const auto fk_formid = DFT->Fetch(source_formid, source_editorid, static_cast<uint32_t>(stage_no_temp));
+                        if (fk_formid != 0) DFT->EditCustomID(fk_formid, static_cast<uint32_t>(stage_no_temp));
+                        else source_temp->GetStage(stage_no_temp); // creates the dynamic form with stage no as custom id
+				    }
+				    stage_no_temp++;
+                }
+		    }
+        }
+
+        DFT->ApplyMissingActiveEffects();
+
+        /////////////////////////////////
 
         int n_instances = 0;
         for (const auto& [lhs, rhs] : m_Data) {
             const auto& formeditorid = lhs.first;
-            const auto source_formid = formeditorid.form_id;
+            auto source_formid = formeditorid.form_id;
+            const auto& source_editorid = formeditorid.editor_id;
             const auto loc = lhs.second;
-            const auto source_form = Utilities::FunctionsSkyrim::GetFormByID(source_formid, formeditorid.editor_id);
+            if (!source_formid) {
+				logger::error("ReceiveData: Formid is null.");
+				continue;
+			}
+            if (source_editorid.empty()){
+                logger::error("ReceiveData: Editorid is empty.");
+				continue;
+            }
+            const auto source_form = Utilities::FunctionsSkyrim::GetFormByID(0, source_editorid);
             if (!source_form) {
-                logger::critical("ReceiveData: Source form not found. Saved formid: {}, editorid: {}",
-                                 formeditorid.form_id, formeditorid.editor_id);
+                logger::critical("ReceiveData: Source form not found. Saved formid: {}, editorid: {}", source_formid,
+                                 source_editorid);
                 continue;
             }
+            if (source_form->GetFormID()!=source_formid){
+				logger::warn("ReceiveData: Source formid does not match. Saved formid: {}, editorid: {}", source_formid,
+								 source_editorid);
+                source_formid = source_form->GetFormID();
+			}
             for (const auto& st_plain:rhs){
                 if (st_plain.is_fake) locs_to_be_handled[loc].push_back(st_plain.form_id);
                 auto* inserted_instance = _RegisterAtReceiveData(source_formid, loc, st_plain);
@@ -2124,18 +2107,38 @@ public:
             }
         }
 
-        _HandleLoc(player_ref);
-
-        auto it = locs_to_be_handled.find(player_refid);
-        if (it != locs_to_be_handled.end()) {
-            locs_to_be_handled.erase(it);
+        logger::trace("Deleting unused fake forms from bank.");
+        setListenContainerChange(false);
+        DFT->DeleteInactives();
+        setListenContainerChange(true);
+        if (DFT->GetNDeleted() > 0) {
+        	logger::warn("ReceiveData: Deleted forms exist. User is required to restart.");
+            Utilities::MsgBoxesNotifs::InGame::CustomErrMsg(
+				"It seems the configuration has changed from your previous session"
+                " that requires you to restart the game."
+                "DO NOT IGNORE THIS:"
+                "1. Save your game."
+                "2. Exit the game."
+                "3. Restart the game."
+                "4. Load the saved game."
+                "JUST DO IT! NOW! BEFORE DOING ANYTHING ELSE!"
+                );
+        } else {
+            _HandleLoc(player_ref);
+            auto it = locs_to_be_handled.find(player_refid);
+            if (it != locs_to_be_handled.end()) {
+                locs_to_be_handled.erase(it);
+            }
+            Print();
         }
+
 
         logger::info("--------Data received. Number of instances: {}---------", n_instances);
 
-        Print();
 
-        setListenContainerChange(true);
+
+        // deleting the fakes from last session in the bank that we know won't be used
+
     }
 
     void Print() {
