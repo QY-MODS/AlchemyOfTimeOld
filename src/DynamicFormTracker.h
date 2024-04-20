@@ -6,14 +6,12 @@ struct ActEff {
     float elapsed;
     std::pair<bool, uint32_t> custom_id;
 
-    const bool contains(const FormID formid) const {
-		return dynamicFormid == formid;
-	}
 };
 
 class DynamicFormTracker : public Utilities::DFSaveLoadData {
     
-    std::map<std::pair<FormID, std::string>, std::set<FormID>> forms; // Create populates this
+    // created form bank during the session. Create populates this.
+    std::map<std::pair<FormID, std::string>, std::set<FormID>> forms;
     std::map<FormID, uint32_t> customIDforms; // Fetch populates this
 
     std::set<FormID> active_forms; // _yield populates this
@@ -25,7 +23,16 @@ class DynamicFormTracker : public Utilities::DFSaveLoadData {
     bool block_create = false;
 
     //std::map<FormID,float> act_effs;
-    std::vector<ActEff> act_effs;
+    std::vector<ActEff> act_effs; // save file specific
+
+	[[nodiscard]] const float GetActiveEffectElapsed(const FormID dyn_formid) {
+		for (const auto& act_eff : act_effs) {
+			if (act_eff.dynamicFormid == dyn_formid) {
+				return act_eff.elapsed;
+			}
+		}
+		return -1.f;
+	}
 
     [[nodiscard]] const bool IsTracked(const FormID dynamic_formid){
         for (const auto& [base_pair, dyn_formset] : forms) {
@@ -372,11 +379,24 @@ public:
 	}
 
     std::vector<std::pair<FormID, std::string>> GetSourceForms(){
-        std::vector<std::pair<FormID, std::string>> source_forms;
+        std::set<std::pair<FormID, std::string>> source_forms;
 		for (const auto& [base, formset] : forms) {
-			source_forms.push_back(base);
+			source_forms.insert(base);
 		}
-		return source_forms;
+        for (const auto& act_eff : act_effs) {
+            const auto base_formid = act_eff.baseFormid;
+            const auto base_form = Utilities::FunctionsSkyrim::GetFormByID(base_formid);
+            if (!base_form) {
+				logger::error("Failed to get base form.");
+				continue;
+			}
+            const auto base_editorid = clib_util::editorID::get_editorID(base_form);
+            source_forms.insert({base_formid, base_editorid});
+		}
+
+        auto source_forms_vector = std::vector<std::pair<FormID, std::string>>(source_forms.begin(), source_forms.end());
+
+		return source_forms_vector;
     }
 
     void EditCustomID(const FormID dynamic_formid, const uint32_t custom_id) {
@@ -384,7 +404,7 @@ public:
         else if (IsTracked(dynamic_formid)) customIDforms.insert({dynamic_formid, custom_id});
 	}
 
-    // tries to fetch by custom id. regardless, returns formid if there is
+    // tries to fetch by custom id. regardless, returns formid if there is in the bank
     const FormID Fetch(const FormID baseFormID, const std::string baseEditorID,
                              const std::optional<uint32_t> customID) {
         auto* base_form = Utilities::FunctionsSkyrim::GetFormByID(baseFormID, baseEditorID);
@@ -481,13 +501,20 @@ public:
         auto act_eff_list = RE::PlayerCharacter::GetSingleton()->AsMagicTarget()->GetActiveEffectList();
 
         int n_act_effs = 0;
+        std::set<FormID> act_effs_temp;
         for (auto it = act_eff_list->begin(); it != act_eff_list->end(); ++it) {
             if (const auto* act_eff = *it){
                 const auto act_eff_formid = act_eff->spell->GetFormID();
                 if (active_forms.contains(act_eff_formid)) {
-                    if (act_effs.contains(act_eff_formid)) logger::warn("Active effect already exists in act effs.");
+                    if (act_effs_temp.contains(act_eff_formid)) logger::warn("Active effect already exists in act effs.");
                     else n_act_effs++;
-					act_effs[act_eff_formid] = act_eff->elapsedSeconds;
+                    bool has_customid = customIDforms.contains(act_eff_formid);
+                    const uint32_t customid_temp = has_customid ? customIDforms[act_eff_formid] : 0;
+                    act_effs.push_back({GetOGFormOfDynamic(act_eff_formid)->GetFormID(),
+                                        act_eff_formid,
+                                        act_eff->elapsedSeconds,
+                                        {false, customid_temp}});
+                    act_effs_temp.insert(act_eff_formid);
 				}
             }
         }
@@ -500,8 +527,7 @@ public:
                 if (!IsActive(dyn_formid)) logger::critical("Inactive form found in forms set.");
                 const bool has_customid = customIDforms.contains(dyn_formid);
                 const uint32_t customid = has_customid ? customIDforms[dyn_formid] : 0;
-                const bool is_act_eff_spell = act_effs.contains(dyn_formid);
-                const float act_eff_elpsd = is_act_eff_spell ? act_effs[dyn_formid] : -1.f;
+                const float act_eff_elpsd = GetActiveEffectElapsed(dyn_formid);
                 Utilities::Types::DFSaveData saveData({dyn_formid, {has_customid, customid}, act_eff_elpsd});
                 rhs.push_back(saveData);
                 n_fakes++;
@@ -528,15 +554,19 @@ public:
             else base_formid = temp_form->GetFormID();
             for (const auto& saveData : rhs) {
                 const auto dyn_formid = saveData.dyn_formid;
+                const auto [has_customid, customid] = saveData.custom_id;
+                const auto act_eff_elpsd = saveData.acteff_elapsed;
+                if (act_eff_elpsd >= 0.f) {
+                    act_effs.push_back({base_formid, dyn_formid, act_eff_elpsd, {has_customid, customid}});
+                    n_act_effs++;
+                }
                 if (const auto dyn_form = RE::TESForm::LookupByID(dyn_formid); !dyn_form) {
                     logger::info("Dynamic form {:x} does not exist.", dyn_formid);
-					continue;
-                } 
-                else if (const auto dyn_form_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(dyn_formid)) {
+                    continue;
+                } else if (const auto dyn_form_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(dyn_formid)) {
                     logger::info("Dynamic form {:x} is a refr with name {}.", dyn_formid, dyn_form->GetName());
-					continue;
-                }
-                else if (!_underlying_check(temp_form, dyn_form)) {
+                    continue;
+                } else if (!_underlying_check(temp_form, dyn_form)) {
                     // bcs load callback happens after the game loads, there is a chance that the game will assign new
                     // stuff to "previously" our dynamic formid especially for stuff like dynamic food which is not
                     // serialized by the game
@@ -544,17 +574,16 @@ public:
                                   dyn_form->GetName());
                     continue;
                 }
-				const auto [has_customid, customid] = saveData.custom_id;
-				const auto act_eff_elpsd = saveData.acteff_elapsed;
-				if (!forms[{base_formid, base_editorid}].insert(dyn_formid).second) {
+                if (forms.contains({base_formid, base_editorid}) &&
+                    forms[{base_formid, base_editorid}].contains(dyn_formid)) {
+                    logger::trace("Form with ID {:x} already exist for baseid {} and editorid {}.", dyn_formid,
+                                 base_formid, base_editorid);
+                }
+				else if (!forms[{base_formid, base_editorid}].insert(dyn_formid).second) {
 					logger::error("Failed to insert new form into forms.");
 					continue;
 				}
 				if (has_customid) customIDforms[dyn_formid] = customid;
-                if (act_eff_elpsd >= 0.f) {
-                    act_effs[dyn_formid] = act_eff_elpsd;
-                    n_act_effs++;
-                }
                 n_fakes++;
 			}
 		}
@@ -568,7 +597,7 @@ public:
 
     void Reset() {
 		// std::lock_guard<std::mutex> lock(mutex);
-		forms.clear();
+		//forms.clear();
 		customIDforms.clear();
 		active_forms.clear();
 		deleted_forms.clear();
@@ -578,44 +607,35 @@ public:
 
     void ApplyMissingActiveEffects() {
 
-        std::map<FormID, float> new_act_effs;
+        std::map<FormID, float> new_act_effs; // terrible name
         // i need to change the formids in act_effs if they are not valid to valid ones
-        for (auto it = act_effs.begin(); it != act_effs.end();) {
-			if (!RE::TESForm::LookupByID(it->first)) {
-                const auto elapsed = it->second;
-                // get custom id of the form and try to find another form with the same custom id and same base form
-                bool found = false;
-                if (customIDforms.contains(it->first)) {
-					const auto custom_id = customIDforms[it->first];
-					for (const auto& [base_pair, dyn_formset] : forms) {
-						if (dyn_formset.contains(it->first)) {
-							for (const auto dyn_formid : dyn_formset) {
-                                if (dyn_formid == it->first) continue;
-								if (customIDforms.contains(dyn_formid) && 
-                                    customIDforms[dyn_formid] == custom_id &&
-                                    RE::TESForm::LookupByID(dyn_formid)) {
-									new_act_effs[dyn_formid] = elapsed;
-                                    found = true;
-									break;
-								}
-							}
-						}
-                        if (found) break;
-					}
-				}
-
-				logger::trace("Form with ID {:x} does not exist. Removing from act effs.", it->first);
-				it = act_effs.erase(it);
-			} else {
-				++it;
+        for (auto it = act_effs.begin(); it != act_effs.end();++it) {
+            const auto elpsd = it->elapsed;
+            if (it->elapsed < 0.f) {
+				logger::error("Elapsed time is negative. Removing from act effs.");
+				continue;
 			}
+            const auto& [has_cstmid, custom_id] = it->custom_id;
+            const auto base_mg_item = Utilities::FunctionsSkyrim::GetFormByID(it->baseFormid);
+            const auto dynamicFormid = it->dynamicFormid;
+            if (!base_mg_item) {
+				logger::error("Failed to get base form.");
+				continue;
+			}
+            if (!has_cstmid) {
+                new_act_effs[dynamicFormid] = elpsd;
+                continue;
+            }
+            const auto dyn_formid = GetByCustomID(custom_id, it->baseFormid, clib_util::editorID::get_editorID(base_mg_item));
+            if (!dyn_formid) {
+                logger::error("Failed to get form by custom id. Removing from act effs.");
+                continue;
+            }
+			new_act_effs[dyn_formid] = elpsd;
 		}
 
-        for (const auto& [formid, elapsed] : new_act_effs) {
-			act_effs[formid] = elapsed;
-		}
-
-        if (act_effs.empty()) return;
+        act_effs.clear();
+        if (new_act_effs.empty()) return;
 
 
         auto plyr = RE::PlayerCharacter::GetSingleton();
@@ -629,7 +649,7 @@ public:
             if (const auto* act_eff = *it) {
                 if (const auto mg_item = act_eff->spell) {
                     const auto mg_item_formid = mg_item->GetFormID();
-                    if (act_effs.contains(mg_item_formid)) act_effs.erase(mg_item_formid);
+                    if (new_act_effs.contains(mg_item_formid)) new_act_effs.erase(mg_item_formid);
                 }
             }
         }
@@ -639,7 +659,7 @@ public:
             logger::error("Failed to get player as magic caster.");
             return;
         }
-        for (const auto& [item_formid, elapsed] : act_effs) {
+        for (const auto& [item_formid, elapsed] : new_act_effs) {
             auto* item = RE::TESForm::LookupByID<RE::MagicItem>(item_formid);
             if (!item) {
                 logger::error("Failed to get item by formid.");
@@ -654,17 +674,18 @@ public:
             if (auto* act_eff = *it) {
                 if (const auto mg_item = act_eff->spell) {
                     const auto mg_item_formid = mg_item->GetFormID();
-                    if (act_effs.contains(mg_item_formid)) {
-                        if (act_eff->duration > act_effs[mg_item_formid]) {
-                            act_eff->elapsedSeconds = act_effs[mg_item_formid];
+                    if (new_act_effs.contains(mg_item_formid)) {
+                        if (act_eff->duration > new_act_effs[mg_item_formid]) {
+                            act_eff->elapsedSeconds = new_act_effs[mg_item_formid];
                         } else {
                             act_eff->elapsedSeconds = act_eff->duration - 1;
                         }
-                        act_effs.erase(mg_item_formid);
+                        new_act_effs.erase(mg_item_formid);
                     }
                 }
             }
         }
+
     };
 };
 
