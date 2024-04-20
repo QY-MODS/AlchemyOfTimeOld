@@ -715,6 +715,7 @@ void LoadCallback(SKSE::SerializationInterface* serializationInterface) {
 
 
     M->Reset();
+    DFT->Reset();
 
     std::uint32_t type;
     std::uint32_t version;
@@ -726,10 +727,12 @@ void LoadCallback(SKSE::SerializationInterface* serializationInterface) {
 
 
         if (version == Settings::kSerializationVersion-1){
-            Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("You are using an older"
+            logger::info("Older version of Alchemy of Time detected.");
+            /*Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("You are using an older"
                 " version of Alchemy of Time (AoT). Versions older than 0.1.4 are unfortunately not supported."
-                "Please roll back to a save game where AoT was not installed or AoT version is 0.1.4 or newer.");
-            continue;
+                "Please roll back to a save game where AoT was not installed or AoT version is 0.1.4 or newer.");*/
+            //continue;
+            cosave_found = 1; // DFT is not saved in older versions
         }
         else if (version != Settings::kSerializationVersion) {
             logger::critical("Loaded data has incorrect version. Recieved ({}) - Expected ({}) for Data Key ({})",

@@ -1907,6 +1907,8 @@ public:
             if (src.data.empty()) continue;
             if (!src.data.contains(loc_refid)) continue;
             for (auto& st_inst : src.data[loc_refid]) { // bu liste onceski savele ayni deil cunku source.datayi _registeratreceivedata deistirdi
+                if (st_inst.xtra.is_decayed) continue;
+                if (st_inst.count<=0) continue;
                 const auto temp_formid = st_inst.xtra.form_id;
                 formid_instances_map[temp_formid].push_back(&st_inst);
                 if (!total_registry_counts.contains(temp_formid))
@@ -1931,7 +1933,12 @@ public:
                 continue;
             }
             for (auto& instance : instances) {
-                if (diff <= instance->count) {
+                if (const auto bound = Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formid);
+                    bound && instance->xtra.is_fake) {
+                    AddItem(loc_ref, nullptr, formid, diff);
+                    break;
+                }
+                else if (diff <= instance->count) {
                     instance->count -= diff;
                     break;
                 }
@@ -2032,7 +2039,7 @@ public:
         // trying to make sure that the fake forms in bank will be used when needed
         const auto source_forms = DFT->GetSourceForms();
         for (const auto& [source_formid, source_editorid] : source_forms) {
-            if (const auto* source_temp = ForceGetSource(source_formid);
+            if (auto* source_temp = ForceGetSource(source_formid); // DFT nin receive datasinda editorid ile formid nin uyusmasini garantiledim
                 source_temp && source_temp->IsHealthy() && source_temp->formid == source_formid) {
                 StageNo stage_no_temp = 0;
                 while (source_temp->IsStageNo(stage_no_temp)) {
@@ -2042,12 +2049,14 @@ public:
                     if (source_temp->IsFakeStage(stage_no_temp)) {
                         const auto fk_formid = DFT->Fetch(source_formid, source_editorid, static_cast<uint32_t>(stage_no_temp));
                         if (fk_formid != 0) DFT->EditCustomID(fk_formid, static_cast<uint32_t>(stage_no_temp));
+                        else source_temp->GetStage(stage_no_temp); // creates the dynamic form with stage no as custom id
 				    }
 				    stage_no_temp++;
                 }
 		    }
         }
 
+        DFT->ApplyMissingActiveEffects();
 
         /////////////////////////////////
 
@@ -2087,35 +2096,38 @@ public:
             }
         }
 
-        _HandleLoc(player_ref);
-
-        auto it = locs_to_be_handled.find(player_refid);
-        if (it != locs_to_be_handled.end()) {
-            locs_to_be_handled.erase(it);
-        }
-
-        logger::info("--------Data received. Number of instances: {}---------", n_instances);
-
-        Print();
-
-
-        // deleting the fakes from last session in the bank that we know won't be used
         logger::trace("Deleting unused fake forms from bank.");
+        setListenContainerChange(false);
         DFT->DeleteInactives();
+        setListenContainerChange(true);
         if (DFT->GetNDeleted() > 0) {
-        	logger::info("ReceiveData: Deleted forms exist. User is required to restart.");
+        	logger::warn("ReceiveData: Deleted forms exist. User is required to restart.");
             Utilities::MsgBoxesNotifs::InGame::CustomErrMsg(
 				"It seems the configuration has changed from your previous session"
-                "that requires you to restart the game."
+                " that requires you to restart the game."
                 "DO NOT IGNORE THIS:"
                 "1. Save your game."
                 "2. Exit the game."
                 "3. Restart the game."
                 "4. Load the saved game."
+                "JUST DO IT! NOW! BEFORE DOING ANYTHING ELSE!"
                 );
+        } else {
+            _HandleLoc(player_ref);
+            auto it = locs_to_be_handled.find(player_refid);
+            if (it != locs_to_be_handled.end()) {
+                locs_to_be_handled.erase(it);
+            }
+            Print();
         }
 
-        DFT->ApplyMissingActiveEffects();
+
+        logger::info("--------Data received. Number of instances: {}---------", n_instances);
+
+
+
+        // deleting the fakes from last session in the bank that we know won't be used
+
     }
 
     void Print() {

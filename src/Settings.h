@@ -1707,8 +1707,10 @@ private:
 				return 0;
 			}
             const auto& name = stages.at(st_no).name;
-            if (!name.empty()) {
-                stage_form->fullName = std::string(stage_form->fullName.c_str()) + " (" + name + ")";
+            const auto og_name = RE::TESForm::LookupByID(formid)->GetName();
+            const auto new_name = std::string(og_name) + " (" + name + ")";
+            if (!name.empty() && std::strcmp(stage_form->fullName.c_str(), new_name.c_str()) != 0) {
+                stage_form->fullName = new_name;
                 logger::info("Updated name of fake form to {}", name);
             }
 
