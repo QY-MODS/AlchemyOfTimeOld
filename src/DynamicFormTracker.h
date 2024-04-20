@@ -1,5 +1,16 @@
 #include "Utils.h"
 
+struct ActEff {
+    FormID baseFormid;
+    FormID dynamicFormid;
+    float elapsed;
+    std::pair<bool, uint32_t> custom_id;
+
+    const bool contains(const FormID formid) const {
+		return dynamicFormid == formid;
+	}
+};
+
 class DynamicFormTracker : public Utilities::DFSaveLoadData {
     
     std::map<std::pair<FormID, std::string>, std::set<FormID>> forms; // Create populates this
@@ -10,10 +21,11 @@ class DynamicFormTracker : public Utilities::DFSaveLoadData {
 
 
     std::mutex mutex;
-    unsigned int form_limit = 10000;
+    const unsigned int form_limit = 10000;
     bool block_create = false;
 
-    std::map<FormID,float> act_effs;
+    //std::map<FormID,float> act_effs;
+    std::vector<ActEff> act_effs;
 
     [[nodiscard]] const bool IsTracked(const FormID dynamic_formid){
         for (const auto& [base_pair, dyn_formset] : forms) {
@@ -229,23 +241,32 @@ class DynamicFormTracker : public Utilities::DFSaveLoadData {
         if (!forms.contains(base)) return;
 
         if (auto newForm = RE::TESForm::LookupByID(dynamic_formid)) {
-            if (auto* virtualMachine = RE::BSScript::Internal::VirtualMachine::GetSingleton()) {
-                auto* handlePolicy = virtualMachine->GetObjectHandlePolicy();
-                auto* bindPolicy = virtualMachine->GetObjectBindPolicy();
 
-                if (handlePolicy && bindPolicy) {
-                    auto newHandler = handlePolicy->GetHandleForObject(newForm->GetFormType(), newForm);
-
-                    if (newHandler != handlePolicy->EmptyHandle()) {
-                        auto* vm_scripts_hashmap = &virtualMachine->attachedScripts;
-                        auto newHandlerScripts_it = vm_scripts_hashmap->find(newHandler);
-
-                        if (newHandlerScripts_it != vm_scripts_hashmap->end()) {
-                            vm_scripts_hashmap->clear();
-                        }
-                    }
+            if (auto bound_temp = newForm->As<RE::TESBoundObject>(); bound_temp) {
+                auto player = RE::PlayerCharacter::GetSingleton();
+                auto player_inventory = player->GetInventory();
+                if (auto it = player_inventory.find(bound_temp); it != player_inventory.end()) {
+                    player->RemoveItem(bound_temp, it->second.first, RE::ITEM_REMOVE_REASON::kRemove, nullptr, nullptr);
                 }
-            }
+			}
+
+            //if (auto* virtualMachine = RE::BSScript::Internal::VirtualMachine::GetSingleton()) {
+            //    auto* handlePolicy = virtualMachine->GetObjectHandlePolicy();
+            //    auto* bindPolicy = virtualMachine->GetObjectBindPolicy();
+
+            //    if (handlePolicy && bindPolicy) {
+            //        auto newHandler = handlePolicy->GetHandleForObject(newForm->GetFormType(), newForm);
+
+            //        if (newHandler != handlePolicy->EmptyHandle()) {
+            //            auto* vm_scripts_hashmap = &virtualMachine->attachedScripts;
+            //            auto newHandlerScripts_it = vm_scripts_hashmap->find(newHandler);
+
+            //            if (newHandlerScripts_it != vm_scripts_hashmap->end()) {
+            //                vm_scripts_hashmap[newHandler].clear();
+            //            }
+            //        }
+            //    }
+            //}
             delete newForm;
         }
 
@@ -253,6 +274,71 @@ class DynamicFormTracker : public Utilities::DFSaveLoadData {
         customIDforms.erase(dynamic_formid);
         active_forms.erase(dynamic_formid);
         deleted_forms.insert(dynamic_formid);
+    }
+
+    [[nodiscard]] const bool _underlying_check(const RE::TESForm* underlying, const RE::TESForm* derivative) const {
+        if (underlying->GetFormType() != derivative->GetFormType()) {
+            logger::trace("Form types do not match.");
+            return false;
+        }
+
+        // alchemy
+        const auto alch_underlying = underlying->As<RE::AlchemyItem>();
+        const auto alch_derivative = derivative->As<RE::AlchemyItem>();
+        bool asd1 = alch_underlying != nullptr;
+        bool asd2 = alch_derivative != nullptr;
+        if (const int asd = asd1 + asd2; asd % 2 != 0) {
+            logger::trace("Alchemy status does not match.");
+            return false;
+        }
+
+        if (alch_underlying && alch_derivative) {
+            if (alch_underlying->IsPoison() != alch_derivative->IsPoison()) {
+                logger::trace("Poison status does not match.");
+                return false;
+            }
+
+            if (alch_underlying->IsFood() != alch_derivative->IsFood()) {
+                logger::trace("Food status does not match.");
+                return false;
+            }
+
+            if (alch_underlying->IsMedicine() != alch_derivative->IsMedicine()) {
+                logger::trace("Medicine status does not match.");
+                return false;
+            }
+        }
+
+        // ingredient
+        const auto ingr_underlying = underlying->As<RE::IngredientItem>();
+        const auto ingr_derivative = derivative->As<RE::IngredientItem>();
+        asd1 = ingr_underlying != nullptr;
+        asd2 = ingr_derivative != nullptr;
+        if (const int asd = asd1 + asd2; asd % 2 != 0) {
+            logger::trace("Ingredient status does not match.");
+            return false;
+        }
+
+        if (ingr_underlying && ingr_derivative) {
+            if (ingr_underlying->IsFood() != ingr_derivative->IsFood()) {
+                logger::trace("Food status does not match.");
+                return false;
+            }
+
+            if (ingr_underlying->IsPoison() != ingr_derivative->IsPoison()) {
+                logger::trace("Poison status does not match.");
+                return false;
+            }
+
+            if (ingr_underlying->IsMedicine() != ingr_derivative->IsMedicine()) {
+                logger::trace("Medicine status does not match.");
+                return false;
+            }
+        }
+
+        // TODO ergänzen as you enable other modules
+
+        return true;
     }
 
 public:
@@ -298,6 +384,7 @@ public:
         else if (IsTracked(dynamic_formid)) customIDforms.insert({dynamic_formid, custom_id});
 	}
 
+    // tries to fetch by custom id. regardless, returns formid if there is
     const FormID Fetch(const FormID baseFormID, const std::string baseEditorID,
                              const std::optional<uint32_t> customID) {
         auto* base_form = Utilities::FunctionsSkyrim::GetFormByID(baseFormID, baseEditorID);
@@ -310,7 +397,8 @@ public:
         if (customID.has_value()) {
             const auto new_formid = GetByCustomID(customID.value(), baseFormID, baseEditorID);
             if (const auto dyn_form = _yield(new_formid, base_form)) return dyn_form->GetFormID();
-        } else if (const auto formset = GetFormSet(baseFormID, baseEditorID); !formset.empty()) {
+        } 
+        if (const auto formset = GetFormSet(baseFormID, baseEditorID); !formset.empty()) {
             for (const auto _formid : formset) {
                 if (IsActive(_formid)) continue;
                 if (const auto dyn_form = _yield(_formid, base_form)) return dyn_form->GetFormID();
@@ -353,8 +441,182 @@ public:
         return 0;
     }
 
+    [[maybe_unused]] void ReviveAll() {
+        for (const auto& [base, formset] : forms) {
+            auto* base_form = Utilities::FunctionsSkyrim::GetFormByID(base.first, base.second);
+            if (!base_form) {
+                logger::error("Failed to get base form.");
+                continue;
+            }
+            for (const auto _formid : formset) {
+                if (const auto dyn_form = _yield(_formid, base_form)) {
+                    logger::info("Revived form with ID: {:x}", dyn_form->GetFormID());
+                }
+            }
+        }
+    }
+
+    const std::set<FormID> GetFormSet(const FormID base_formid, std::string base_editorid = "") {
+        if (base_editorid.empty()) {
+            base_editorid = Utilities::FunctionsSkyrim::GetEditorID(base_formid);
+            if (base_editorid.empty()) {
+                return {};
+            }
+        }
+        const std::pair<FormID, std::string> key = {base_formid, base_editorid};
+        if (forms.contains(key)) return forms[key];
+        return {};
+    };
+
+    const size_t GetNDeleted() {
+		return deleted_forms.size();
+	}
+
+    void SendData() {
+        // std::lock_guard<std::mutex> lock(mutex);
+        logger::info("--------Sending data (DFT) ---------");
+        Clear();
+
+        act_effs.clear();
+        auto act_eff_list = RE::PlayerCharacter::GetSingleton()->AsMagicTarget()->GetActiveEffectList();
+
+        int n_act_effs = 0;
+        for (auto it = act_eff_list->begin(); it != act_eff_list->end(); ++it) {
+            if (const auto* act_eff = *it){
+                const auto act_eff_formid = act_eff->spell->GetFormID();
+                if (active_forms.contains(act_eff_formid)) {
+                    if (act_effs.contains(act_eff_formid)) logger::warn("Active effect already exists in act effs.");
+                    else n_act_effs++;
+					act_effs[act_eff_formid] = act_eff->elapsedSeconds;
+				}
+            }
+        }
+
+        int n_fakes = 0;
+        for (const auto& [base_pair, dyn_formset] : forms) {
+            Utilities::Types::DFSaveDataLHS lhs({base_pair.first, base_pair.second});
+            Utilities::Types::DFSaveDataRHS rhs;
+			for (const auto dyn_formid : dyn_formset) {
+                if (!IsActive(dyn_formid)) logger::critical("Inactive form found in forms set.");
+                const bool has_customid = customIDforms.contains(dyn_formid);
+                const uint32_t customid = has_customid ? customIDforms[dyn_formid] : 0;
+                const bool is_act_eff_spell = act_effs.contains(dyn_formid);
+                const float act_eff_elpsd = is_act_eff_spell ? act_effs[dyn_formid] : -1.f;
+                Utilities::Types::DFSaveData saveData({dyn_formid, {has_customid, customid}, act_eff_elpsd});
+                rhs.push_back(saveData);
+                n_fakes++;
+			}
+            if (!rhs.empty()) SetData(lhs, rhs);
+        }
+
+        logger::info("Number of dynamic forms sent: {}", n_fakes);
+        logger::info("Number of active effects sent: {}", n_act_effs);
+        logger::info("--------Data sent (DFT) ---------");
+    };
+
+    void ReceiveData() {
+        // std::lock_guard<std::mutex> lock(mutex);
+		logger::info("--------Receiving data (DFT) ---------");
+
+        int n_fakes = 0;
+        int n_act_effs = 0;
+        for (const auto& [lhs, rhs] : m_Data) {
+            auto base_formid = lhs.first;
+            const auto& base_editorid = lhs.second;
+            const auto temp_form = Utilities::FunctionsSkyrim::GetFormByID(0, base_editorid);
+            if (!temp_form) logger::critical("Failed to get base form.");
+            else base_formid = temp_form->GetFormID();
+            for (const auto& saveData : rhs) {
+                const auto dyn_formid = saveData.dyn_formid;
+                if (const auto dyn_form = RE::TESForm::LookupByID(dyn_formid); !dyn_form) {
+                    logger::info("Dynamic form {:x} does not exist.", dyn_formid);
+					continue;
+                } 
+                else if (const auto dyn_form_ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(dyn_formid)) {
+                    logger::info("Dynamic form {:x} is a refr with name {}.", dyn_formid, dyn_form->GetName());
+					continue;
+                }
+                else if (!_underlying_check(temp_form, dyn_form)) {
+                    // bcs load callback happens after the game loads, there is a chance that the game will assign new
+                    // stuff to "previously" our dynamic formid especially for stuff like dynamic food which is not
+                    // serialized by the game
+                    logger::trace("Underlying check failed for dynamic form {:x} with name {}.", dyn_formid,
+                                  dyn_form->GetName());
+                    continue;
+                }
+				const auto [has_customid, customid] = saveData.custom_id;
+				const auto act_eff_elpsd = saveData.acteff_elapsed;
+				if (!forms[{base_formid, base_editorid}].insert(dyn_formid).second) {
+					logger::error("Failed to insert new form into forms.");
+					continue;
+				}
+				if (has_customid) customIDforms[dyn_formid] = customid;
+                if (act_eff_elpsd >= 0.f) {
+                    act_effs[dyn_formid] = act_eff_elpsd;
+                    n_act_effs++;
+                }
+                n_fakes++;
+			}
+		}
+
+        logger::info("Number of dynamic forms received: {}", n_fakes);
+        logger::info("Number of active effects received: {}", n_act_effs);
+        // need to check if formids and editorids are valid
+        logger::info("--------Data received (DFT) ---------");
+
+	};
+
+    void Reset() {
+		// std::lock_guard<std::mutex> lock(mutex);
+		forms.clear();
+		customIDforms.clear();
+		active_forms.clear();
+		deleted_forms.clear();
+		act_effs.clear();
+        block_create = false;
+	}
+
     void ApplyMissingActiveEffects() {
+
+        std::map<FormID, float> new_act_effs;
+        // i need to change the formids in act_effs if they are not valid to valid ones
+        for (auto it = act_effs.begin(); it != act_effs.end();) {
+			if (!RE::TESForm::LookupByID(it->first)) {
+                const auto elapsed = it->second;
+                // get custom id of the form and try to find another form with the same custom id and same base form
+                bool found = false;
+                if (customIDforms.contains(it->first)) {
+					const auto custom_id = customIDforms[it->first];
+					for (const auto& [base_pair, dyn_formset] : forms) {
+						if (dyn_formset.contains(it->first)) {
+							for (const auto dyn_formid : dyn_formset) {
+                                if (dyn_formid == it->first) continue;
+								if (customIDforms.contains(dyn_formid) && 
+                                    customIDforms[dyn_formid] == custom_id &&
+                                    RE::TESForm::LookupByID(dyn_formid)) {
+									new_act_effs[dyn_formid] = elapsed;
+                                    found = true;
+									break;
+								}
+							}
+						}
+                        if (found) break;
+					}
+				}
+
+				logger::trace("Form with ID {:x} does not exist. Removing from act effs.", it->first);
+				it = act_effs.erase(it);
+			} else {
+				++it;
+			}
+		}
+
+        for (const auto& [formid, elapsed] : new_act_effs) {
+			act_effs[formid] = elapsed;
+		}
+
         if (act_effs.empty()) return;
+
 
         auto plyr = RE::PlayerCharacter::GetSingleton();
         auto mg_target = plyr->AsMagicTarget();
@@ -383,12 +645,6 @@ public:
                 logger::error("Failed to get item by formid.");
                 continue;
             }
-            //        auto* OGform = GetOGFormOfDynamic(item_formid);
-            //        if (!OGform){
-            //            logger::error("Failed to get original form of dynamic form.");
-            // continue;
-            //        }
-            //        ReviveDynamicForm(item, OGform, 0);
             mg_caster->CastSpellImmediate(item, false, plyr, 1.0f, false, 0.0f, nullptr);
         }
 
@@ -409,95 +665,7 @@ public:
                 }
             }
         }
-
-        act_effs.clear();
     };
-
-    const std::set<FormID> GetFormSet(const FormID base_formid, std::string base_editorid = "") {
-        if (base_editorid.empty()) {
-            base_editorid = Utilities::FunctionsSkyrim::GetEditorID(base_formid);
-            if (base_editorid.empty()) {
-                return {};
-            }
-        }
-        const std::pair<FormID, std::string> key = {base_formid, base_editorid};
-        if (forms.contains(key)) return forms[key];
-        return {};
-    };
-
-    const size_t GetNDeleted() {
-		return deleted_forms.size();
-	}
-
-    void SendData() {
-        // std::lock_guard<std::mutex> lock(mutex);
-        logger::info("--------Sending data (DFT) ---------");
-        Clear();
-
-        act_effs.clear();
-        auto act_eff_list = RE::PlayerCharacter::GetSingleton()->AsMagicTarget()->GetActiveEffectList();
-
-        for (auto it = act_eff_list->begin(); it != act_eff_list->end(); ++it) {
-            if (const auto* act_eff = *it){
-                const auto act_eff_formid = act_eff->spell->GetFormID();
-                if (active_forms.contains(act_eff_formid)) {
-					act_effs[act_eff_formid] = act_eff->elapsedSeconds;
-				}
-            }
-        }
-
-        for (const auto& [base_pair, dyn_formset] : forms) {
-            Utilities::Types::DFSaveDataLHS lhs({base_pair.first, base_pair.second});
-            Utilities::Types::DFSaveDataRHS rhs;
-			for (const auto dyn_formid : dyn_formset) {
-                if (!IsActive(dyn_formid)) logger::critical("Inactive form found in forms set.");
-                const bool has_customid = customIDforms.contains(dyn_formid);
-                const uint32_t customid = has_customid ? customIDforms[dyn_formid] : 0;
-                const bool is_act_eff_spell = act_effs.contains(dyn_formid);
-                const float act_eff_elpsd = is_act_eff_spell ? act_effs[dyn_formid] : -1.f;
-                Utilities::Types::DFSaveData saveData({dyn_formid, {has_customid, customid}, act_eff_elpsd});
-                rhs.push_back(saveData);
-			}
-            if (!rhs.empty()) SetData(lhs, rhs);
-        }
-    };
-
-    void ReceiveData() {
-        // std::lock_guard<std::mutex> lock(mutex);
-		logger::info("--------Receiving data (DFT) ---------");
-		Clear();
-		forms.clear();
-		customIDforms.clear();
-		active_forms.clear();
-		deleted_forms.clear();
-		act_effs.clear();
-
-        for (const auto& [lhs, rhs] : m_Data) {
-            auto base_formid = lhs.first;
-            const auto& base_editorid = lhs.second;
-            const auto temp_form = Utilities::FunctionsSkyrim::GetFormByID(0, base_editorid);
-            if (!temp_form) logger::critical("Failed to get base form.");
-            else base_formid = temp_form->GetFormID();
-            for (const auto& saveData : rhs) {
-                const auto dyn_formid = saveData.dyn_formid;
-                const auto dyn_form = RE::TESForm::LookupByID(dyn_formid);
-                if (!dyn_form) {
-					logger::info("Dynamic form does not exist.");
-					continue;
-				}
-				const auto [has_customid, customid] = saveData.custom_id;
-				const auto act_eff_elpsd = saveData.acteff_elapsed;
-				forms[{base_formid, base_editorid}].insert(dyn_formid);
-				if (has_customid) customIDforms[dyn_formid] = customid;
-                if (act_eff_elpsd >= 0.f) act_effs[dyn_formid] = act_eff_elpsd;
-			}
-		}
-
-        // need to check if formids and editorids are valid
-        logger::info("--------Data received (DFT) ---------");
-
-	};
-
 };
 
 DynamicFormTracker* DFT = nullptr;

@@ -715,6 +715,7 @@ void LoadCallback(SKSE::SerializationInterface* serializationInterface) {
 
 
     M->Reset();
+    DFT->Reset();
 
     std::uint32_t type;
     std::uint32_t version;
