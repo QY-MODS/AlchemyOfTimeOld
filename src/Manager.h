@@ -1779,7 +1779,7 @@ public:
         logger::trace("Manager: Updating stages for loc_refid {}.",loc_refid);
         if (!loc_refid) {
 #ifndef NDEBUG
-            logger::critical("UpdateStages: loc_refid is null.");
+            logger::warn("UpdateStages: loc_refid is null.");
 #endif
             return false;
         }
