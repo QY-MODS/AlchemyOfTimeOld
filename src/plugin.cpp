@@ -149,6 +149,7 @@ public:
 
     void HandleWOsInCell() {
         if (!world_objects_evolve) return;
+        logger::trace("Handling world objects in cell.");
         M->UpdateStages(player_refid);
         Utilities::FunctionsSkyrim::WorldObject::ForEachRefInCell(
             [this](RE::TESObjectREFR* arg) { this->HandleWO(arg); });
