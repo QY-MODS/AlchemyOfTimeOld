@@ -25,6 +25,23 @@ class DynamicFormTracker : public Utilities::DFSaveLoadData {
     //std::map<FormID,float> act_effs;
     std::vector<ActEff> act_effs; // save file specific
 
+    void CleanseFormsets() {
+        for (auto it = forms.begin(); it != forms.end(); ++it) {
+            auto& [base, formset] = *it;
+            for (auto it2 = formset.begin(); it2 != formset.end();) {
+                if (!Utilities::FunctionsSkyrim::GetFormByID(*it2)) {
+                    logger::trace("Form with ID {:x} does not exist. Removing from formset.", *it2);
+                    it2 = formset.erase(it2);
+                    customIDforms.erase(*it2);
+                    active_forms.erase(*it2);
+                    //deleted_forms.erase(*it2);
+                } else {
+                    ++it2;
+                }
+            }
+        }
+    }
+
 	[[nodiscard]] const float GetActiveEffectElapsed(const FormID dyn_formid) {
 		for (const auto& act_eff : act_effs) {
 			if (act_eff.dynamicFormid == dyn_formid) {
@@ -274,13 +291,14 @@ class DynamicFormTracker : public Utilities::DFSaveLoadData {
             //        }
             //    }
             //}
+            logger::warn("Deleting form with ID: {:x}", dynamic_formid);
             delete newForm;
+            deleted_forms.insert(dynamic_formid);
         }
 
         forms[base].erase(dynamic_formid);
         customIDforms.erase(dynamic_formid);
         active_forms.erase(dynamic_formid);
-        deleted_forms.insert(dynamic_formid);
     }
 
     [[nodiscard]] const bool _underlying_check(const RE::TESForm* underlying, const RE::TESForm* derivative) const {
@@ -367,6 +385,7 @@ public:
 
     void DeleteInactives() {
 		std::lock_guard<std::mutex> lock(mutex);
+        logger::trace("Deleting inactives.");
         for (auto& [base, formset] : forms) {
 		    size_t index = 0;
             while (index < formset.size()) {
@@ -524,7 +543,7 @@ public:
             Utilities::Types::DFSaveDataLHS lhs({base_pair.first, base_pair.second});
             Utilities::Types::DFSaveDataRHS rhs;
 			for (const auto dyn_formid : dyn_formset) {
-                if (!IsActive(dyn_formid)) logger::critical("Inactive form found in forms set.");
+                if (!IsActive(dyn_formid)) logger::critical("Inactive form {:x} found in forms set.",dyn_formid);
                 const bool has_customid = customIDforms.contains(dyn_formid);
                 const uint32_t customid = has_customid ? customIDforms[dyn_formid] : 0;
                 const float act_eff_elpsd = GetActiveEffectElapsed(dyn_formid);
@@ -602,9 +621,10 @@ public:
     void Reset() {
 		// std::lock_guard<std::mutex> lock(mutex);
 		//forms.clear();
+        CleanseFormsets();
 		customIDforms.clear();
 		active_forms.clear();
-		deleted_forms.clear();
+		//deleted_forms.clear();
 		act_effs.clear();
         block_create = false;
 	};
@@ -613,7 +633,9 @@ public:
         for (const auto& [base, formset] : forms) {
 			logger::info("---------------------Base formid: {:x}, EditorID: {}---------------------", base.first, base.second);
 			for (const auto _formid : formset) {
-				logger::info("Dynamic formid: {:x} with name: {}", _formid, Utilities::FunctionsSkyrim::GetFormByID(_formid)->GetName());
+                const auto _form = Utilities::FunctionsSkyrim::GetFormByID(_formid);
+                const auto _name = _form ? _form->GetName() : "NULL";
+                logger::info("Dynamic formid: {:x} with name: {}", _formid, _name);
 			}
 		}
     }

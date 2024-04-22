@@ -1841,7 +1841,7 @@ public:
         ENABLE_IF_NOT_UNINSTALLED
         for (auto& src : sources) {
 			if (src.data.contains(a_refid)) {
-                logger::info("HandleFormDelete: Formid {}", a_refid);
+                logger::warn("HandleFormDelete: Formid {}", a_refid);
 				for (auto& st_inst : src.data[a_refid]) {
                     st_inst.count = 0;
 				}
@@ -2035,10 +2035,10 @@ public:
 
         // std::lock_guard<std::mutex> lock(mutex);
         
-        if (DFT->GetNDeleted() > 0) {
-            logger::critical("ReceiveData: Deleted forms exist.");
-            return RaiseMngrErr("ReceiveData: Deleted forms exist.");
-		}
+  //      if (DFT->GetNDeleted() > 0) {
+  //          logger::critical("ReceiveData: Deleted forms exist.");
+  //          return RaiseMngrErr("ReceiveData: Deleted forms exist.");
+		//}
 
 
         if (m_Data.empty()) {
