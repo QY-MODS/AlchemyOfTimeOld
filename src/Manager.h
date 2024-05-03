@@ -504,8 +504,8 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
             return;
         }
         addTo->AddObjectToContainer(bound, xList, count, addFrom);
-        //logger::trace("Refreshing inventory for newly added item.");
-        //Utilities::FunctionsSkyrim::Menu::SendInventoryUpdateMessage(addTo, bound);
+        logger::trace("Refreshing inventory for newly added item.");
+        Utilities::FunctionsSkyrim::Menu::SendInventoryUpdateMessage(addTo, bound);
         setListenContainerChange(true);
     }
 
