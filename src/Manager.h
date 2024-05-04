@@ -16,6 +16,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
     std::map<RefID,std::vector<FormID>> locs_to_be_handled; // onceki sessiondan kalan fake formlar
 
     bool worldobjectsevolve = false;
+    bool should_reset = false;
 
     // Use Or Take Compatibility
     bool po3_use_or_take = false;
@@ -279,32 +280,18 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
                       inventory_owner->GetName(),
                       update_count, old_item, new_item);
 
-        auto inventory = inventory_owner->GetInventory();
-        auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
-        /*if (entry != inventory.end() && entry->second.second->extraLists && entry->second.second->extraLists->front()) {
-            AddItem(inventory_owner, nullptr, new_item, update_count, entry->second.second->extraLists->front());
+        const auto inventory = inventory_owner->GetInventory();
+        const auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
+        if (entry == inventory.end()) {
+            logger::error("Item not found in inventory.");
+            return;
         }
-        else AddItem(inventory_owner, nullptr, new_item, update_count);*/
-        if (entry == inventory.end()) logger::error("Item not found in inventory.");
         else if (entry->second.second->IsQuestObject()) {
 			logger::warn("Item is a quest object.");
 			return;
 		}
-        // check if it is hotkeyed
-        /*bool is_hotkeyed = false;
-        std::uint8_t hotkey;
-        if (entry->second.second && entry->second.second->extraLists && !entry->second.second->extraLists->empty()) {
-            if (entry->second.second->extraLists->front()) {
-                if (entry->second.second->extraLists->front()->HasType<RE::ExtraHotkey>()) {
-                    is_hotkeyed = true;
-                    hotkey = entry->second.second->extraLists->front()->GetByType<RE::ExtraHotkey>()->hotkey.underlying();
-                }
-            }
-        }*/
-        else {
-            RemoveItemReverse(inventory_owner, nullptr, old_item, std::min(update_count, entry->second.first),
-                              RE::ITEM_REMOVE_REASON::kRemove);
-        }
+        else RemoveItemReverse(
+            inventory_owner, nullptr, old_item, std::min(update_count, entry->second.first),RE::ITEM_REMOVE_REASON::kRemove);
         AddItem(inventory_owner, nullptr, new_item, update_count);
         logger::trace("Stage updated in inventory.");
 
@@ -315,8 +302,8 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         logger::trace("Updating stage in inventory of {} Count {} , Old item {} , New item {}",
                       inventory_owner->GetName(), update_count, old_item, new_item);
 
-        auto inventory = inventory_owner->GetInventory();
-        auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
+        const auto inventory = inventory_owner->GetInventory();
+        const auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
         if (entry == inventory.end()) {
             logger::error("Item not found in inventory.");
             return;
@@ -327,7 +314,6 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         bool has_xList = Utilities::FunctionsSkyrim::Inventory::EntryHasXData(entry->second.second.get());
         
         const auto __count = std::min(update_count, entry->second.first);
-        //else AddItem(inventory_owner, nullptr, new_item, update_count);
         auto ref_handle = Utilities::FunctionsSkyrim::WorldObject::DropObjectIntoTheWorld(RE::TESForm::LookupByID<RE::TESBoundObject>(new_item),
                                                            __count);
         if (has_xList) {
@@ -344,12 +330,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         }
         setListenContainerChange(true);
         
-        //AddItem(inventory_owner, nullptr, new_item, update_count, {});
-        if (entry != inventory.end()) {
-            RemoveItemReverse(inventory_owner, nullptr, old_item, __count,
-                                RE::ITEM_REMOVE_REASON::kRemove);
-        }
-        else logger::error("Item not found in inventory.");
+        RemoveItemReverse(inventory_owner, nullptr, old_item, __count,RE::ITEM_REMOVE_REASON::kRemove);
         logger::trace("Stage updated in inventory.");
     }
 
@@ -781,7 +762,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
 
     void RaiseMngrErr(const std::string err_msg_ = "Error") {
         logger::critical("{}", err_msg_);
-        Utilities::MsgBoxesNotifs::InGame::CustomErrMsg(err_msg_);
+        Utilities::MsgBoxesNotifs::InGame::CustomMsg(err_msg_);
         Utilities::MsgBoxesNotifs::InGame::GeneralErr();
         Uninstall();
     }
@@ -803,6 +784,9 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
             if (Settings::INI_settings["Other Settings"].contains("WorldObjectsEvolve")) {
                 worldobjectsevolve = Settings::INI_settings["Other Settings"]["WorldObjectsEvolve"];
             } else logger::warn("WorldObjectsEvolve not found.");
+            if (Settings::INI_settings["Other Settings"].contains("bReset")) {
+				should_reset = Settings::INI_settings["Other Settings"]["bReset"];
+            } else logger::warn("bReset not found.");
         } 
         else logger::critical("Other Settings not found.");
         
@@ -965,7 +949,7 @@ public:
 
         if (GetNInstances() > _instance_limit) {
             logger::warn("Instance limit reached.");
-            Utilities::MsgBoxesNotifs::InGame::CustomErrMsg(
+            Utilities::MsgBoxesNotifs::InGame::CustomMsg(
                 std::format("The mod is tracking over {} instances. Maybe it is not bad to check your memory usage and "
                             "skse co-save sizes.",
                             _instance_limit));
@@ -1988,7 +1972,7 @@ public:
 
         if (GetNInstances() > _instance_limit) {
             logger::warn("Instance limit reached.");
-            Utilities::MsgBoxesNotifs::InGame::CustomErrMsg(
+            Utilities::MsgBoxesNotifs::InGame::CustomMsg(
                 std::format("The mod is tracking over {} instances. Maybe it is not bad to check your memory usage and "
                             "skse co-save sizes.",
                             _instance_limit));
@@ -2044,7 +2028,12 @@ public:
         if (m_Data.empty()) {
             logger::warn("ReceiveData: No data to receive.");
             return;
-        }
+        } else if (should_reset) {
+			logger::info("ReceiveData: User wants to reset.");
+			Reset();
+            Utilities::MsgBoxesNotifs::InGame::CustomMsg("The mod has been reset.");
+            return;
+		}
 
         // I need to deal with the fake forms from last session
         // trying to make sure that the fake forms in bank will be used when needed
@@ -2113,7 +2102,7 @@ public:
         setListenContainerChange(true);
         if (DFT->GetNDeleted() > 0) {
         	logger::warn("ReceiveData: Deleted forms exist. User is required to restart.");
-            Utilities::MsgBoxesNotifs::InGame::CustomErrMsg(
+            Utilities::MsgBoxesNotifs::InGame::CustomMsg(
 				"It seems the configuration has changed from your previous session"
                 " that requires you to restart the game."
                 "DO NOT IGNORE THIS:"
@@ -2134,11 +2123,6 @@ public:
 
 
         logger::info("--------Data received. Number of instances: {}---------", n_instances);
-
-
-
-        // deleting the fakes from last session in the bank that we know won't be used
-
     }
 
     void Print() {
@@ -2148,23 +2132,6 @@ public:
             src.PrintData();
         }
     }
-
-   // const std::map<FormID, std::pair<StageNo,float>> GetActiveFakeStageEffElapseds() const {
-   //     const auto& allowed_qform_types = Settings::mgeffs_allowedQFORMS;
-   //     std::map<FormID, std::pair<StageNo,float>> active_fake_stage_eff_dur = {};
-   //     for (const auto& src : sources) {
-   //         if (!Utilities::Functions::Vector::HasElement(allowed_qform_types, src.qFormType)) continue;
-   //         if (src.fake_effects.empty()) continue;
-   //         const std::map<StageNo, std::vector<StageEffect>> def_effs = src.defaultsettings->effects;
-   //         for (const auto& [st_no, st_effects] : def_effs) {
-   //             for (const auto& st_eff:st_effects){
-   //                 if (!Utilities::Functions::Vector::HasElement(src.fake_effects,st_eff.beffect)) continue;
-   //                 active_fake_stage_eff_dur[st_eff.beffect] = {st_no, };
-   //                 
-   //             }
-			//}
-   //     }
-   // }
 
 #undef ENABLE_IF_NOT_UNINSTALLED
 };

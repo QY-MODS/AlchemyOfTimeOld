@@ -394,7 +394,7 @@ public:
 					else {
 						logger::error("Could not get vendor chest");
 #ifndef NDEBUG
-						Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Could not get vendor chest.");
+						Utilities::MsgBoxesNotifs::InGame::CustomMsg("Could not get vendor chest.");
 #endif  // !NDEBUG
                     }
                 }
@@ -494,7 +494,7 @@ public:
                         }
                     } else {
                         logger::error("Could not get vendor chest");
-						Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Could not get vendor chest.");
+						Utilities::MsgBoxesNotifs::InGame::CustomMsg("Could not get vendor chest.");
 					
                     }
                 }
@@ -528,7 +528,7 @@ public:
             else {
                 logger::warn("Item got removed from player inventory due to unknown reason.");
 #ifndef NDEBUG
-                Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Item got removed from player inventory due to unknown reason.");
+                Utilities::MsgBoxesNotifs::InGame::CustomMsg("Item got removed from player inventory due to unknown reason.");
 #endif  // !NDEBUG
                 // remove from one of the instances
                 M->HandleConsume(event->baseObj);
@@ -666,7 +666,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         SKSE::MessagingInterface::kPostLoadGame) {
         logger::info("New or Post-load game.");
         if (Settings::failed_to_load) {
-            Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Failed to load settings. Check log for details.");
+            Utilities::MsgBoxesNotifs::InGame::CustomMsg("Failed to load settings. Check log for details.");
             M->Uninstall();
 			return;
         }
@@ -729,7 +729,7 @@ void LoadCallback(SKSE::SerializationInterface* serializationInterface) {
 
         if (version == Settings::kSerializationVersion-1){
             logger::info("Older version of Alchemy of Time detected.");
-            /*Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("You are using an older"
+            /*Utilities::MsgBoxesNotifs::InGame::CustomMsg("You are using an older"
                 " version of Alchemy of Time (AoT). Versions older than 0.1.4 are unfortunately not supported."
                 "Please roll back to a save game where AoT was not installed or AoT version is 0.1.4 or newer.");*/
             //continue;
