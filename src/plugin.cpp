@@ -405,9 +405,6 @@ public:
                     if (!ref_id) {
                         logger::trace("Could not find reference");
                         ref_id = picked_up_time > 0 ? picked_up_refid : 0;
-                        if (std::abs(picked_up_time - RE::Calendar::GetSingleton()->GetHoursPassed())>0.001f) {
-                            logger::warn("Picked up time: {}, calendar time: {}. Was it a book?", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
-                        }
                         if (!ref_id) {
                             logger::warn("Could not find reference with stored pickedup RefID {}", picked_up_refid);
                             logger::trace("Registering it...");
@@ -417,6 +414,9 @@ public:
 #endif  // !NDEBUG
                             }
                             return RE::BSEventNotifyControl::kContinue;
+                        }
+                        else if (std::abs(picked_up_time - RE::Calendar::GetSingleton()->GetHoursPassed()) > 0.001f) {
+                            logger::warn("Picked up time: {}, calendar time: {}. Was it a book?", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
                         }
                     }
                     logger::trace("Reference found: {}", ref_id);
