@@ -27,7 +27,7 @@ namespace Settings
 														{"SLGM",false},
 														{"MISC",false}
                                                         };
-    const std::map<const char*, bool> otherkeysvals = {{"WorldObjectsEvolve", false}};
+    const std::map<const char*, bool> otherkeysvals = {{"WorldObjectsEvolve", false}, {"bReset",false}};
     const std::map<const char*, std::map<const char*, bool>> InISections = 
                    {{"Modules", moduleskeyvals}, {"Other Settings", otherkeysvals}};
     std::map<std::string,std::map<std::string, bool>> INI_settings;
@@ -229,8 +229,7 @@ namespace Settings
         if (!ini.KeyExists("Other Settings", "nTimeToForgetInDays")) {
             ini.SetLongValue("Other Settings", "nTimeToForgetInDays", 90);
             nForgettingTime = 2160;
-        } else
-            nForgettingTime = 24 * ini.GetLongValue("Other Settings", "nTimeToForgetInDays", 90);
+        } else nForgettingTime = 24 * ini.GetLongValue("Other Settings", "nTimeToForgetInDays", 90);
 
         nForgettingTime = std::min(nForgettingTime, 4320);
 
@@ -1276,8 +1275,8 @@ struct Source {
             if (data[loc].empty()) continue;
             logger::info("Location: {}", loc);
             for (auto& instance : instances) {
-                logger::info("No: {}, Count: {}, Start time: {}, Delay Mag {}, Delayer {}, isfake {}, istransforming {}, isdecayed {}",
-                    instance.no, instance.count, instance.start_time, instance.GetDelayMagnitude(), instance.GetDelayerFormID(), instance.xtra.is_fake, instance.xtra.is_transforming, instance.xtra.is_decayed);
+                logger::info("No: {}, Count: {}, Start time: {}, Stage Duration {}, Delay Mag {}, Delayer {}, isfake {}, istransforming {}, isdecayed {}",
+                    instance.no, instance.count, instance.start_time, GetStage(instance.no).duration, instance.GetDelayMagnitude(), instance.GetDelayerFormID(), instance.xtra.is_fake, instance.xtra.is_transforming, instance.xtra.is_decayed);
                 if (n_print>200) {
                     logger::info("Print limit reached.");
                     break;
@@ -1345,7 +1344,12 @@ private:
                 }
             }
 
-        }
+        } 
+        else if (GetNStages() < 2 && GetFinalStage().formid == st_inst.xtra.form_id) {
+			logger::trace("Only one stage found and it is the same as decayed stage.");
+            st_inst.SetNewStart(curr_time, 0);
+			return false;
+		}
         if (!IsStageNo(st_inst.no)) {
             logger::trace("Stage {} does not exist.", st_inst.no);
 			return false;
@@ -1354,7 +1358,6 @@ private:
             logger::trace("Count is less than or equal 0.");
             return false;
         }
-        
         float diff = st_inst.GetElapsed(curr_time);
         bool updated = false;
         logger::trace("Current time: {}, Start time: {}, Diff: {}, Duration: {}", curr_time, st_inst.start_time, diff,
@@ -1465,6 +1468,17 @@ private:
 			}
         }
     }
+
+    const size_t GetNStages() const { 
+        std::set<StageNo> temp_stage_nos;
+        for (const auto& [stage_no, _] : stages) {
+			temp_stage_nos.insert(stage_no);
+	    }
+        for (const auto& fake_no : fake_stages) {
+			temp_stage_nos.insert(fake_no);
+		}
+        return temp_stage_nos.size();
+	}
     
     [[nodiscard]] const Stage GetFinalStage() const {
         Stage dcyd_st;
@@ -1473,15 +1487,13 @@ private:
         return dcyd_st;
     }
 
-    [[nodiscard]] const Stage GetTransformedStage(const FormID key_formid) const{
+    [[nodiscard]] const Stage GetTransformedStage(const FormID key_formid) const {
         Stage trnsf_st;
         const auto& trnsf_props = defaultsettings->transformers[key_formid];
         trnsf_st.formid = std::get<0>(trnsf_props);
         trnsf_st.duration = 0.1f; // just to avoid error in checkintegrity
         return trnsf_st;
     }
-
-    
 
     void SetDelayOfInstances(const float some_time, RE::TESObjectREFR* inventory_owner) {
         if (!inventory_owner) {

@@ -149,7 +149,7 @@ namespace Utilities {
                     std::format("{}: Uninstall failed. Please contact the mod author.", Utilities::mod_name).c_str());
             };
 
-            void CustomErrMsg(const std::string& msg) { RE::DebugMessageBox((mod_name + ": " + msg).c_str()); };
+            void CustomMsg(const std::string& msg) { RE::DebugMessageBox((mod_name + ": " + msg).c_str()); };
         };
     };
 
@@ -2129,36 +2129,7 @@ namespace Utilities {
 
         using Stages = std::vector<Stage>;
         using StageDict = std::map<StageNo, Stage>;
-
-        /*struct StageDict {
-            StageDict() = default;
-            StageDict(std::vector<StageNo> nos, std::vector<Stage> stages) {
-                for (size_t i = 0; i < nos.size(); i++) {
-                    stage_map[nos[i]] = stages[i];
-                }
-            }
-
-            [[nodiscard]] const bool CheckIntegrity() const {
-                for (const auto& [no, stage] : stage_map) {
-                    if (!stage.CheckIntegrity()) return false;
-                }
-                return true;
-            }
-
-            [[nodiscard]] const bool IsEmpty() const { return stage_map.empty(); }
-
-            [[nodiscard]] const bool contains(const StageNo no) const { return stage_map.contains(no); }
-
-            [[nodiscard]] const Stage& GetStage(const StageNo no) const {
-                if (contains(no)) return stage_map.at(no);
-                logger::critical("Stage {} not found", no);
-                return stage_map.at(0);
-            }
-
-        private:
-            std::map<StageNo, Stage> stage_map;
-        };*/
-
+        
         struct StageInstancePlain{
             float start_time;
             StageNo no;
@@ -2202,20 +2173,6 @@ namespace Utilities {
                 _delay_formid = 0;
             }
         
-            //StageInstance(const StageInstancePlain& plain)
-            //    : start_time(plain.start_time),
-            //      no(plain.no),
-            //      count(plain.count),
-            //      _elapsed(plain._elapsed),
-            //      _delay_start(plain._delay_start),
-            //      _delay_mag(plain._delay_mag),
-            //      _delay_formid(plain._delay_formid) {
-            //	
-            //    xtra.is_fake = plain.is_fake;
-            //    xtra.is_decayed = plain.is_decayed;
-            //}
-
-
             //define ==
             // assumes that they are in the same inventory
 			[[nodiscard]] bool operator==(const StageInstance& other) const {
@@ -2224,11 +2181,6 @@ namespace Utilities {
                        start_time == other.start_time && 
                     _elapsed == other._elapsed && xtra == other.xtra;
 			}
-            
-   //         [[maybe_unused]] bool SameExceptCount(const StageInstance& other) const {
-   //             return no == other.no && location == other.location &&
-   //                    start_time == other.start_time && _elapsed == other._elapsed;
-			//}
 
             // times are very close (abs diff less than 0.015h = 0.9min)
             // assumes that they are in the same inventory
@@ -2268,7 +2220,6 @@ namespace Utilities {
 
             const float GetDelaySlope() const {
                 const auto delay_magnitude = std::min(std::max(-1000.f, _delay_mag), 1000.f);
-                //return 1 - delay_magnitude;
                 //if (std::abs(delay_magnitude) < 0.0001f) {
                 //    // If the delay slope is too close to 0, return a small non-zero value
                 //    return delay_magnitude < 0 ? -0.0001f : 0.0001f;

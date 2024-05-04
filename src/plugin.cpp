@@ -342,7 +342,7 @@ public:
         logger::trace("ListenContainerChange: {}",
                       M->getListenContainerChange());
         if (!M->getListenContainerChange()) return RE::BSEventNotifyControl::kContinue;
-        if (furniture_entered) return RE::BSEventNotifyControl::kContinue;
+        if (furniture_entered && event->newContainer!=player_refid) return RE::BSEventNotifyControl::kContinue;
         if (!event) return RE::BSEventNotifyControl::kContinue;
         if (!event->itemCount) return RE::BSEventNotifyControl::kContinue;
         if (!event->baseObj) return RE::BSEventNotifyControl::kContinue;
@@ -394,7 +394,7 @@ public:
 					else {
 						logger::error("Could not get vendor chest");
 #ifndef NDEBUG
-						Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Could not get vendor chest.");
+						Utilities::MsgBoxesNotifs::InGame::CustomMsg("Could not get vendor chest.");
 #endif  // !NDEBUG
                     }
                 }
@@ -404,10 +404,7 @@ public:
                     auto ref_id = Utilities::FunctionsSkyrim::WorldObject::TryToGetRefIDFromHandle(reference_);
                     if (!ref_id) {
                         logger::trace("Could not find reference");
-                        ref_id = picked_up_refid;
-                        if (std::abs(picked_up_time - RE::Calendar::GetSingleton()->GetHoursPassed())>0.001f) {
-                            logger::warn("Picked up time: {}, calendar time: {}. Was it a book?", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
-                        }
+                        ref_id = picked_up_time > 0 ? picked_up_refid : 0;
                         if (!ref_id) {
                             logger::warn("Could not find reference with stored pickedup RefID {}", picked_up_refid);
                             logger::trace("Registering it...");
@@ -417,6 +414,9 @@ public:
 #endif  // !NDEBUG
                             }
                             return RE::BSEventNotifyControl::kContinue;
+                        }
+                        else if (std::abs(picked_up_time - RE::Calendar::GetSingleton()->GetHoursPassed()) > 0.001f) {
+                            logger::warn("Picked up time: {}, calendar time: {}. Was it a book?", picked_up_time, RE::Calendar::GetSingleton()->GetHoursPassed());
                         }
                     }
                     logger::trace("Reference found: {}", ref_id);
@@ -494,7 +494,7 @@ public:
                         }
                     } else {
                         logger::error("Could not get vendor chest");
-						Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Could not get vendor chest.");
+						Utilities::MsgBoxesNotifs::InGame::CustomMsg("Could not get vendor chest.");
 					
                     }
                 }
@@ -528,7 +528,7 @@ public:
             else {
                 logger::warn("Item got removed from player inventory due to unknown reason.");
 #ifndef NDEBUG
-                Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Item got removed from player inventory due to unknown reason.");
+                Utilities::MsgBoxesNotifs::InGame::CustomMsg("Item got removed from player inventory due to unknown reason.");
 #endif  // !NDEBUG
                 // remove from one of the instances
                 M->HandleConsume(event->baseObj);
@@ -549,43 +549,9 @@ public:
                 RE::IDEvent* id_event = e->AsIDEvent();
                 auto userEvent = id_event->userEvent;
                 if (a_event->GetIDCode() != 157) continue;
-
-                if (a_event->IsPressed()) {
-                    if (a_event->IsRepeating() && a_event->HeldDuration() > .3f && a_event->HeldDuration() < .32f) {
-                        M->Print();
-                    //    logger::trace("User event: {}", userEvent.c_str());
-                    //    // we accept : "accept","RightEquip", "LeftEquip", "equip", "toggleFavorite"
-                    //    auto userevents = RE::UserEvents::GetSingleton();
-                    //    if (!(userEvent == userevents->accept || userEvent == userevents->rightEquip ||
-                    //          userEvent == userevents->leftEquip || userEvent == userevents->equip)) {
-                    //        logger::trace("User event not accepted.");
-                    //        continue;
-                    //    }
-                    //    if (const auto queue = RE::UIMessageQueue::GetSingleton()) {
-                    //        auto ui = RE::UI::GetSingleton();
-                    //        RefID refHandle = 0;
-                    //        if (ui->IsMenuOpen(RE::InventoryMenu::MENU_NAME)) {
-                    //            ReShowMenu = RE::InventoryMenu::MENU_NAME;
-                    //            queue->AddMessage(RE::TweenMenu::MENU_NAME, RE::UI_MESSAGE_TYPE::kHide, nullptr);
-                    //        } else if (ui->IsMenuOpen(RE::FavoritesMenu::MENU_NAME))
-                    //            ReShowMenu = RE::FavoritesMenu::MENU_NAME;
-                    //        else if (ui->IsMenuOpen(RE::ContainerMenu::MENU_NAME)) {
-                    //            ReShowMenu = RE::ContainerMenu::MENU_NAME;
-                    //            const auto menu = ui ? ui->GetMenu<RE::ContainerMenu>() : nullptr;
-                    //            refHandle = menu ? menu->GetTargetRefHandle() : 0;
-                    //            RE::TESObjectREFRPtr ref;
-                    //            RE::LookupReferenceByHandle(refHandle, ref);
-                    //            if (ref)
-                    //                external_container_refid = ref->GetFormID();
-                    //            else
-                    //                logger::warn("Failed to get ref from handle.");
-                    //            logger::trace("External container refid: {}", external_container_refid);
-                    //        } else
-                    //            continue;
-                    //        queue->AddMessage(ReShowMenu, RE::UI_MESSAGE_TYPE::kHide, nullptr);
-                    //        return RE::BSEventNotifyControl::kContinue;
-                    //    }
-                    }
+                if (!a_event->IsPressed()) continue;
+                if (a_event->IsRepeating() && a_event->HeldDuration() > .3f && a_event->HeldDuration() < .32f) {
+                    M->Print();
                 }
             }
         }
@@ -666,7 +632,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         SKSE::MessagingInterface::kPostLoadGame) {
         logger::info("New or Post-load game.");
         if (Settings::failed_to_load) {
-            Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("Failed to load settings. Check log for details.");
+            Utilities::MsgBoxesNotifs::InGame::CustomMsg("Failed to load settings. Check log for details.");
             M->Uninstall();
 			return;
         }
@@ -729,7 +695,7 @@ void LoadCallback(SKSE::SerializationInterface* serializationInterface) {
 
         if (version == Settings::kSerializationVersion-1){
             logger::info("Older version of Alchemy of Time detected.");
-            /*Utilities::MsgBoxesNotifs::InGame::CustomErrMsg("You are using an older"
+            /*Utilities::MsgBoxesNotifs::InGame::CustomMsg("You are using an older"
                 " version of Alchemy of Time (AoT). Versions older than 0.1.4 are unfortunately not supported."
                 "Please roll back to a save game where AoT was not installed or AoT version is 0.1.4 or newer.");*/
             //continue;
