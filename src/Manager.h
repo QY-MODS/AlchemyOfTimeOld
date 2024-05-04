@@ -2008,7 +2008,7 @@ public:
         } else if (should_reset) {
 			logger::info("ReceiveData: User wants to reset.");
 			Reset();
-            Utilities::MsgBoxesNotifs::InGame::CustomMsg("The mod has been reset.");
+            Utilities::MsgBoxesNotifs::InGame::CustomMsg("The mod has been reset. Please save and close the game. Do not forget to set bReset back to false in the INI before loading your save.");
             return;
 		}
 
