@@ -9,7 +9,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
     RE::TESObjectREFR* player_ref = RE::PlayerCharacter::GetSingleton()->As<RE::TESObjectREFR>();
 
     //std::map<RefID,std::set<FormID>> external_favs;
-    std::map<FormFormID,std::pair<int,Count>> handle_crafting_instances; // real-stage:added-total before adding (both real)
+    std::map<FormFormID,std::pair<int,Count>> handle_crafting_instances; // formid1: source formid, formid2: stage formid
     std::map<FormID, bool> faves_list;
     std::map<FormID, bool> equipped_list;
     
@@ -400,18 +400,6 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         }
     }
 
-  //  [[maybe_unused]] void AlignRegistries(std::vector<RefID> locs) {
-  //      ENABLE_IF_NOT_UNINSTALLED
-  //      logger::trace("Aligning registries.");
-        //for (auto& src : sources) {
-        //	for (auto& st_inst : src.data) {
-  //              if (!Utilities::Functions::Vector::HasElement(locs,st_inst.location)) continue;
-  //              // POPULATE THIS
-  //              if (st_inst.location == player_refid) HandleConsume(st_inst.xtra.form_id);
-        //	}
-        //}
-  //  }
-
     const RE::ObjectRefHandle RemoveItemReverse(RE::TESObjectREFR* moveFrom, RE::TESObjectREFR* moveTo, FormID item_id, Count count,
                                                 RE::ITEM_REMOVE_REASON reason) {
         logger::trace("Removing item reverse");
@@ -451,14 +439,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
                     logger::trace("Removing item reverse without extra data.");
                     ref_handle = moveFrom->RemoveItem(item_obj, count, reason, nullptr, moveTo);
                 } else {
-                    /*logger::trace("Removing item reverse with extra data.");
-                    for (auto& extra : *asd) {
-                        if (extra->HasType(RE::ExtraDataType::kOwnership)) {
-                            logger::trace("Removing item reverse with ownership.");
-                        } else {
-                            logger::trace("Removing item reverse without ownership.");
-                        }
-                    }*/
+                    logger::trace("Removing item reverse with extra data.");
                     ref_handle = moveFrom->RemoveItem(item_obj, count, reason, asd->front(), moveTo);
                 }
                 //Utilities::FunctionsSkyrim::Menu::SendInventoryUpdateMessage(moveFrom, item_obj);
@@ -1477,16 +1458,16 @@ public:
             // just to align reality and registries:
             //AlignRegistries({player_refid});
             if (!src.data.contains(player_refid)) continue;
-            for (auto& st_inst : src.data[player_refid]) {
-                if (!st_inst.xtra.crafting_allowed) continue;
+            for (const auto& st_inst : src.data.at(player_refid)) {
                 const auto stage_formid = st_inst.xtra.form_id;
                 if (!stage_formid) {
                     logger::error("HandleCraftingEnter: Stage formid is null!!!");
                     continue;
                 }
-                if (stage_formid == src.formid) continue;
+                //if (stage_formid == src.formid) continue;
                 if (Utilities::FunctionsSkyrim::Inventory::IsQuestItem(stage_formid,player_ref)) continue;
-                const FormFormID temp = {src.formid, stage_formid}; // formid1: source formid, formid2: stage formid
+                if (stage_formid != src.formid && !st_inst.xtra.crafting_allowed) continue;
+                const FormFormID temp = {src.formid, stage_formid};
                 if (!handle_crafting_instances.contains(temp)) {
                     const auto stage_bound = st_inst.GetBound();
                     if (!stage_bound) return RaiseMngrErr("HandleCraftingEnter: Stage bound is null.");
@@ -1495,11 +1476,11 @@ public:
                     const auto count_src = it != player_inventory.end() ? it->second.first : 0;
                     handle_crafting_instances[temp] = {st_inst.count, count_src};
                 } 
-                else handle_crafting_instances[temp].first += st_inst.count;
+                else handle_crafting_instances.at(temp).first += st_inst.count;
                 if (!faves_list.contains(stage_formid)) faves_list[stage_formid] = Utilities::FunctionsSkyrim::Inventory::IsFavorited(stage_formid,player_refid);
-                else if (!faves_list[stage_formid]) faves_list[stage_formid] = Utilities::FunctionsSkyrim::Inventory::IsFavorited(stage_formid,player_refid);
+                else if (!faves_list.at(stage_formid)) faves_list.at(stage_formid) = Utilities::FunctionsSkyrim::Inventory::IsFavorited(stage_formid,player_refid);
                 if (!equipped_list.contains(stage_formid)) equipped_list[stage_formid] = Utilities::FunctionsSkyrim::Inventory::IsEquipped(stage_formid);
-                else if (!equipped_list[stage_formid]) equipped_list[stage_formid] = Utilities::FunctionsSkyrim::Inventory::IsEquipped(stage_formid);
+                else if (!equipped_list.at(stage_formid)) equipped_list.at(stage_formid) = Utilities::FunctionsSkyrim::Inventory::IsEquipped(stage_formid);
             }
         }
         
@@ -1507,13 +1488,14 @@ public:
             logger::warn("HandleCraftingEnter: No instances found.");
             return;
         }
-        for (auto& [formids, counts] : handle_crafting_instances) {
+        for (const auto& [formids, counts] : handle_crafting_instances) {
+            if (formids.form_id1 == formids.form_id2) continue;
             RemoveItemReverse(player_ref, nullptr, formids.form_id2, counts.first, RE::ITEM_REMOVE_REASON::kRemove);
             AddItem(player_ref, nullptr, formids.form_id1, counts.first);
             logger::trace("Crafting item updated in inventory.");
         }
         // print handle_crafting_instances
-        for (auto& [formids, counts] : handle_crafting_instances) {
+        for (const auto& [formids, counts] : handle_crafting_instances) {
             logger::trace("HandleCraftingEnter: Formid1: {} , Formid2: {} , Count1: {} , Count2: {}", formids.form_id1,
                           formids.form_id2, counts.first, counts.second);
         }
@@ -1534,31 +1516,26 @@ public:
         }
 
         logger::trace("Crafting menu closed");
-        for (auto& [formids, counts] : handle_crafting_instances) {
-            logger::info("HandleCraftingExit: Formid1: {} , Formid2: {} , Count1: {} , Count2: {}", formids.form_id1,
+        for (const auto& [formids, counts] : handle_crafting_instances) {
+            logger::trace("HandleCraftingExit: Formid1: {} , Formid2: {} , Count1: {} , Count2: {}", formids.form_id1,
                          formids.form_id2, counts.first, counts.second);
         }
 
         // need to figure out how many items were used up in crafting and how many were left
-
         const auto player_inventory = player_ref->GetInventory();
         for (auto& [formids, counts] : handle_crafting_instances) {
-            const auto src_bound = Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formids.form_id1);
-            const auto it = player_inventory.find(src_bound);
-            const auto inventory_count = it != player_inventory.end() ? it->second.first : 0;
-            const auto expected_count = counts.first + counts.second;
-            auto diff = expected_count - inventory_count; // crafta kullanilan item sayisi
-            const auto to_be_removed_added = inventory_count - counts.second;
-            if (to_be_removed_added > 0) {
-                RemoveItemReverse(player_ref, nullptr, formids.form_id1, to_be_removed_added,
-                                  RE::ITEM_REMOVE_REASON::kRemove);
+            const auto it = player_inventory.find(Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(formids.form_id1));
+            const auto actual_count = it != player_inventory.end() ? it->second.first : 0;
+            if (const auto to_be_removed_added = actual_count - counts.second; to_be_removed_added > 0) {
+                RemoveItemReverse(player_ref, nullptr, formids.form_id1, to_be_removed_added, RE::ITEM_REMOVE_REASON::kRemove);
                 AddItem(player_ref, nullptr, formids.form_id2, to_be_removed_added);
                 bool __faved = faves_list[formids.form_id2];
                 if (__faved) Utilities::FunctionsSkyrim::Inventory::FavoriteItem(formids.form_id2, player_refid);
                 bool __equipped = equipped_list[formids.form_id2];
                 if (__equipped) Utilities::FunctionsSkyrim::Inventory::EquipItem(formids.form_id2, false);
             }
-            if (diff<=0) continue;
+            const auto expected_count = formids.form_id1 == formids.form_id2 ? counts.first : counts.first + counts.second;
+            if (0 >= expected_count - actual_count) continue; // crafta kullanilan item sayisi
             HandleConsume(formids.form_id2);
         }
 

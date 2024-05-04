@@ -1275,8 +1275,8 @@ struct Source {
             if (data[loc].empty()) continue;
             logger::info("Location: {}", loc);
             for (auto& instance : instances) {
-                logger::info("No: {}, Count: {}, Start time: {}, Delay Mag {}, Delayer {}, isfake {}, istransforming {}, isdecayed {}",
-                    instance.no, instance.count, instance.start_time, instance.GetDelayMagnitude(), instance.GetDelayerFormID(), instance.xtra.is_fake, instance.xtra.is_transforming, instance.xtra.is_decayed);
+                logger::info("No: {}, Count: {}, Start time: {}, Stage Duration {}, Delay Mag {}, Delayer {}, isfake {}, istransforming {}, isdecayed {}",
+                    instance.no, instance.count, instance.start_time, GetStage(instance.no).duration, instance.GetDelayMagnitude(), instance.GetDelayerFormID(), instance.xtra.is_fake, instance.xtra.is_transforming, instance.xtra.is_decayed);
                 if (n_print>200) {
                     logger::info("Print limit reached.");
                     break;
