@@ -289,20 +289,30 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         }
 
         const auto inventory = inventory_owner->GetInventory();
-        const auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
+        auto* old_bound = RE::TESForm::LookupByID<RE::TESBoundObject>(old_item);
+        if (!old_bound) {
+			logger::error("Old item is null.");
+			return;
+		}
+        const auto entry = inventory.find(old_bound);
         if (entry == inventory.end()) {
             logger::error("Item not found in inventory.");
             return;
         } 
-        if (const auto inv_count = entry->second.first; inv_count <= 0) {
+        const auto inv_count = entry->second.first;
+        if (inv_count <= 0) {
             logger::warn("Item count in inventory is 0 or less {}.", inv_count);
             return;
         }
+        if (!entry->second.second) {
+			logger::error("Item data is null.");
+			return;
+		}
         if (entry->second.second->IsQuestObject()) {
 			logger::warn("Item is a quest object.");
 			return;
         } 
-        RemoveItemReverse(inventory_owner, nullptr, old_item, std::min(update_count, entry->second.first),RE::ITEM_REMOVE_REASON::kRemove);
+        RemoveItemReverse(inventory_owner, nullptr, old_item, std::min(update_count, inv_count),RE::ITEM_REMOVE_REASON::kRemove);
         AddItem(inventory_owner, nullptr, new_item, update_count);
         logger::trace("Stage updated in inventory.");
 
