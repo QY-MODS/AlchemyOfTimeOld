@@ -276,22 +276,33 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
 
     void _ApplyEvolutionInInventory(RE::TESObjectREFR* inventory_owner, Count update_count, FormID old_item, FormID new_item) {
         
+        
+        if (!inventory_owner) return RaiseMngrErr("Inventory owner is null.");
+
         logger::trace("Updating stage in inventory of {} Count {} , Old item {} , New item {}",
                       inventory_owner->GetName(),
                       update_count, old_item, new_item);
+
+        if (update_count <= 0) {
+            logger::error("Update count is 0 or less {}.", update_count);
+            return;
+        }
 
         const auto inventory = inventory_owner->GetInventory();
         const auto entry = inventory.find(RE::TESForm::LookupByID<RE::TESBoundObject>(old_item));
         if (entry == inventory.end()) {
             logger::error("Item not found in inventory.");
             return;
+        } 
+        if (const auto inv_count = entry->second.first; inv_count <= 0) {
+            logger::warn("Item count in inventory is 0 or less {}.", inv_count);
+            return;
         }
-        else if (entry->second.second->IsQuestObject()) {
+        if (entry->second.second->IsQuestObject()) {
 			logger::warn("Item is a quest object.");
 			return;
-		}
-        else RemoveItemReverse(
-            inventory_owner, nullptr, old_item, std::min(update_count, entry->second.first),RE::ITEM_REMOVE_REASON::kRemove);
+        } 
+        RemoveItemReverse(inventory_owner, nullptr, old_item, std::min(update_count, entry->second.first),RE::ITEM_REMOVE_REASON::kRemove);
         AddItem(inventory_owner, nullptr, new_item, update_count);
         logger::trace("Stage updated in inventory.");
 
@@ -452,29 +463,55 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
     }
 
     void AddItem(RE::TESObjectREFR* addTo, RE::TESObjectREFR* addFrom, FormID item_id,
-                                                Count count, RE::ExtraDataList* xList=nullptr) {
+                                                Count count) {
         logger::trace("AddItem");
         //xList = nullptr;
         if (!addTo) return RaiseMngrErr("add to is null!");
+        if (count <= 0) {
+            logger::error("Count is 0 or less.");
+            return;
+        }
+        if (addFrom) {
+            if (addTo->GetFormID() == addFrom->GetFormID()) {
+				logger::warn("Add to and add from are the same.");
+				return;
+            } 
+            else if (!addFrom->HasContainer()) {
+				logger::warn("Add from does not have a container.");
+				return;
+            }
+        }
         
         logger::trace("Adding item.");
 
-        setListenContainerChange(false);
-        auto bound = RE::TESForm::LookupByID<RE::TESBoundObject>(item_id);
+        auto* bound = RE::TESForm::LookupByID<RE::TESBoundObject>(item_id);
         if (!bound) {
             logger::critical("Bound is null.");
             return;
         }
-        addTo->AddObjectToContainer(bound, xList, count, addFrom);
-        logger::trace("Refreshing inventory for newly added item.");
-        Utilities::FunctionsSkyrim::Menu::SendInventoryUpdateMessage(addTo, bound);
+        logger::trace("setting listen container change to false.");
+        setListenContainerChange(false);
+        logger::trace("Adding item to container.");
+        addTo->AddObjectToContainer(bound, nullptr, count, addFrom);
+        logger::trace("Item added to container.");
         setListenContainerChange(true);
+        logger::trace("listen container change set to true.");
+        SKSE::GetTaskInterface()->AddTask(
+            [addTo, bound]() { 
+                logger::trace("Refreshing inventory for newly added item.");
+                Utilities::FunctionsSkyrim::Menu::SendInventoryUpdateMessage(addTo, bound); });
+        //Utilities::FunctionsSkyrim::Menu::SendInventoryUpdateMessage(addTo, bound);
     }
 
     [[maybe_unused]] const bool PickUpItem(RE::TESObjectREFR* item, Count count,const unsigned int max_try = 3) {
         //std::lock_guard<std::mutex> lock(mutex);
     
         logger::trace("PickUpItem");
+
+        if (count <= 0) {
+			logger::warn("Count is 0 or less.");
+			return false;
+		}
 
         if (!item) {
             logger::warn("Item is null");
@@ -1713,6 +1750,7 @@ public:
         if (!update_took_place) update_took_place = temp_update_took_place;
         if (!update_took_place) logger::trace("No update1");
 
+        logger::trace("while (!to_register_go.empty())");
         while (!to_register_go.empty()) {
 			const auto& [formid, count, refid,r_time] = to_register_go.front();
             to_register_go.erase(to_register_go.begin());
