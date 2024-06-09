@@ -1,7 +1,8 @@
 set(headers ${headers}
-	src/logger.h
-	src/Utils.h
-	src/DynamicFormTracker.h
-	src/Settings.h
-	src/Manager.h
+	include/logger.h
+	include/Utils.h
+	include/DynamicFormTracker.h
+	include/Settings.h
+	include/Manager.h
+	include/UI.h
 )

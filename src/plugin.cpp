@@ -1,5 +1,4 @@
-#include "Manager.h"
-
+#include "UI.h"
 Manager* M = nullptr;
 bool block_eventsinks = false;
 
@@ -627,6 +626,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         Settings::LoadSettings();
         auto sources = std::vector<Source>();
         M = Manager::GetSingleton(sources);
+        UI::Register(M);
     }
     if (message->type == SKSE::MessagingInterface::kNewGame || message->type ==
         SKSE::MessagingInterface::kPostLoadGame) {
