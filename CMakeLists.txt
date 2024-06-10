@@ -166,7 +166,7 @@ function(addMenuFramework MENU_FRAMEWORK_FOLDER IMGUI_FOLDER)
 
 endfunction()
 
-addMenuFramework("$ENV{SKYRIM_MODS_FOLDER}" "$ENV{IMGUI_LIB_FOLDER}")
+addMenuFramework("$ENV{SKYRIM_MODS_FOLDER}" "$ENV{USER_PATH}/GitHub/SKSE-Menu-Framework-SDK/ImGui")
 
 
 if(DEFINED OUTPUT_FOLDER)
