@@ -626,7 +626,6 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         Settings::LoadSettings();
         auto sources = std::vector<Source>();
         M = Manager::GetSingleton(sources);
-        UI::Register(M);
     }
     if (message->type == SKSE::MessagingInterface::kNewGame || message->type ==
         SKSE::MessagingInterface::kPostLoadGame) {
@@ -657,6 +656,10 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         RE::PlayerCharacter::GetSingleton()->AsBGSActorCellEventSource()->AddEventSink(eventSink);
         logger::info("Event sinks added.");
         eventSink->HandleWOsInCell();
+        
+        // MCP
+        UI::Register(M);
+        logger::info("MCP registered.");
     }
 }
 

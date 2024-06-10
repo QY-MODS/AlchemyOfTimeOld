@@ -4,7 +4,8 @@
 
 namespace UI {
     struct Instance {
-        StageNo stage_number;
+        std::pair<StageNo,StageNo> stage_number;
+        std::string stage_name;
         Count count;
         float start_time;
         Duration duration;
@@ -19,27 +20,91 @@ namespace UI {
 
     LocationMap locations;
 
-    inline static std::string item_current = "##current";
-    inline static std::string sub_item_current = "##item"; 
-    inline static bool is_list_box_focused = false;
-    static ImGuiTextFilter filter;
-    static ImGuiTextFilter filter2;
+    std::string last_generated = "";
+    std::string item_current = "##current";
+    std::string sub_item_current = "##item"; 
+    bool is_list_box_focused = false;
+    ImGuiTextFilter filter;
+    ImGuiTextFilter filter2;
+    ImGuiTableFlags table_flags = ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable;
 
     Manager* M;
-    void __stdcall Render();
+    void __stdcall RenderSettings();
+    void __stdcall RenderStatus();
+    void __stdcall RenderInspect();
     void Register(Manager* manager) {
         SKSEMenuFramework::SetSection("Alchemy Of Time");
-        SKSEMenuFramework::AddSectionItem("Print", Render);
+        SKSEMenuFramework::AddSectionItem("Settings", RenderSettings);
+        SKSEMenuFramework::AddSectionItem("Status", RenderStatus);
+        SKSEMenuFramework::AddSectionItem("Inspect", RenderInspect);
         M = manager;
     }
-    void __stdcall Render() {
+
+    void __stdcall RenderSettings(){
+
+        for (const auto& [section_name, section_settings] : Settings::INI_settings) {
+            if (ImGui::CollapsingHeader(section_name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+                if (ImGui::BeginTable("table_settings", 2, table_flags)) {
+                    for (const auto& [setting_name, setting] : section_settings) {
+                        // we just want to display the settings in read only mode
+                        const char* value = setting ? "Enabled" : "Disabled";
+                        const auto color = setting ? ImVec4(0, 1, 0, 1) : ImVec4(1, 0, 0, 1);
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        ImGui::Text(setting_name.c_str());
+                        ImGui::TableNextColumn();
+                        ImGui::TextColored(color, value);
+                    }
+                    ImGui::EndTable();
+                }
+            }
+        }
+    };
+
+    void __stdcall RenderStatus() {
+        const auto color_operational = ImVec4(0, 1, 0, 1);
+        const auto color_not_operational = ImVec4(1, 0, 0, 1);
+
+        if (ImGui::BeginTable("table_status", 3, table_flags)) {
+            ImGui::TableSetupColumn("Module");
+            ImGui::TableSetupColumn("Default Preset");
+            ImGui::TableSetupColumn("Custom Presets");
+            ImGui::TableHeadersRow();
+            for (const auto& [module_name,module_enabled] : Settings::INI_settings["Modules"]) {
+                if (!module_enabled) continue;
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::Text(module_name.c_str());
+                ImGui::TableNextColumn();
+                const auto loaded_default = Settings::defaultsettings[module_name].IsHealthy();
+                const auto loaded_default_str = loaded_default ? "Loaded" : "Not Loaded";
+                const auto color = loaded_default ? color_operational : color_not_operational;
+                ImGui::TextColored(color, loaded_default_str);
+                ImGui::TableNextColumn();
+                const auto& custom_presets = Settings::custom_settings[module_name];
+                
+				std::string loaded_custom_str = "Not Loaded";
+				auto color_custom = color_not_operational;
+                if (custom_presets.size() > 0) {
+                    loaded_custom_str = std::format("Loaded ({})", custom_presets.size());
+                    color_custom = color_operational;
+				}
+                ImGui::TextColored(color_custom, loaded_custom_str.c_str());
+            }
+            ImGui::EndTable();
+        }
+    };
+
+    void __stdcall RenderInspect() {
 
         if (!M) {
             ImGui::Text("Not available");
             return;
         }
 
-        if (ImGui::Button("Generate")) {
+        FontAwesome::PushSolid();
+        if (ImGui::Button((FontAwesome::UnicodeToUtf8(0xf021) + " Refresh").c_str())) {
+            last_generated = std::format("{} (in-game hours)", RE::Calendar::GetSingleton()->GetHoursPassed());
             auto& sources = M->GetSources();
 
             locations.clear();
@@ -51,18 +116,27 @@ namespace UI {
 
                     for (auto& stageInstance : instances) {
                         const auto* delayerForm = RE::TESForm::LookupByID(stageInstance.GetDelayerFormID());
+                        auto delayer_name = delayerForm ? delayerForm->GetName() : std::format("{:x}", stageInstance.GetDelayerFormID());
+                        if (delayer_name == "0") delayer_name = "None";
+                        int max_stage_no = 0;
+                        while (source.IsStageNo(max_stage_no+1)) max_stage_no++;
+                        
+                        const auto temp_stage_no = std::make_pair(stageInstance.no, max_stage_no);
+                        auto temp_stagename = source.GetStageName(stageInstance.no);
+                        temp_stagename = temp_stagename.empty() ? "" : std::format("({})", temp_stagename);
                         Instance instance(
-                            stageInstance.no,
+                            temp_stage_no, 
+                            temp_stagename,
                             stageInstance.count,
                             stageInstance.start_time,
                             source.GetStageDuration(stageInstance.no),
                             stageInstance.GetDelayMagnitude(),
-                            delayerForm ? delayerForm->GetName()
-                                        : std::format("{:x}", stageInstance.GetDelayerFormID()),
+                            delayer_name,
                             stageInstance.xtra.is_fake,
                             stageInstance.xtra.is_transforming,
                             stageInstance.xtra.is_decayed
                         );
+
                         const auto item = RE::TESForm::LookupByID(source.formid);
                         locations[std::string(locationName) + "##location"][(item ? item->GetName() : source.editorid)+ "##item"]
                             .push_back(
@@ -79,6 +153,10 @@ namespace UI {
                 sub_item_current = "##item"; 
             }
         }
+        FontAwesome::Pop();
+        
+        ImGui::SameLine();
+        ImGui::Text(("Last Generated: " + last_generated).c_str());
 
         ImGui::Text("Location");
         if (ImGui::BeginCombo("##combo 1", item_current.c_str())) {
@@ -125,23 +203,20 @@ namespace UI {
                 auto & selectedInstances = selectedItem[sub_item_current];
 
                 ImGui::Text("Instances");
-
-                static ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable;
-                if (ImGui::BeginTable("table1", 9, flags)) {
-                    ImGui::TableSetupColumn("Stage Number");
+                if (ImGui::BeginTable("table_inspect", 8, table_flags)) {
+                    ImGui::TableSetupColumn("Stage");
                     ImGui::TableSetupColumn("Count");
                     ImGui::TableSetupColumn("Start Time");
                     ImGui::TableSetupColumn("Duration");
-                    ImGui::TableSetupColumn("Delay Magnitude");
-                    ImGui::TableSetupColumn("Delayer");
-                    ImGui::TableSetupColumn("Fake");
+                    ImGui::TableSetupColumn("Time Modulation");
+                    ImGui::TableSetupColumn("Dynamic Form");
                     ImGui::TableSetupColumn("Transforming");
                     ImGui::TableSetupColumn("Decayed");
                     ImGui::TableHeadersRow();
                     for (const auto& item : selectedInstances) {
                             ImGui::TableNextRow();
                             ImGui::TableNextColumn();
-                            ImGui::TextUnformatted(std::format("{}", item.stage_number).c_str());
+                            ImGui::TextUnformatted(std::format("{}/{} {}", item.stage_number.first, item.stage_number.second,item.stage_name).c_str());
                             ImGui::TableNextColumn();
                             ImGui::TextUnformatted(std::format("{}", item.count).c_str());
                             ImGui::TableNextColumn();
@@ -149,9 +224,7 @@ namespace UI {
                             ImGui::TableNextColumn();
                             ImGui::TextUnformatted(std::format("{}", item.duration).c_str());
                             ImGui::TableNextColumn();
-                            ImGui::TextUnformatted(std::format("{}", item.delay_magnitude).c_str());
-                            ImGui::TableNextColumn();
-                            ImGui::TextUnformatted(item.delayer.c_str());
+                            ImGui::TextUnformatted(std::format("{} ({})", item.delay_magnitude, item.delayer).c_str());
                             ImGui::TableNextColumn();
                             ImGui::TextUnformatted(item.is_fake? "Yes" : "No");
                             ImGui::TableNextColumn();
