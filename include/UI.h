@@ -44,21 +44,21 @@ namespace UI {
 
             locations.clear();
 
-            for (auto & source : sources) {
-                for (auto& [location, instances] : source.data) {
-                    auto locationReference = RE::TESForm::LookupByID<RE::TESObjectREFR>(location);
+            for (const auto& source : sources) {
+                for (const auto& [location, instances] : source.data) {
+                    const auto* locationReference = RE::TESForm::LookupByID<RE::TESObjectREFR>(location);
                     const char* locationName = locationReference ? locationReference->GetName() : (std::format("{:x}", location).c_str());
 
                     for (auto& stageInstance : instances) {
-                        const auto delayerForm = RE::TESForm::LookupByID(stageInstance.GetDelayerFormID());
+                        const auto* delayerForm = RE::TESForm::LookupByID(stageInstance.GetDelayerFormID());
                         Instance instance(
                             stageInstance.no,
                             stageInstance.count,
                             stageInstance.start_time,
-                            source.GetStage(stageInstance.no).duration,
+                            source.GetStageDuration(stageInstance.no),
                             stageInstance.GetDelayMagnitude(),
-                                          delayerForm ? delayerForm->GetName()
-                                                      : std::format("{:x}", stageInstance.GetDelayerFormID()),
+                            delayerForm ? delayerForm->GetName()
+                                        : std::format("{:x}", stageInstance.GetDelayerFormID()),
                             stageInstance.xtra.is_fake,
                             stageInstance.xtra.is_transforming,
                             stageInstance.xtra.is_decayed
@@ -71,11 +71,11 @@ namespace UI {
                 }
             }
 
-            auto current = locations.find(item_current);
+            const auto current = locations.find(item_current);
             if (current == locations.end()){
                 item_current = "##current";
                 sub_item_current = "##item"; 
-            } else if (auto item = (*current).second; item.find(sub_item_current) == item.end()) {
+            } else if (const auto item = current->second; item.find(sub_item_current) == item.end()) {
                 sub_item_current = "##item"; 
             }
         }
@@ -134,9 +134,9 @@ namespace UI {
                     ImGui::TableSetupColumn("Duration");
                     ImGui::TableSetupColumn("Delay Magnitude");
                     ImGui::TableSetupColumn("Delayer");
-                    ImGui::TableSetupColumn("Is Fake");
-                    ImGui::TableSetupColumn("Is Transforming");
-                    ImGui::TableSetupColumn("Is Decayed");
+                    ImGui::TableSetupColumn("Fake");
+                    ImGui::TableSetupColumn("Transforming");
+                    ImGui::TableSetupColumn("Decayed");
                     ImGui::TableHeadersRow();
                     for (const auto& item : selectedInstances) {
                             ImGui::TableNextRow();

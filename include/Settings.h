@@ -811,6 +811,12 @@ struct Source {
         }
     }
 
+    const Duration GetStageDuration(const StageNo no) const {
+        if (!IsStageNo(no)) return 0;
+        else if (stages.contains(no)) return stages.at(no).duration;
+        else return 0;
+    };
+
     [[nodiscard]] const bool InsertNewInstance(StageInstance& stage_instance, const RefID loc) { 
 
         if (init_failed) {

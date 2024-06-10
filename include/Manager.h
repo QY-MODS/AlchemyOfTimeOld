@@ -2154,7 +2154,7 @@ public:
         }
     }
 
-    std::vector<Source>& GetSources() {
+    const std::vector<Source>& GetSources() const {
        return sources;
     }
 
