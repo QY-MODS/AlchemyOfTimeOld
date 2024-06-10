@@ -1,5 +1,4 @@
-#include "Manager.h"
-
+#include "UI.h"
 Manager* M = nullptr;
 bool block_eventsinks = false;
 
@@ -657,6 +656,10 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         RE::PlayerCharacter::GetSingleton()->AsBGSActorCellEventSource()->AddEventSink(eventSink);
         logger::info("Event sinks added.");
         eventSink->HandleWOsInCell();
+        
+        // MCP
+        UI::Register(M);
+        logger::info("MCP registered.");
     }
 }
 
