@@ -2,6 +2,17 @@
 #include "SKSEMenuFramework.h"
 #include "Manager.h"
 
+
+static void HelpMarker(const char* desc) {
+    ImGui::TextDisabled("(?)");
+    if (ImGui::BeginItemTooltip()) {
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 35.0f);
+        ImGui::TextUnformatted(desc);
+        ImGui::PopTextWrapPos();
+        ImGui::EndTooltip();
+    }
+}
+
 namespace UI {
     struct Instance {
         std::pair<StageNo,StageNo> stage_number;
@@ -33,7 +44,7 @@ namespace UI {
     void __stdcall RenderStatus();
     void __stdcall RenderInspect();
     void Register(Manager* manager) {
-        SKSEMenuFramework::SetSection("Alchemy Of Time");
+        SKSEMenuFramework::SetSection(Utilities::mod_name);
         SKSEMenuFramework::AddSectionItem("Settings", RenderSettings);
         SKSEMenuFramework::AddSectionItem("Status", RenderStatus);
         SKSEMenuFramework::AddSectionItem("Inspect", RenderInspect);
@@ -46,13 +57,30 @@ namespace UI {
             if (ImGui::CollapsingHeader(section_name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
                 if (ImGui::BeginTable("table_settings", 2, table_flags)) {
                     for (const auto& [setting_name, setting] : section_settings) {
-                        // we just want to display the settings in read only mode
-                        const char* value = setting ? "Enabled" : "Disabled";
-                        const auto color = setting ? ImVec4(0, 1, 0, 1) : ImVec4(1, 0, 0, 1);
                         ImGui::TableNextRow();
                         ImGui::TableNextColumn();
-                        ImGui::Text(setting_name.c_str());
+                        if (setting_name == "DisableWarnings") {
+                            const auto previous_state = Settings::disable_warnings;
+                            ImGui::Checkbox(setting_name.c_str(), &Settings::disable_warnings);
+                            if (Settings::disable_warnings != previous_state) {
+                                // save to INI
+                                Settings::INI_settings[section_name][setting_name] = Settings::disable_warnings;
+                                CSimpleIniA ini;
+                                ini.SetUnicode();
+                                ini.LoadFile(Settings::INI_path);
+                                ini.SetBoolValue(section_name.c_str(), setting_name.c_str(), Settings::disable_warnings);
+                                ini.SaveFile(Settings::INI_path);
+                            }
+                            ImGui::SameLine();
+                            HelpMarker("Disables in-game warning pop-ups.");
+                        } else {
+                            // we just want to display the settings in read only mode
+                            ImGui::Text(setting_name.c_str());
+                        }
                         ImGui::TableNextColumn();
+                        const auto temp_setting_val = setting_name == "DisableWarnings" ? Settings::disable_warnings  : setting;
+                        const char* value = temp_setting_val ? "Enabled" : "Disabled";
+                        const auto color = setting ? ImVec4(0, 1, 0, 1) : ImVec4(1, 0, 0, 1);
                         ImGui::TextColored(color, value);
                     }
                     ImGui::EndTable();
@@ -105,7 +133,7 @@ namespace UI {
         FontAwesome::PushSolid();
         if (ImGui::Button((FontAwesome::UnicodeToUtf8(0xf021) + " Refresh").c_str())) {
             last_generated = std::format("{} (in-game hours)", RE::Calendar::GetSingleton()->GetHoursPassed());
-            auto& sources = M->GetSources();
+            const auto& sources = M->GetSources();
 
             locations.clear();
 

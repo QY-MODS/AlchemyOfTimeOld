@@ -5,6 +5,7 @@
 using namespace Utilities::Types;
 
 namespace Settings
+
 {
 
     bool failed_to_load = false;
@@ -27,14 +28,15 @@ namespace Settings
 														{"SLGM",false},
 														{"MISC",false}
                                                         };
-    const std::map<const char*, bool> otherkeysvals = {{"WorldObjectsEvolve", false}, {"bReset",false}};
+    const std::map<const char*, bool> otherkeysvals = {{"WorldObjectsEvolve", false}, {"bReset", false}, {"DisableWarnings",false}};
     const std::map<const char*, std::map<const char*, bool>> InISections = 
                    {{"Modules", moduleskeyvals}, {"Other Settings", otherkeysvals}};
     std::map<std::string,std::map<std::string, bool>> INI_settings;
 
     int nMaxInstances = 200000;
     int nForgettingTime = 2160;  // in hours
-
+    bool disable_warnings = false;
+    
     /* std::vector<RE::ExtraDataType> xTrack = {
         RE::ExtraDataType::kEnchantment,
         RE::ExtraDataType::kWorn,
@@ -212,10 +214,10 @@ namespace Settings
             // it exist now check if we have values for all keys
             else {
 				for (const auto& [key, val] : defaults) {
-					if (!ini.GetBoolValue(section, key, val)) {
+                    if (const auto temp_bool = ini.GetBoolValue(section, key, val); temp_bool == val) {
 						ini.SetBoolValue(section, key, val);
 						INI_settings[section][key] = val;
-					} else INI_settings[section][key] = ini.GetBoolValue(section, key, val);
+					} else INI_settings[section][key] = temp_bool;
 				}
             }
 		}
@@ -233,7 +235,9 @@ namespace Settings
 
         nForgettingTime = std::min(nForgettingTime, 4320);
 
-		ini.SaveFile(INI_path);
+        disable_warnings = ini.GetBoolValue("Other Settings", "DisableWarnings", disable_warnings);
+		
+        ini.SaveFile(INI_path);
     }
 
     [[nodiscard]] const bool IsQFormType(const FormID formid, const std::string& qformtype) {

@@ -491,10 +491,9 @@ public:
                             RefreshMenu(RE::BarterMenu::MENU_NAME, nullptr);
                             RefreshMenu(RE::BarterMenu::MENU_NAME, vendor_chest);
                         }
-                    } else {
+                    } else if (!Settings::disable_warnings) {
                         logger::error("Could not get vendor chest");
 						Utilities::MsgBoxesNotifs::InGame::CustomMsg("Could not get vendor chest.");
-					
                     }
                 }
                 else if (event->baseObj == consume_equipped_id) {
