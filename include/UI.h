@@ -49,6 +49,9 @@ namespace UI {
             return;
         } 
 
+        filter = new ImGuiTextFilter();
+        filter2 = new ImGuiTextFilter();
+
         SKSEMenuFramework::SetSection(Utilities::mod_name);
         SKSEMenuFramework::AddSectionItem("Settings", RenderSettings);
         SKSEMenuFramework::AddSectionItem("Status", RenderStatus);
@@ -194,7 +197,7 @@ namespace UI {
         ImGui::Text("Location");
         if (ImGui::BeginCombo("##combo 1", item_current.c_str())) {
             for (const auto & [key, value] : locations) {
-                if (ImGui::ImGuiTextFilterManger::PassFilter(filter, key.c_str(), nullptr)) {
+                if (filter->PassFilter(key.c_str())) {
                     const bool is_selected = item_current == key;
                     if (ImGui::Selectable(key.c_str(), is_selected)) {
                         item_current = key;
@@ -214,7 +217,7 @@ namespace UI {
             ImGui::Text("Item");
             if (ImGui::BeginCombo("##combo 2", sub_item_current.c_str())) {
                 for (const auto& [key, value] : selectedItem) {
-                    if (ImGui::ImGuiTextFilterManger::PassFilter(filter2, key.c_str(), nullptr)) {
+                    if (filter2->PassFilter(key.c_str())) {
                         const bool is_selected = (sub_item_current == key);
                         if (ImGui::Selectable(key.c_str(), is_selected)) {
                             sub_item_current = key;
@@ -229,7 +232,7 @@ namespace UI {
 
             ImGui::SameLine();
 
-            ImGui::ImGuiTextFilterManger::Draw(filter2, "#filter2", 0.0f);
+            filter2->Draw("#filter2");
 
             if (selectedItem.find(sub_item_current) != selectedItem.end()) {
 
