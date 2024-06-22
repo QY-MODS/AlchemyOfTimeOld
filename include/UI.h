@@ -1,6 +1,6 @@
 #pragma once
-#include "SKSEMenuFramework.h"
 #include "Manager.h"
+#include "SKSEMCP/SKSEMenuFramework.hpp"
 
 
 static void HelpMarker(const char* desc) {

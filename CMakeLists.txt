@@ -77,8 +77,9 @@ get_target_property(commonlib_src_dir CommonLibSSE SOURCE_DIR)
 
 # CLIB-UTIL
 find_path(CLIB_UTIL_INCLUDE_DIRS "ClibUtil/utils.hpp")
+# SKSE-MCP
+find_path(SKSE_MCP_INCLUDE_DIRS "SKSEMCP/utils.hpp")
 #YAML-CPP
-
 FetchContent_Declare(
   yaml-cpp
   GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
@@ -119,6 +120,7 @@ target_include_directories(
 	${PROJECT_NAME}
 	PRIVATE
 	${CLIB_UTIL_INCLUDE_DIRS}
+	${SKSE_MCP_INCLUDE_DIRS}
     ${CMAKE_CURRENT_BINARY_DIR}/include
 	${CMAKE_CURRENT_SOURCE_DIR}/include
 )
