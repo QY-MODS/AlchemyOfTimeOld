@@ -1,6 +1,6 @@
 #pragma once
-#include "SKSEMenuFramework.h"
 #include "Manager.h"
+#include "SKSEMCP/SKSEMenuFramework.hpp"
 
 
 static void HelpMarker(const char* desc) {
@@ -35,8 +35,8 @@ namespace UI {
     std::string item_current = "##current";
     std::string sub_item_current = "##item"; 
     bool is_list_box_focused = false;
-    ImGuiTextFilter filter;
-    ImGuiTextFilter filter2;
+    ImGuiTextFilter* filter;
+    ImGuiTextFilter* filter2;
     ImGuiTableFlags table_flags = ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable;
 
     Manager* M;
@@ -44,6 +44,14 @@ namespace UI {
     void __stdcall RenderStatus();
     void __stdcall RenderInspect();
     void Register(Manager* manager) {
+
+        if (!SKSEMenuFramework::IsInstalled()) {
+            return;
+        } 
+
+        filter = new ImGuiTextFilter();
+        filter2 = new ImGuiTextFilter();
+
         SKSEMenuFramework::SetSection(Utilities::mod_name);
         SKSEMenuFramework::AddSectionItem("Settings", RenderSettings);
         SKSEMenuFramework::AddSectionItem("Status", RenderStatus);
@@ -189,7 +197,7 @@ namespace UI {
         ImGui::Text("Location");
         if (ImGui::BeginCombo("##combo 1", item_current.c_str())) {
             for (const auto & [key, value] : locations) {
-                if (filter.PassFilter(key.c_str())) {
+                if (filter->PassFilter(key.c_str())) {
                     const bool is_selected = item_current == key;
                     if (ImGui::Selectable(key.c_str(), is_selected)) {
                         item_current = key;
@@ -200,7 +208,6 @@ namespace UI {
         }
         is_list_box_focused = ImGui::IsItemHovered(ImGuiHoveredFlags_::ImGuiHoveredFlags_NoNavOverride);
         ImGui::SameLine();
-        filter.Draw("#filter1");
 
         is_list_box_focused = is_list_box_focused || ImGui::IsItemActive();
 
@@ -210,7 +217,7 @@ namespace UI {
             ImGui::Text("Item");
             if (ImGui::BeginCombo("##combo 2", sub_item_current.c_str())) {
                 for (const auto& [key, value] : selectedItem) {
-                    if (filter2.PassFilter(key.c_str())) {
+                    if (filter2->PassFilter(key.c_str())) {
                         const bool is_selected = (sub_item_current == key);
                         if (ImGui::Selectable(key.c_str(), is_selected)) {
                             sub_item_current = key;
@@ -224,7 +231,8 @@ namespace UI {
             }
 
             ImGui::SameLine();
-            filter2.Draw("#filter2");
+
+            filter2->Draw("#filter2");
 
             if (selectedItem.find(sub_item_current) != selectedItem.end()) {
 
