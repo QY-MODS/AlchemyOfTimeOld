@@ -1,6 +1,7 @@
 #include "UI.h"
 Manager* M = nullptr;
 bool block_eventsinks = false;
+bool eventsinks_added = false;
 
 
 // MP <3
@@ -628,6 +629,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
     }
     if (message->type == SKSE::MessagingInterface::kNewGame || message->type ==
         SKSE::MessagingInterface::kPostLoadGame) {
+        if (eventsinks_added) return;
         logger::info("New or Post-load game.");
         if (Settings::failed_to_load) {
             Utilities::MsgBoxesNotifs::InGame::CustomMsg("Failed to load settings. Check log for details.");
@@ -653,6 +655,7 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         eventSourceHolder->AddEventSink<RE::TESFormDeleteEvent>(eventSink);
         SKSE::GetCrosshairRefEventSource()->AddEventSink(eventSink);
         RE::PlayerCharacter::GetSingleton()->AsBGSActorCellEventSource()->AddEventSink(eventSink);
+        eventsinks_added = true;
         logger::info("Event sinks added.");
         eventSink->HandleWOsInCell();
         
