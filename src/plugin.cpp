@@ -11,7 +11,6 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
                      public RE::BSTEventSink<RE::MenuOpenCloseEvent>,
                      public RE::BSTEventSink<RE::TESFurnitureEvent>,
                      public RE::BSTEventSink<RE::TESContainerChangedEvent>,
-                     public RE::BSTEventSink<RE::InputEvent*>,
                      public RE::BSTEventSink<RE::TESSleepStopEvent>,
                      public RE::BSTEventSink<RE::TESWaitStopEvent>,
                      public RE::BSTEventSink<RE::BGSActorCellEvent>,
@@ -536,26 +535,6 @@ public:
         
         return RE::BSEventNotifyControl::kContinue;
     }
-
-    RE::BSEventNotifyControl ProcessEvent(RE::InputEvent* const* evns, RE::BSTEventSource<RE::InputEvent*>*) {
-        
-        if (block_eventsinks) return RE::BSEventNotifyControl::kContinue;
-        if (!*evns) return RE::BSEventNotifyControl::kContinue;
-
-        for (RE::InputEvent* e = *evns; e; e = e->next) {
-            if (e->eventType.get() == RE::INPUT_EVENT_TYPE::kButton) {
-                RE::ButtonEvent* a_event = e->AsButtonEvent();
-                RE::IDEvent* id_event = e->AsIDEvent();
-                auto userEvent = id_event->userEvent;
-                if (a_event->GetIDCode() != 157) continue;
-                if (!a_event->IsPressed()) continue;
-                if (a_event->IsRepeating() && a_event->HeldDuration() > .3f && a_event->HeldDuration() < .32f) {
-                    M->Print();
-                }
-            }
-        }
-        return RE::BSEventNotifyControl::kContinue;
-    }
     
     RE::BSEventNotifyControl ProcessEvent(const RE::TESSleepStopEvent*,
                                           RE::BSTEventSource<RE::TESSleepStopEvent>*) {
@@ -647,9 +626,6 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         eventSourceHolder->AddEventSink<RE::TESContainerChangedEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESFurnitureEvent>(eventSink);
         RE::UI::GetSingleton()->AddEventSink<RE::MenuOpenCloseEvent>(eventSink);
-#ifndef NDEBUG
-        RE::BSInputDeviceManager::GetSingleton()->AddEventSink(eventSink);
-#endif
         eventSourceHolder->AddEventSink<RE::TESSleepStopEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESWaitStopEvent>(eventSink);
         eventSourceHolder->AddEventSink<RE::TESFormDeleteEvent>(eventSink);
@@ -657,7 +633,10 @@ void OnMessage(SKSE::MessagingInterface::Message* message) {
         RE::PlayerCharacter::GetSingleton()->AsBGSActorCellEventSource()->AddEventSink(eventSink);
         eventsinks_added = true;
         logger::info("Event sinks added.");
-        eventSink->HandleWOsInCell();
+        
+        if (message->type != SKSE::MessagingInterface::kNewGame) {
+            eventSink->HandleWOsInCell();
+        }
         
         // MCP
         UI::Register(M);
