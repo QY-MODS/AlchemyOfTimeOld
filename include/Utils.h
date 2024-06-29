@@ -1062,52 +1062,47 @@ namespace Utilities {
             
             template <typename T>
             void ForEachRefInCell(T func) {
-                const auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
+                auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
                 if (!player_cell) {
 					logger::error("Player cell is null.");
 					return;
 				}
-                auto& runtimeData = player_cell->GetRuntimeData();
-                RE::BSSpinLockGuard locker(runtimeData.spinLock);
-                for (auto& ref : runtimeData.references) {
+                auto& cell_runtime_data = player_cell->GetRuntimeData();
+				for (auto& ref : cell_runtime_data.references) {
 					if (!ref) continue;
 					func(ref.get());
 				}
             }
 
-            RE::TESObjectREFR* TryToGetRefInCell(const FormID baseid, const Count count, float radius = 180) {
-                const auto player = RE::PlayerCharacter::GetSingleton();
-                const auto player_cell = player->GetParentCell();
-                if (!player_cell) {
-					logger::error("Player cell is null.");
-					return nullptr;
-				}
-                const auto player_pos = player->GetPosition();
-                auto& runtimeData = player_cell->GetRuntimeData();
-                RE::BSSpinLockGuard locker(runtimeData.spinLock);
-                for (const auto& ref : runtimeData.references) {
+            RE::TESObjectREFR* TryToGetRefInCell(const FormID baseid, const Count count, float radius = 180,
+                                                 unsigned int max_try = 2) {
+                auto player_cell = RE::PlayerCharacter::GetSingleton()->GetParentCell();
+                auto& cell_runtime_data = player_cell->GetRuntimeData();
+                for (auto& ref : cell_runtime_data.references) {
                     if (!ref) continue;
                     /*if (ref->IsDisabled()) continue;
                     if (ref->IsMarkedForDeletion()) continue;
                     if (ref->IsDeleted()) continue;*/
-                    const auto ref_base = ref->GetBaseObject();
-                    if (!ref_base) continue;
-                    const auto ref_baseid = ref_base->GetFormID();
-                    const auto ref_id = ref->GetFormID();
-                    const auto ref_pos = ref->GetPosition();
-                    if (ref_baseid == baseid && ref->extraList.GetCount() == count) {
+                    if (ref->GetBaseObject()->GetFormID() == baseid && ref->extraList.GetCount() == count) {
+                        logger::info("Ref found in cell: {} with id {}", ref->GetBaseObject()->GetName(),
+                                     ref->GetFormID());
                         // get radius and check if ref is in radius
-                        if (ref_id < 4278190080) {
+                        if (ref->GetFormID() < 4278190080) {
                             logger::trace("Ref is a placed reference. Continuing search.");
                             continue;
                         }
-                        logger::trace("Ref found in cell: {} with id {}", ref_base->GetName(), ref_id);
                         if (radius) {
-                            if (player_pos.GetDistance(ref_pos) < radius) return ref.get();
-                            else logger::trace("Ref is not in radius");
-                        } else return ref.get();
+                            auto player_pos = RE::PlayerCharacter::GetSingleton()->GetPosition();
+                            auto ref_pos = ref->GetPosition();
+                            if (player_pos.GetDistance(ref_pos) < radius)
+                                return ref.get();
+                            else
+                                logger::trace("Ref is not in radius");
+                        } else
+                            return ref.get();
                     }
                 }
+                if (max_try) return TryToGetRefInCell(baseid, count, radius, --max_try);
                 return nullptr;
             }
 
