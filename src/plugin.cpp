@@ -95,7 +95,7 @@ class OurEventSink : public RE::BSTEventSink<RE::TESEquipEvent>,
     void HandleWO(RE::TESObjectREFR* ref) const {
         if (!world_objects_evolve) return;
         if (!ref) return;
-        if (ref->IsDisabled() || ref->IsDeleted()) return;
+        if (ref->IsDisabled() || ref->IsDeleted() || ref->IsMarkedForDeletion()) return;
         if (ref->IsActivationBlocked()) return;
         if (ref->extraList.GetOwner() && !ref->extraList.GetOwner()->IsPlayer()) return;
         if (auto ref_base = ref->GetObjectReference()) /*logger::trace("HandleWO: {}", ref_base->GetName())*/
@@ -483,7 +483,8 @@ public:
                     }
                 } 
                 if (ref) {
-                    M->HandleDrop(event->baseObj, event->itemCount, ref);
+                    if (M->HandleDropCheck(ref)) M->HandleDrop(event->baseObj, event->itemCount, ref);
+                    else M->HandleConsume(event->baseObj);
                 }
                 else if (RE::UI::GetSingleton()->IsMenuOpen(RE::BarterMenu::MENU_NAME)){
                     if (auto vendor_chest = Utilities::FunctionsSkyrim::Menu::GetVendorChestFromMenu()){

@@ -1079,6 +1079,35 @@ public:
     }
     // TAMAM
     // update oncesinde ettiini varsayiyo
+
+    bool HandleDropCheck(RE::TESObjectREFR* ref){
+        if (ref->IsDisabled()) {
+            logger::warn("HandleDropCheck: Ref is disabled.");
+            return false;
+        }
+        if (ref->IsDeleted()) {
+            logger::warn("HandleDropCheck: Ref is deleted.");
+            return false;
+        }
+        if (ref->IsMarkedForDeletion()) {
+            logger::warn("HandleDropCheck: Ref is marked for deletion.");
+            return false;
+        }
+        // if (!ref->Is3DLoaded()) {
+        //     logger::warn("HandleDropCheck: Ref is not 3D loaded.");
+        //     return;
+        // }
+        if (ref->IsActivationBlocked()) {
+            logger::warn("HandleDropCheck: Ref is activation blocked.");
+            return false;
+        }
+        if (std::string(ref->GetName()).empty()) {
+            logger::warn("HandleDropCheck: Ref name is empty.");
+            return false;
+        }
+
+        return true;
+    };
     void HandleDrop(const FormID dropped_formid, Count count, RE::TESObjectREFR* dropped_stage_ref) {
         ENABLE_IF_NOT_UNINSTALLED
 
@@ -1086,19 +1115,6 @@ public:
         if (!dropped_stage_ref) return RaiseMngrErr("Ref is null.");
         if (!count) {
             logger::warn("Count is 0.");
-            return;
-        }
-
-        if (dropped_stage_ref->IsDisabled()) {
-            logger::warn("HandleDrop: Ref is disabled.");
-            return;
-        }
-        if (!dropped_stage_ref->Is3DLoaded()) {
-            logger::warn("HandleDrop: Ref is not 3D loaded.");
-            return;
-        }
-        if (std::string(dropped_stage_ref->GetName()).empty()) {
-            logger::warn("HandleDrop: Ref name is empty.");
             return;
         }
 
@@ -1135,7 +1151,8 @@ public:
             /*const auto curr_count = dropped_stage_ref->extraList.GetCount();
             Utilities::FunctionsSkyrim::WorldObject::SetObjectCount(dropped_stage_ref, count + curr_count);*/
             return;
-        } else if (dropped_stage_ref->extraList.GetCount() != count) {
+        } 
+        else if (dropped_stage_ref->extraList.GetCount() != count) {
             logger::warn("HandleDrop: Count mismatch: {} , {}", dropped_stage_ref->extraList.GetCount(), count);
             // try to assign stage instances to the dropped item
             const auto refid = dropped_stage_ref->GetFormID();
