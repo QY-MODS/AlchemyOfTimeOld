@@ -69,6 +69,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         if (stop_t > curr_time) return;
         const auto refid = ref_n_stops[0].first;
         if (auto ref = RE::TESForm::LookupByID<RE::TESObjectREFR>(refid)) {
+            logger::trace("_WOUpdateLoop: Queued Update for {}.", ref->GetName());
             if (!UpdateStages(ref, curr_time)) {
                 logger::warn("Queued Update failed for {}. update_time {}, curr_time {}", refid, stop_t, curr_time);
                 _ref_stops_.erase(refid);
@@ -91,6 +92,7 @@ class Manager : public Utilities::Ticker, public Utilities::SaveLoadData {
         if (auto ui = RE::UI::GetSingleton(); ui && ui->GameIsPaused()) return setListenWOUpdate(true);
         if (auto cal = RE::Calendar::GetSingleton()) {
             const auto curr_time = cal->GetHoursPassed();
+            logger::trace("_WOUpdateLoop");
             _WOUpdateLoop(curr_time);
         }
         logger::trace("UpdateLoop done.");
@@ -1087,6 +1089,19 @@ public:
             return;
         }
 
+        if (dropped_stage_ref->IsDisabled()) {
+            logger::warn("HandleDrop: Ref is disabled.");
+            return;
+        }
+        if (!dropped_stage_ref->Is3DLoaded()) {
+            logger::warn("HandleDrop: Ref is not 3D loaded.");
+            return;
+        }
+        if (std::string(dropped_stage_ref->GetName()).empty()) {
+            logger::warn("HandleDrop: Ref name is empty.");
+            return;
+        }
+
         // mutex.lock();
 
         logger::trace("HandleDrop: dropped_formid {} , Count {}", dropped_formid, count);
@@ -1168,6 +1183,8 @@ public:
         for (const auto& i : Settings::xRemove) {
             dropped_stage_ref->extraList.RemoveByType(static_cast<RE::ExtraDataType>(i));
         }
+
+        logger::trace("HandleDrop: asd1");
 
         bool handled_first_stack = false;
         std::vector<size_t> removed_indices;
@@ -1280,6 +1297,8 @@ public:
             }
         }
 
+        logger::trace("HandleDrop: asd2");
+
         if (count > 0) {
             logger::warn("HandleDrop: Count is still greater than 0. Dropping the rest to the world.");
             auto dropbound = Utilities::FunctionsSkyrim::GetFormByID<RE::TESBoundObject>(dropped_formid);
@@ -1298,12 +1317,18 @@ public:
             QueueWOUpdate(new_ref->GetFormID(), source->GetNextUpdateTime(&source->data.at(new_ref->GetFormID())[0]));
         }
 
+        logger::trace("HandleDrop: asd3");
+
         // dropped_stage_ref->extraList.RemoveByType(RE::ExtraDataType::kOwnership);
         Utilities::FunctionsSkyrim::xData::PrintObjectExtraData(dropped_stage_ref);
 
+        logger::trace("HandleDrop: asd4");
         UpdateStages(player_ref);
+        logger::trace("HandleDrop: asd5");
 
         if (!source->data.empty()) CleanUpSourceData(source);
+        logger::trace("HandleDrop: asd6");
+
         // source->PrintData();
         // mutex.unlock();
     }
